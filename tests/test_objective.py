@@ -40,6 +40,7 @@ from synthobj.draws import gp_draw
 from synthobj.interaction import Interaction
 from synthobj.kernel import eigen_factor, make_grid
 from synthobj.objective import ACTIVE_EPS, Labels, SyntheticObjective
+from synthobj.rotation import EXT_HI, EXT_LO, PairRotation
 
 # The plan's hand-built objective: D = 20, four components, one pair, gamma = 0.25.
 D = 20
@@ -499,11 +500,34 @@ def test_family_spec_annotation_is_deferred(obj: SyntheticObjective) -> None:
     assert "synthobj.families" not in sys.modules
 
 
-def test_rotation_must_be_none(
+def test_rotation_is_accepted(
+    pieces: tuple[tuple[Component, ...], tuple[Interaction, ...]]
+) -> None:
+    # Task 6 implements what task 5 rejected. A rotated pair must live on the extended domain
+    # (ruling R7): reusing an ordinary [0,1] main effect here would send z outside its knot range at
+    # a real rotation angle, which is not what this guard test is about. Coordinates 0 and 5 are
+    # otherwise inactive (see INACTIVE), so a small extended-domain pair there is disjoint from
+    # both PAIR and UNPAIRED; the deep rotation math lives in test_rotation.py -- this only pins
+    # that SyntheticObjective's guard now lets a real PairRotation through.
+    mains, inters = pieces
+    grid = make_grid(EXT_LO, EXT_HI, 256)
+    factor = eigen_factor(EXT_LO, EXT_HI, 256, 0.5)
+    f0 = Component.from_raw(0, 0.5, 0.25, grid, gp_draw(factor, np.random.default_rng(50)))
+    f5 = Component.from_raw(5, 0.5, 0.25, grid, gp_draw(factor, np.random.default_rng(51)))
+    rotation = PairRotation(30.0, ((0, 5),))
+
+    built = SyntheticObjective(D, mains + (f0, f5), inters, rotation, None, 0)
+    assert built.rotation is rotation
+    assert built.labels.rotation_deg == 30.0
+    assert built.labels.rotation_pairs == ((0, 5),)
+    assert np.isfinite(built.f_star)
+
+
+def test_a_non_pairrotation_object_is_rejected(
     pieces: tuple[tuple[Component, ...], tuple[Interaction, ...]]
 ) -> None:
     mains, inters = pieces
-    with pytest.raises(NotImplementedError, match="rotation"):
+    with pytest.raises(TypeError, match="PairRotation"):
         SyntheticObjective(D, mains, inters, object(), None, 0)
 
 

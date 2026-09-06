@@ -47,6 +47,7 @@ import numpy as np
 
 from synthobj.component import Component
 from synthobj.interaction import Interaction, block_argmax
+from synthobj.rotation import PairRotation, rotated_block_argmax, rotated_block_stats
 
 if TYPE_CHECKING:
     from synthobj.families import FamilySpec
@@ -114,8 +115,13 @@ class SyntheticObjective:
     `allow_overlap=True`, since no family in this project uses them and the joint-grid fallback
     the plan sketches is not built.
 
-    `rotation` must be `None` in this version; the rotated family (plan decision D2) extends this
-    class. `spec` may be `None`, in which case the labels record `family="custom"` and the study's
+    `rotation` is `None` or a `PairRotation` (plan decision D2). When it is given, `__call__` applies
+    `rotation.forward` to `X` before evaluating every component and interaction, and multiplies the
+    total by `scale` -- the renormalizing factor that keeps `Var_nu f = 1` even though rotation moves
+    variance between coordinates. `f_star` for a rotated pair comes from `rotated_block_argmax`
+    (searched in x-space, ruling R8) rather than `block_argmax`, and its axis-aligned first-order
+    shares (`Labels.s_axis`) and remainder (`Labels.gamma_axis`) come from `rotated_block_stats`.
+    `spec` may be `None`, in which case the labels record `family="custom"` and the study's
     default noise sd of 0.1; a spec that is present must carry `name`, `noise_sd`, `generator` and
     `monotone`, and a missing one raises `AttributeError` (ruling R27). `labels` is for the
     save/load path: when it is given it is stored verbatim and `f_star` is taken from it, so
@@ -127,16 +133,14 @@ class SyntheticObjective:
         D: int,
         components: Sequence[Component],
         interactions: Sequence[Interaction],
-        rotation: None,
+        rotation: PairRotation | None,
         spec: FamilySpec | None,
         seed: int,
         labels: Labels | None = None,
         allow_overlap: bool = False,
     ) -> None:
-        if rotation is not None:
-            raise NotImplementedError(
-                "rotation is not implemented in this version of SyntheticObjective; pass None"
-            )
+        if rotation is not None and not isinstance(rotation, PairRotation):
+            raise TypeError(f"rotation must be a PairRotation or None; got {type(rotation).__name__}")
 
         self.D = int(D)
         self.components: tuple[Component, ...] = tuple(components)
@@ -155,7 +159,12 @@ class SyntheticObjective:
             # max(f + g) is not max f + max g -- f_star would silently stop being the maximum.
             raise ValueError(f"one component per coordinate is required; got coordinates {coords}")
 
+        rotation_pairs = rotation.pairs if rotation is not None else ()
+        # A rotated pair's block maximum (rotated_block_argmax) needs its two coordinates disjoint
+        # from every other block for the same reason an interaction pair does: f_star separates into
+        # a sum of independent per-block maxima only when the blocks partition the coordinates.
         paired = [coord for inter in self.interactions for coord in (inter.i, inter.j)]
+        paired += [coord for pair in rotation_pairs for coord in pair]
         if len(set(paired)) != len(paired):
             if allow_overlap:
                 raise NotImplementedError(
@@ -169,6 +178,7 @@ class SyntheticObjective:
         if missing:
             raise ValueError(f"every paired coordinate needs a main effect; {missing} have none")
 
+        self.scale = self._compute_scale()
         self.labels = self._compute_labels() if labels is None else labels
         self.f_star = self.labels.f_star
 
@@ -177,14 +187,19 @@ class SyntheticObjective:
 
         Raises `ValueError` if `X` is not `D` coordinates wide, holds a non-finite entry, or lies
         more than `BOX_TOL` outside [0,1]; points inside that tolerance are clipped onto the face.
-        A zero-row batch is legal and returns an empty `(0,)` result.
+        A zero-row batch is legal and returns an empty `(0,)` result. When `rotation` is set, every
+        component and interaction is evaluated at `rotation.forward(X)` rather than at `X` itself,
+        and the sum is scaled by `self.scale` -- 1.0 when there is no rotation, so this reduces to
+        the un-rotated sum exactly.
         """
         points, single = self._as_points(X)
+        Z = self.rotation.forward(points) if self.rotation is not None else points
         values = np.zeros(points.shape[0])
         for comp in self.components:
-            values += comp(points[:, comp.coord])
+            values += comp(Z[:, comp.coord])
         for inter in self.interactions:
-            values += inter(points[:, inter.i], points[:, inter.j])
+            values += inter(Z[:, inter.i], Z[:, inter.j])
+        values *= self.scale
         return values.reshape(()) if single else values
 
     def observe(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -238,14 +253,38 @@ class SyntheticObjective:
         """
         return default if self.spec is None else getattr(self.spec, name)
 
+    def _compute_scale(self) -> float:
+        """`1 / sqrt(total realized Var_nu f)`, or `1.0` when there is no rotation.
+
+        Blocks are independent under the product measure, so variances add: a rotated pair's raw
+        block variance is `rotated_block_stats`'s `Var phi` (quadrature, since rotation moves the
+        block outside the domain `Component.from_raw` normalized on), while an unpaired component's
+        `share` and an interaction's `c**2` are exact by construction. Without a rotation the total
+        is not computed at all, matching the pre-rotation objective's implicit `scale = 1`.
+        """
+        if self.rotation is None:
+            return 1.0
+        by_coord = {comp.coord: comp for comp in self.components}
+        rotated_coords = {coord for pair in self.rotation.pairs for coord in pair}
+        total = sum(
+            rotated_block_stats(by_coord[i], by_coord[j], self.rotation)[0]
+            for i, j in self.rotation.pairs
+        )
+        total += sum(comp.share for comp in self.components if comp.coord not in rotated_coords)
+        total += sum(inter.c**2 for inter in self.interactions)
+        return 1.0 / np.sqrt(total)
+
     def _compute_labels(self) -> Labels:
         """Assemble `Labels`, including `f_star` and its maximizer (plan decision D1).
 
         Pairs are disjoint, so each paired block is an independent function of its own two
-        coordinates and the maximum separates: `f_star` is the sum of the per-block maxima from
-        `block_argmax` (accurate to about 1e-10) and the per-component maxima from
-        `Component.argmax` (exact to floating point). `x_star` records the achieving coordinates,
-        with every coordinate carrying no main effect left at 0.5 -- `f` ignores those entirely.
+        coordinates and the maximum separates: `f_star` is `self.scale` times the sum of the
+        per-block maxima (`block_argmax` for an interaction, `rotated_block_argmax` for a rotated
+        pair, both accurate to about 1e-10) and the per-component maxima from `Component.argmax`
+        (exact to floating point) -- matching `__call__`, which scales the whole sum once rather
+        than each block. `x_star` records the achieving coordinates, with every coordinate carrying
+        no main effect left at 0.5 -- `f` ignores those entirely. A rotated pair's `x_star` comes
+        directly from `rotated_block_argmax`'s x-space search, so it already lies in the cube.
         """
         D = self.D
         s = np.zeros(D)
@@ -260,20 +299,52 @@ class SyntheticObjective:
         x_star = np.full(D, 0.5)
         f_star = 0.0
         paired: set[int] = set()
+        s_axis = np.zeros(D)
+        scale2 = self.scale**2
+
+        rotation_pairs = self.rotation.pairs if self.rotation is not None else ()
+        for i, j in rotation_pairs:
+            f_a, f_b = by_coord[i], by_coord[j]
+            (x_a, x_b), phi = rotated_block_argmax(f_a, f_b, self.rotation)
+            x_star[i], x_star[j] = float(x_a), float(x_b)
+            f_star += phi
+            paired.update((i, j))
+            _, var_a, var_b = rotated_block_stats(f_a, f_b, self.rotation)
+            s_axis[i] = var_a * scale2
+            s_axis[j] = var_b * scale2
+
         for inter in self.interactions:
             (x_i, x_j), phi = block_argmax(by_coord[inter.i], by_coord[inter.j], inter)
             x_star[inter.i], x_star[inter.j] = float(x_i), float(x_j)
             f_star += phi
             paired.update((inter.i, inter.j))
+
         for comp in self.components:
             if comp.coord in paired:
                 continue
             x, value = comp.argmax()
             x_star[comp.coord] = x
             f_star += value
+            if self.rotation is not None:
+                s_axis[comp.coord] = comp.share * scale2
+
+        f_star *= self.scale
 
         s_pairs = tuple(float(inter.c**2) for inter in self.interactions)
         gamma = float(sum(s_pairs))
+
+        if self.rotation is None:
+            # No rotation: the axis-aligned shares are the pre-rotation ones and nothing is
+            # renormalized.
+            rotation_deg = 0.0
+            rotation_pairs_label: tuple[tuple[int, int], ...] = ()
+            s_axis = s.copy()
+            gamma_axis = gamma
+        else:
+            rotation_deg = float(self.rotation.theta_deg)
+            rotation_pairs_label = rotation_pairs
+            gamma_axis = 1.0 - float(s_axis.sum())
+
         return Labels(
             D=D,
             S=tuple(sorted(by_coord)),
@@ -286,13 +357,11 @@ class SyntheticObjective:
             gamma=gamma,
             f_star=float(f_star),
             x_star=x_star,
-            # No rotation: the axis-aligned shares are the pre-rotation ones and nothing is
-            # renormalized. Plan decision D2 generalizes these five fields.
-            rotation_deg=0.0,
-            rotation_pairs=(),
-            s_axis=s.copy(),
-            gamma_axis=gamma,
-            scale=1.0,
+            rotation_deg=rotation_deg,
+            rotation_pairs=rotation_pairs_label,
+            s_axis=s_axis,
+            gamma_axis=gamma_axis,
+            scale=self.scale,
             generator=str(self._spec_field("generator", "matern")),
             monotone=bool(self._spec_field("monotone", False)),
             family=str(self._spec_field("name", "custom")),
