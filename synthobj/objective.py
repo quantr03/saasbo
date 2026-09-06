@@ -47,7 +47,7 @@ import numpy as np
 
 from synthobj.component import Component
 from synthobj.interaction import Interaction, block_argmax
-from synthobj.rotation import PairRotation, rotated_block_argmax, rotated_block_stats
+from synthobj.rotation import PairRotation, rotated_block_argmax, rotated_block_mean, rotated_block_stats
 
 if TYPE_CHECKING:
     from synthobj.families import FamilySpec
@@ -116,12 +116,16 @@ class SyntheticObjective:
     the plan sketches is not built.
 
     `rotation` is `None` or a `PairRotation` (plan decision D2). When it is given, `__call__` applies
-    `rotation.forward` to `X` before evaluating every component and interaction, and multiplies the
-    total by `scale` -- the renormalizing factor that keeps `Var_nu f = 1` even though rotation moves
-    variance between coordinates. `f_star` for a rotated pair comes from `rotated_block_argmax`
-    (searched in x-space, ruling R8) rather than `block_argmax`, and its axis-aligned first-order
-    shares (`Labels.s_axis`) and remainder (`Labels.gamma_axis`) come from `rotated_block_stats`.
-    `spec` may be `None`, in which case the labels record `family="custom"` and the study's
+    `rotation.forward` to `X` before evaluating every component and interaction, then subtracts `mu`
+    and multiplies by `scale` -- `scale` renormalizes `Var_nu f` back to 1, and `mu` (ruling R30,
+    `Sum_p rotated_block_mean` over rotated pairs) recenters `E_nu f` back to 0, since rotation moves
+    both: a component is centered under its own coordinate's `U[0,1]` marginal, but a rotated
+    coordinate's marginal is not `U[0,1]`. `f_star` for a rotated pair comes from
+    `rotated_block_argmax` (searched in x-space, ruling R8) rather than `block_argmax`, and its
+    axis-aligned first-order shares (`Labels.s_axis`) and remainder (`Labels.gamma_axis`) come from
+    `rotated_block_stats` -- neither needs a `mu` correction, since both are computed as
+    `E[X**2] - E[X]**2` and are already shift-invariant. `spec` may be `None`, in which case the
+    labels record `family="custom"` and the study's
     default noise sd of 0.1; a spec that is present must carry `name`, `noise_sd`, `generator` and
     `monotone`, and a missing one raises `AttributeError` (ruling R27). `labels` is for the
     save/load path: when it is given it is stored verbatim and `f_star` is taken from it, so
@@ -179,6 +183,7 @@ class SyntheticObjective:
             raise ValueError(f"every paired coordinate needs a main effect; {missing} have none")
 
         self.scale = self._compute_scale()
+        self.mu = self._compute_mu()
         self.labels = self._compute_labels() if labels is None else labels
         self.f_star = self.labels.f_star
 
@@ -189,8 +194,8 @@ class SyntheticObjective:
         more than `BOX_TOL` outside [0,1]; points inside that tolerance are clipped onto the face.
         A zero-row batch is legal and returns an empty `(0,)` result. When `rotation` is set, every
         component and interaction is evaluated at `rotation.forward(X)` rather than at `X` itself,
-        and the sum is scaled by `self.scale` -- 1.0 when there is no rotation, so this reduces to
-        the un-rotated sum exactly.
+        and the sum is recentered by `self.mu` and scaled by `self.scale` (ruling R30) -- `mu = 0.0`
+        and `scale = 1.0` when there is no rotation, so this reduces to the un-rotated sum exactly.
         """
         points, single = self._as_points(X)
         Z = self.rotation.forward(points) if self.rotation is not None else points
@@ -199,7 +204,7 @@ class SyntheticObjective:
             values += comp(Z[:, comp.coord])
         for inter in self.interactions:
             values += inter(Z[:, inter.i], Z[:, inter.j])
-        values *= self.scale
+        values = (values - self.mu) * self.scale
         return values.reshape(()) if single else values
 
     def observe(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -214,12 +219,19 @@ class SyntheticObjective:
         return np.asarray(values + self.noise_sd * rng.standard_normal(values.shape))
 
     def component_variances(self) -> np.ndarray:
-        """Realized `Var_nu` of each block by 64-node quadrature: main effects, then interactions.
+        """Pre-rotation `Var_nu` of each block by 64-node quadrature: main effects, then interactions.
 
-        For blocks built by `Component.from_raw` this equals the prescribed shares to roundoff,
-        and it sums to `Var_nu f` because the blocks are uncorrelated under the product measure.
-        It is the measured counterpart of `Labels.s` and `Labels.s_pairs`, which are prescribed:
-        the two diverge exactly when a block was not built to the share it claims.
+        For blocks built by `Component.from_raw` this equals the prescribed shares to roundoff -- it
+        is the measured counterpart of `Labels.s` and `Labels.s_pairs`, which are prescribed, and the
+        two diverge exactly when a block was not built to the share it claims. Without a rotation
+        this also sums to `Var_nu f`, since the blocks are uncorrelated under the product measure.
+
+        Ruling R31: **under a rotation it does not.** Each component's own `nu_var()` is read off
+        its own coordinate and ignores both the rotation (which mixes a pair's two coordinates) and
+        `scale`, so the sum here is neither the realized `Var_nu f` (which `scale` forces to exactly
+        1) nor a meaningful per-coordinate axis variance -- that is `Labels.s_axis`, from
+        `rotated_block_stats`. The values are still meaningful ground truth: they are exactly
+        `Labels.s` (and `Labels.s_pairs`) for every block, rotated or not.
         """
         return np.array(
             [comp.nu_var() for comp in self.components]
@@ -272,18 +284,38 @@ class SyntheticObjective:
         )
         total += sum(comp.share for comp in self.components if comp.coord not in rotated_coords)
         total += sum(inter.c**2 for inter in self.interactions)
-        return 1.0 / np.sqrt(total)
+        return float(1.0 / np.sqrt(total))
+
+    def _compute_mu(self) -> float:
+        """`Sum_p E_nu[phi_p]` over rotated pairs, or `0.0` with no rotation (ruling R30).
+
+        Unpaired components are already centered by `Component.from_raw` (`E_nu = 0`), and a product
+        interaction is exactly zero-mean on its own two coordinates (`synthobj.interaction`'s
+        orthogonality identities) -- only a rotated pair's mixing of two independent uniforms can
+        shift the mean away from 0 (`rotated_block_mean`). Pairs are disjoint, so the total is a
+        plain sum: `E[X + Y] = E[X] + E[Y]` regardless of independence. `__call__` and `_compute_labels`
+        both subtract this once, in the same raw (pre-`scale`) units it is computed in.
+        """
+        if self.rotation is None:
+            return 0.0
+        by_coord = {comp.coord: comp for comp in self.components}
+        return float(
+            sum(rotated_block_mean(by_coord[i], by_coord[j], self.rotation) for i, j in self.rotation.pairs)
+        )
 
     def _compute_labels(self) -> Labels:
         """Assemble `Labels`, including `f_star` and its maximizer (plan decision D1).
 
         Pairs are disjoint, so each paired block is an independent function of its own two
-        coordinates and the maximum separates: `f_star` is `self.scale` times the sum of the
-        per-block maxima (`block_argmax` for an interaction, `rotated_block_argmax` for a rotated
-        pair, both accurate to about 1e-10) and the per-component maxima from `Component.argmax`
-        (exact to floating point) -- matching `__call__`, which scales the whole sum once rather
-        than each block. `x_star` records the achieving coordinates, with every coordinate carrying
-        no main effect left at 0.5 -- `f` ignores those entirely. A rotated pair's `x_star` comes
+        coordinates and the maximum separates: `f_star` is `(sum - self.mu) * self.scale`, where
+        `sum` is the raw total of the per-block maxima (`block_argmax` for an interaction,
+        `rotated_block_argmax` for a rotated pair, both accurate to about 1e-10) and the
+        per-component maxima from `Component.argmax` (exact to floating point) -- matching
+        `__call__`, which recenters and scales the whole sum once rather than each block (ruling
+        R30: `rotated_block_argmax`'s own `phi` is never recentered, since L-BFGS-B's relative
+        `ftol` would otherwise see a shifted stopping denominator and the maximizer's last bits
+        could move). `x_star` records the achieving coordinates, with every coordinate carrying no
+        main effect left at 0.5 -- `f` ignores those entirely. A rotated pair's `x_star` comes
         directly from `rotated_block_argmax`'s x-space search, so it already lies in the cube.
         """
         D = self.D
@@ -328,7 +360,7 @@ class SyntheticObjective:
             if self.rotation is not None:
                 s_axis[comp.coord] = comp.share * scale2
 
-        f_star *= self.scale
+        f_star = (f_star - self.mu) * self.scale
 
         s_pairs = tuple(float(inter.c**2) for inter in self.interactions)
         gamma = float(sum(s_pairs))

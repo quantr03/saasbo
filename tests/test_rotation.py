@@ -37,13 +37,14 @@ from scipy.stats import qmc
 
 from synthobj.component import Component
 from synthobj.draws import gp_draw
-from synthobj.kernel import eigen_factor, make_grid
+from synthobj.kernel import GL_NODES, GL_WEIGHTS, eigen_factor, make_grid
 from synthobj.objective import SyntheticObjective
 from synthobj.rotation import (
     EXT_HI,
     EXT_LO,
     PairRotation,
     rotated_block_argmax,
+    rotated_block_mean,
     rotated_block_stats,
     rotated_block_value_and_grad,
 )
@@ -96,6 +97,16 @@ def obj_theta0(mains: tuple[Component, ...]) -> SyntheticObjective:
 @pytest.fixture(scope="module")
 def obj_theta45(mains: tuple[Component, ...]) -> SyntheticObjective:
     return _objective(45.0, mains)
+
+
+@pytest.fixture(scope="module")
+def obj_theta30(mains: tuple[Component, ...]) -> SyntheticObjective:
+    # theta=0, 45 and 90 are each fixed points of theta -> 90 - theta under this fixture's equal
+    # shares: swapping cos/sin inside rotated_block_stats maps 0 <-> 90 (both individually asserted
+    # exactly elsewhere) and is a literal no-op at 45 (cos 45 = sin 45), so a mutant confined to that
+    # one function is invisible to any objective-level test that only ever exercises those three
+    # angles. theta=30 has no such symmetry.
+    return _objective(30.0, mains)
 
 
 # --- EXT_LO / EXT_HI / n_ext (ruling R7) -----------------------------------------------------------
@@ -154,8 +165,17 @@ def test_forward_of_a_million_points_stays_inside_the_extended_domain(theta_deg:
 # --- rotated_block_stats -------------------------------------------------------------------------
 
 
+# An unequal-share pair for the theta in {0, 90} exactness tests: with both factors at the same
+# share (as an earlier version of this file had it), var_a and var_b are numerically identical at
+# these two angles and a mutant that returns (var_phi, var_b, var_a) is invisible. 0.25 vs 0.10
+# breaks that symmetry.
+SHARE_A, SHARE_B = 0.25, 0.10
+
+
 def test_rotated_block_stats_at_theta_zero_matches_the_unrotated_shares() -> None:
-    f_a, f_b = _component(0, MAIN_SHARE, 10), _component(1, MAIN_SHARE, 11)
+    # theta=0: z_a = x_a, z_b = x_b (forward is the identity), so phi = f_a(x_a) + f_b(x_b) is
+    # already separable and var_a/var_b are exactly f_a's/f_b's own nu_var.
+    f_a, f_b = _component(0, SHARE_A, 10), _component(1, SHARE_B, 11)
     var_phi, var_a, var_b = rotated_block_stats(f_a, f_b, PairRotation(0.0, ((0, 1),)))
     assert var_phi == pytest.approx(f_a.nu_var() + f_b.nu_var(), abs=1e-8)
     assert var_a == pytest.approx(f_a.nu_var(), abs=1e-8)
@@ -163,12 +183,17 @@ def test_rotated_block_stats_at_theta_zero_matches_the_unrotated_shares() -> Non
 
 
 def test_rotated_block_stats_at_theta_ninety_is_also_exactly_additive() -> None:
-    # A quarter turn just relabels the two coordinates -- also exact at all 20 dispatch seeds.
-    f_a, f_b = _component(0, MAIN_SHARE, 12), _component(1, MAIN_SHARE, 13)
+    # theta=90: z_a = 1 - x_b, z_b = x_a. The variance attributable to x_a is Var[f_b(x_a)] (since
+    # z_b = x_a), i.e. f_b's own nu_var, and the variance attributable to x_b is Var[f_a(1 - x_b)] =
+    # f_a's own nu_var (1 - x_b is uniform on [0,1] too) -- var_a and var_b are SWAPPED relative to
+    # theta=0, not equal to their theta=0 values. (An earlier version of this test asserted the
+    # theta=0 pairing here; it passed only because that fixture used equal shares, which cannot
+    # distinguish "var_a is f_a's variance" from "var_a is f_b's variance.")
+    f_a, f_b = _component(0, SHARE_A, 12), _component(1, SHARE_B, 13)
     var_phi, var_a, var_b = rotated_block_stats(f_a, f_b, PairRotation(90.0, ((0, 1),)))
     assert var_phi == pytest.approx(f_a.nu_var() + f_b.nu_var(), abs=1e-8)
-    assert var_a == pytest.approx(f_a.nu_var(), abs=1e-8)
-    assert var_b == pytest.approx(f_b.nu_var(), abs=1e-8)
+    assert var_a == pytest.approx(f_b.nu_var(), abs=1e-8)
+    assert var_b == pytest.approx(f_a.nu_var(), abs=1e-8)
 
 
 @pytest.mark.parametrize("theta_deg", [15.0, 30.0, 45.0, 60.0])
@@ -184,6 +209,35 @@ def test_rotated_block_stats_first_order_never_exceeds_the_total(theta_deg: floa
     assert var_a >= 0.0
     assert var_b >= 0.0
     assert var_phi >= var_a + var_b - 1e-10
+
+
+def test_rotated_block_stats_var_a_and_var_b_subtract_the_mean_correctly() -> None:
+    # Regression for a mutant that drops "- mean_phi**2" when computing var_a/var_b. At a
+    # non-symmetric angle with unequal shares, E_nu[phi] is measurably non-zero (the R30 finding),
+    # so omitting the mean-square term inflates var_a/var_b by mean_phi**2 -- asserted directly
+    # against an independent recomputation of the same 64x64 GL quadrature, rather than relying on
+    # the ANOVA inequality above to notice the inflation incidentally.
+    f_a, f_b = _component(0, SHARE_A, 40), _component(1, SHARE_B, 41)
+    rot = PairRotation(30.0, ((0, 1),))
+    var_phi, var_a, var_b = rotated_block_stats(f_a, f_b, rot)
+
+    theta = np.deg2rad(30.0)
+    c, s = np.cos(theta), np.sin(theta)
+    xa, xb = np.meshgrid(GL_NODES, GL_NODES, indexing="ij")
+    za = 0.5 + c * (xa - 0.5) - s * (xb - 0.5)
+    zb = 0.5 + s * (xa - 0.5) + c * (xb - 0.5)
+    phi = f_a(za) + f_b(zb)
+    w = GL_WEIGHTS[:, None] * GL_WEIGHTS[None, :]
+    mean_phi = float((w * phi).sum())
+    assert abs(mean_phi) > 1e-3  # non-trivial: dropping mean_phi**2 is not a rounding no-op here
+
+    e_given_a = phi @ GL_WEIGHTS
+    e_given_b = GL_WEIGHTS @ phi
+    expected_var_a = float((GL_WEIGHTS * e_given_a**2).sum()) - mean_phi**2
+    expected_var_b = float((GL_WEIGHTS * e_given_b**2).sum()) - mean_phi**2
+
+    assert var_a == pytest.approx(expected_var_a, abs=1e-12)
+    assert var_b == pytest.approx(expected_var_b, abs=1e-12)
 
 
 # --- rotated_block_value_and_grad (chain rule) ----------------------------------------------------
@@ -371,16 +425,18 @@ def test_gamma_stays_zero_while_gamma_axis_is_positive(obj_theta45: SyntheticObj
 
 
 def test_s_axis_matches_rotated_block_stats_times_scale_squared(
-    obj_theta45: SyntheticObjective, mains: tuple[Component, ...]
+    obj_theta30: SyntheticObjective, mains: tuple[Component, ...]
 ) -> None:
     # `gamma_axis = 1 - s_axis.sum()` (the brief's own formula) makes the sum-to-one check below
     # tautological with respect to s_axis's own values -- it cannot tell a correctly indexed s_axis
     # from one with i and j swapped, since the swap cancels in the sum. This test recomputes each
     # pair's two first-order variances independently via rotated_block_stats and pins them to the
-    # matching coordinate, which the sum-to-one check cannot.
+    # matching coordinate, which the sum-to-one check cannot. theta=30 (not 45), because at 45
+    # cos(theta) == sin(theta), so a mutant that swaps them inside rotated_block_stats is a literal
+    # no-op there and this check would not be exercising anything at that particular angle.
     by_coord = {comp.coord: comp for comp in mains}
-    labels = obj_theta45.labels
-    rot = PairRotation(45.0, PAIRS)
+    labels = obj_theta30.labels
+    rot = PairRotation(30.0, PAIRS)
     for i, j in PAIRS:
         _, var_a, var_b = rotated_block_stats(by_coord[i], by_coord[j], rot)
         assert labels.s_axis[i] == pytest.approx(var_a * labels.scale**2, abs=1e-10)
@@ -400,17 +456,39 @@ def test_intermediate_angle_scale_and_axis_shares_are_only_checked_qualitatively
     assert float(labels.s_axis.sum()) + labels.gamma_axis == pytest.approx(1.0, abs=1e-8)
 
 
-def test_rotated_objective_qmc_variance_is_one_after_scaling(obj_theta45: SyntheticObjective) -> None:
-    # Variance only, per the brief's checklist -- deliberately not mean. A component is centered to
-    # E_nu[f_a] = 0 under its OWN coordinate's U[0,1] marginal, but z_a = 0.5 + R(x_a - .5, x_b - .5)
-    # is a linear combination of two independent uniforms, whose marginal is a triangular-ish
-    # distribution over a wider interval, not U[0,1] -- so E_nu[f_a(z_a)] is generically nonzero at
-    # an intermediate angle (measured -0.006 to -0.025 per pair here at theta=15/45; exactly 0 at
-    # theta in {0, 90}, confirmed above). `scale`'s job is Var_nu f = 1, which does not require a
-    # zero mean, and the brief's own checklist for this test asks only for variance.
+def test_rotated_objective_qmc_variance_is_one_after_scaling(obj_theta30: SyntheticObjective) -> None:
+    # theta=30 (not 45): the previous fixture-choice note applies here too (see
+    # test_s_axis_matches_rotated_block_stats_times_scale_squared). Variance only, per the brief's
+    # checklist. Mean is checked separately, exactly, by
+    # test_e_nu_f_is_zero_after_recentering_at_a_non_symmetric_angle below -- ruling R30 recenters
+    # by `mu` precisely so the QMC-sampled mean here is small-sample noise around 0, not a
+    # structurally nonzero quantity the way it was before that fix.
     X = qmc.Sobol(D, scramble=True, seed=0).random(2**17)
-    values = obj_theta45(X)
+    values = obj_theta30(X)
     assert float(values.var()) == pytest.approx(1.0, rel=0.01)
+
+
+def test_e_nu_f_is_zero_after_recentering_at_a_non_symmetric_angle() -> None:
+    # Ruling R30: SyntheticObjective recenters by `mu = Sum_p rotated_block_mean` so `E_nu[f] = 0`
+    # despite rotation moving it (measured -0.006 to -0.14 across seeds/angles before this fix, per
+    # the fix-round message). This integrates the objective's PUBLIC __call__ over the same 64x64
+    # Gauss-Legendre grid `rotated_block_mean` itself uses, rather than re-deriving `mu`'s formula,
+    # so it exercises the whole pipeline (forward, mu, scale together) and is not a tautological
+    # restatement of `_compute_mu`. theta=30 is not a multiple of 90, where the mean is exactly 0
+    # even before recentering and this test would have no power to distinguish "recentered" from
+    # "never needed it."
+    f0 = _component(0, MAIN_SHARE, 800)
+    f1 = _component(1, MAIN_SHARE, 801)
+    obj = SyntheticObjective(2, (f0, f1), (), PairRotation(30.0, ((0, 1),)), None, 0)
+    assert obj.mu != 0.0  # the correction is doing real work at this angle, not a no-op
+
+    xa, xb = np.meshgrid(GL_NODES, GL_NODES, indexing="ij")
+    X = np.stack([xa.ravel(), xb.ravel()], axis=-1)
+    values = obj(X).reshape(xa.shape)
+    w = GL_WEIGHTS[:, None] * GL_WEIGHTS[None, :]
+    mean_f = float((w * values).sum())
+
+    assert mean_f == pytest.approx(0.0, abs=1e-10)
 
 
 def test_f_star_dominates_a_million_uniform_points(obj_theta45: SyntheticObjective) -> None:
@@ -453,8 +531,44 @@ def test_f_star_matches_a_dense_grid_through_the_public_call() -> None:
         X = np.stack(np.meshgrid(rows, xs, indexing="ij"), axis=-1).reshape(-1, 2)
         brute = max(brute, float(obj(X).max()))
 
-    assert brute <= obj.f_star + 1e-9  # dominance, from the grid's side
-    assert obj.f_star >= brute - 1e-9  # dominance, from f_star's side (a million random points
-    #                                    elsewhere in this file cover the general case; this pair's
-    #                                    own dense grid is tighter)
+    assert brute <= obj.f_star + 1e-9  # dominance: f_star must be at least as big as the grid found
     assert obj.f_star - brute <= 1e-5  # two-sided: catches an inflated f_star
+
+
+# --- component_variances() under rotation (ruling R31) ---------------------------------------------
+
+
+def test_component_variances_excludes_rotation_and_scale() -> None:
+    # Ruling R31: component_variances()'s docstring promises pre-rotation Var_nu per block, not the
+    # realized post-rotation axis variance (Labels.s_axis) or Var_nu f, which `scale` forces to
+    # exactly 1 regardless. Shares deliberately do NOT sum to 1 pre-rotation here -- every other
+    # fixture in this file uses shares that do, which is exactly why the brief's own note says the
+    # old, wrong docstring's claim held "only by coincidence of this configuration": with an
+    # unrescaled sum of 1.2, that coincidence cannot happen.
+    f0 = _component(0, 0.6, 500)
+    f1 = _component(1, 0.6, 501)
+    obj = SyntheticObjective(2, (f0, f1), (), PairRotation(30.0, ((0, 1),)), None, 0)
+
+    variances = obj.component_variances()
+    assert variances == pytest.approx([f0.nu_var(), f1.nu_var()], abs=1e-10)
+    assert float(variances.sum()) == pytest.approx(1.2, abs=1e-6)  # pre-rotation, un-rescaled
+    assert not np.allclose(variances, obj.labels.s_axis)  # NOT the realized axis-aligned variance
+
+    X = qmc.Sobol(2, scramble=True, seed=1).random(2**16)
+    assert float(obj(X).var()) == pytest.approx(1.0, rel=0.02)  # the REAL Var_nu f, via scale
+
+
+# --- R() bridged to forward -------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("theta_deg", [15.0, 30.0])
+def test_forward_matches_R_directly(theta_deg: float) -> None:
+    # R() is normative per the brief but nothing in synthobj/ calls it -- forward computes cos/sin
+    # itself rather than going through R(). Pin the two together directly so R() is load-bearing:
+    # a future refactor that changes forward's formula without updating R() (or vice versa) is
+    # caught here rather than by nothing at all. Non-symmetric angles, since at a multiple of 45 or
+    # 90 several plausible-but-wrong formulas would coincidentally agree with the correct one.
+    rot = PairRotation(theta_deg, ((0, 1),))
+    x = np.array([0.2, 0.9])
+    expected = 0.5 + rot.R() @ (x - 0.5)
+    assert rot.forward(x) == pytest.approx(expected, abs=1e-14)

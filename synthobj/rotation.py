@@ -20,6 +20,13 @@ first-order Sobol shares (`Labels.s_axis`) and a remainder (`Labels.gamma_axis`)
 additive model cannot see -- unlike `Labels.gamma`, which stays 0 for this family because it has no
 explicit `Interaction`.
 
+Rotating also moves the *mean*: `f_a`/`f_b` are centered under their own coordinate's `U[0,1]`
+marginal, but `z_a`, `z_b` are linear combinations of two independent uniforms, so `E_nu[phi]` is
+generically nonzero away from a multiple of 90 degrees (ruling R30). `rotated_block_mean` computes
+that quantity by the same quadrature `rotated_block_stats` uses internally for its own mean, and
+`SyntheticObjective` subtracts the sum of it over every rotated pair (once, alongside `scale`) to
+restore `E_nu[f] = 0`.
+
 `rotated_block_argmax` is `interaction.block_argmax`'s analogue for a rotated pair (ruling R8): a
 rotated component's knots live on the extended domain and are not the set `phi` is ever evaluated
 on, so the search is a uniform 1024x1024 grid on `[0,1]^2` in x-space, with the best `top_k` cells
@@ -78,15 +85,41 @@ class PairRotation:
         return Z
 
 
+def rotated_block_mean(f_a: Component, f_b: Component, rot: PairRotation) -> float:
+    """`E_nu[phi]` for `phi(x_a, x_b) = f_a(z_a) + f_b(z_b)`, by 64x64 Gauss-Legendre quadrature.
+
+    `f_a`/`f_b` are centered so `E_{u~U[0,1]}[f_a(u)] = 0` under their OWN coordinate's marginal
+    (`Component.from_raw`), but `z_a = 1/2 + cos(theta)(x_a - 1/2) - sin(theta)(x_b - 1/2)` is a
+    linear combination of two independent uniforms, whose marginal is not `U[0,1]` -- so integrating
+    a nonlinear draw against it is generically nonzero away from a multiple of 90 degrees (ruling
+    R30). `SyntheticObjective` subtracts the sum of this over its rotated pairs once, alongside
+    `scale`, to restore `E_nu[f] = 0`.
+    """
+    theta = np.deg2rad(rot.theta_deg)
+    c, s = np.cos(theta), np.sin(theta)
+    xa, xb = np.meshgrid(GL_NODES, GL_NODES, indexing="ij")
+    za, zb = _rotated_pair(xa, xb, c, s)
+    phi = f_a(za) + f_b(zb)
+    w = GL_WEIGHTS[:, None] * GL_WEIGHTS[None, :]
+    return float((w * phi).sum())
+
+
 def rotated_block_stats(f_a: Component, f_b: Component, rot: PairRotation) -> tuple[float, float, float]:
     """64x64 Gauss-Legendre quadrature of `phi(x_a, x_b) = f_a(z_a) + f_b(z_b)` under `U[0,1]^2`.
 
     Returns `(Var phi, Var_{x_a} E_{x_b} phi, Var_{x_b} E_{x_a} phi)`: the block's total variance and
     its two axis-aligned first-order Sobol variances. `phi` is additive in `(z_a, z_b)` but the
     rotation mixes `(x_a, x_b)`, so in general `Var phi >= Var_{x_a}E_{x_b}phi + Var_{x_b}E_{x_a}phi`
-    (the ANOVA remainder is a variance and cannot be negative), with equality -- and the two
-    first-order terms reducing to `f_a.nu_var()` and `f_b.nu_var()` -- only when `rot.theta_deg` is a
-    multiple of 90 degrees.
+    (the ANOVA remainder is a variance and cannot be negative), with equality only when
+    `rot.theta_deg` is a multiple of 90 degrees -- and even then the two first-order terms reduce to
+    `f_a.nu_var()` and `f_b.nu_var()` **in order** only at an even multiple (0, 180, ...); at an odd
+    multiple (90, 270, ...) the rotation exchanges the two coordinates (`z_a` depends only on `x_b`,
+    `z_b` only on `x_a`), so the pair comes out swapped: `Var_{x_a}E_{x_b}phi = f_b.nu_var()` and
+    `Var_{x_b}E_{x_a}phi = f_a.nu_var()`.
+
+    `mean_phi` is computed via `rotated_block_mean` rather than re-derived here, so it is the exact
+    same quantity `SyntheticObjective` subtracts for `mu` (ruling R30) -- not a second, merely
+    numerically-close copy of the same quadrature.
     """
     theta = np.deg2rad(rot.theta_deg)
     c, s = np.cos(theta), np.sin(theta)
@@ -95,7 +128,7 @@ def rotated_block_stats(f_a: Component, f_b: Component, rot: PairRotation) -> tu
     phi = f_a(za) + f_b(zb)
 
     w = GL_WEIGHTS[:, None] * GL_WEIGHTS[None, :]
-    mean_phi = float((w * phi).sum())
+    mean_phi = rotated_block_mean(f_a, f_b, rot)
     var_phi = float((w * phi**2).sum()) - mean_phi**2
 
     e_given_a = phi @ GL_WEIGHTS  # E_{x_b}[phi | x_a], one value per x_a node
