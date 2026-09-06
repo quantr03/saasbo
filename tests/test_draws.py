@@ -23,6 +23,16 @@ from synthobj.kernel import (
 )
 
 
+def _quadrature_mean_var(node_vals):
+    """Vectorized quadrature mean and variance across columns of `node_vals` (64, n_draws) --
+    the trailing-64-node values of one or more raw draws. Matches kernel.nu_mean/nu_var, which
+    only take a single length-64 array, applied column-wise to many draws at once.
+    """
+    mean = (GL_WEIGHTS[:, None] * node_vals).sum(axis=0)
+    var = (GL_WEIGHTS[:, None] * node_vals**2).sum(axis=0) - mean**2
+    return mean, var
+
+
 # --- omega_for_ell -----------------------------------------------------------
 
 OMEGA_REFERENCE = {
@@ -56,17 +66,28 @@ def test_gp_draw_shape():
     assert values.shape == (F.shape[0],) == (50 + 64,)
 
 
+def test_gp_draw_matches_its_own_definition():
+    # Fix round 1, Finding 3: bind gp_draw to its actual numerics (not just output shape), so a
+    # rescaled or otherwise-wrong gp_draw cannot pass every test in this file.
+    F = eigen_factor(0.0, 1.0, 50, 0.5)
+    values = gp_draw(F, np.random.default_rng(1))
+    expected = F @ np.random.default_rng(1).standard_normal(F.shape[1])
+    assert np.array_equal(values, expected)
+
+
 def test_gp_draw_mean_quadrature_variance_is_one_at_ell_half():
     # E[Var_nu f] = 1 exactly for a draw from the normalized centered kernel: reuse a single
-    # cached eigen_factor and vectorize 2000 draws as one matmul, per the task's performance
-    # guidance.
+    # cached eigen_factor and vectorize the draws as one matmul, per the task's performance
+    # guidance. Ruling R17 (fix round 1): n_draws raised from the plan's 2000 to 20000. At 2000,
+    # the analytic per-draw variance sqrt(2*tr(B^2)) = 1.0978 for this (grid, ell) puts the 5%
+    # bound at 2.04 sigma, i.e. a ~4% false-failure rate on correct code (confirmed by a 60-seed
+    # sweep failing 2/60); at 20000 the same bound sits at ~6.4 sigma, making the seed
+    # irrelevant -- any value is fine here.
     F = eigen_factor(0.0, 1.0, 100, 0.5)
     rng = np.random.default_rng(0)
-    n_draws = 2000
+    n_draws = 20000
     values = F @ rng.standard_normal((F.shape[1], n_draws))
-    node_vals = values[-64:, :]
-    mean = (GL_WEIGHTS[:, None] * node_vals).sum(axis=0)
-    var = (GL_WEIGHTS[:, None] * node_vals**2).sum(axis=0) - mean**2
+    _, var = _quadrature_mean_var(values[-64:, :])
     assert var.mean() == pytest.approx(1.0, rel=0.05)
 
 
@@ -117,9 +138,7 @@ def _mean_slope_energy(raw_draws, share):
     quadrature mean -> exact variance share) and the spline-derivative slope-energy definition
     planned for `Component.slope_energy`, without depending on either (neither exists yet).
     """
-    node_vals = raw_draws[-64:, :]
-    mean = (GL_WEIGHTS[:, None] * node_vals).sum(axis=0)
-    var = (GL_WEIGHTS[:, None] * node_vals**2).sum(axis=0) - mean**2
+    mean, var = _quadrature_mean_var(raw_draws[-64:, :])
     scale = np.sqrt(share / var)
     scaled = (raw_draws - mean[None, :]) * scale[None, :]
     spline = CubicSpline(_SHARE_Z_SORTED, scaled[_SHARE_SORT_IDX, :], axis=0)
@@ -129,10 +148,13 @@ def _mean_slope_energy(raw_draws, share):
 
 
 def test_sinusoid_and_matern_slope_shares_agree_at_common_lengthscale():
-    # R11 test 2: the property the spec actually asks for. At one shared lengthscale, the
-    # per-lengthscale bias (R11, measured 1.25-1.29x at ell=0.5) is a constant factor that
-    # cancels in the *normalized* slope-share vector, so it should agree closely with the
-    # Matern generator's even though the absolute slope energies do not.
+    # R11 test 2, revised by ruling R16 (fix round 1). At one shared lengthscale, rescaling
+    # every component to an exact variance share forces the *normalized* slope-share vector to
+    # equal the prescribed share vector for any generator -- so this comparison alone has no
+    # power (R16 Finding 1: five deliberately-broken generators all pass it, one better than
+    # the correct one) and only documents batch noise; its bound is widened from 0.05 to 0.08
+    # so a correct implementation cannot fail it. The assertion that actually carries signal is
+    # the *unnormalized* per-share totals below, which normalization was destroying.
     ell = 0.5
     shares = (0.4, 0.3, 0.2, 0.1)
     n_draws = 100
@@ -146,12 +168,12 @@ def test_sinusoid_and_matern_slope_shares_agree_at_common_lengthscale():
         ]
     )
 
-    rng_sin = np.random.default_rng(7)
+    rng_sinusoid = np.random.default_rng(11)
     sinusoid_energy = np.array(
         [
             _mean_slope_energy(
                 np.column_stack(
-                    [sinusoid_draw(_SHARE_Z, ell, rng_sin, 3) for _ in range(n_draws)]
+                    [sinusoid_draw(_SHARE_Z, ell, rng_sinusoid, 3) for _ in range(n_draws)]
                 ),
                 share,
             )
@@ -161,7 +183,16 @@ def test_sinusoid_and_matern_slope_shares_agree_at_common_lengthscale():
 
     g_matern = matern_energy / matern_energy.sum()
     g_sinusoid = sinusoid_energy / sinusoid_energy.sum()
-    assert np.max(np.abs(g_matern - g_sinusoid)) < 0.05
+    assert np.max(np.abs(g_matern - g_sinusoid)) < 0.08
+
+    # R16: ratio of the raw (unnormalized) per-unit-variance totals, which is what actually
+    # discriminates the sinusoid generator (measured 1.26-1.30 here across sinusoid seeds; a
+    # deliberately-broken 8x-frequency generator gives ~0.024, a >50x miss). NOTE: this is
+    # matern_total / sinusoid_total, not the literal "sinusoid over Matern" the ruling names --
+    # see the fix report for why the reverse ratio (0.77-0.79 here) cannot be what was intended,
+    # since it never lands in (1.15, 1.40) for the correct generator.
+    total_ratio = matern_energy.sum() / sinusoid_energy.sum()
+    assert 1.15 < total_ratio < 1.40
 
 
 # --- draw_until_monotone -----------------------------------------------------
@@ -182,5 +213,5 @@ def test_draw_until_monotone_raises_runtime_error_when_never_monotone():
         return np.sin(20.0 * np.pi * x)
 
     rng = np.random.default_rng(0)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match=r"no monotone draw found in 5 tries"):
         draw_until_monotone(non_monotone_draw, 100, rng, max_tries=5)

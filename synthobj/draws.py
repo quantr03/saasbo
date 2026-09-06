@@ -50,7 +50,7 @@ def sinusoid_draw(Z: np.ndarray, ell: float, rng, n_terms: int = 3) -> np.ndarra
 
     Each term k draws w_k ~ N(0,1), omega_k ~ LogUniform(omega(ell)/1.25, 1.25*omega(ell)),
     phi_k ~ U[0, 2*pi), and contributes w_k * sin(2*pi*omega_k*z + phi_k); the returned array
-    is their sum at each point of `Z`.
+    is their sum at each point of `Z`. `Z` must be one-dimensional.
     """
     omega_center = omega_for_ell(ell)
     log_bounds = np.log(omega_center / 1.25), np.log(1.25 * omega_center)
