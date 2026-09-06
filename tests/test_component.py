@@ -18,6 +18,7 @@ ell=0.08 max 1.5e-5 / rms 4.1e-6, ell=0.06 max 5.8e-5 / rms 1.5e-5; slope-energy
 difference between the production 1024 resolution and a 2048-point reference 4e-7 to 8e-5).
 They are marked `slow` -- their `eigh` calls dominate this file's runtime.
 """
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError
 
 import numpy as np
@@ -54,9 +55,16 @@ def _gp_component(
     return Component.from_raw(coord, ell, share, make_grid(0.0, 1.0, n), raw, sign)
 
 
-def _analytic_component(grid: np.ndarray, share: float, f) -> Component:
+def _analytic_component(
+    grid: np.ndarray, share: float, f: Callable[[np.ndarray], np.ndarray]
+) -> Component:
     """A component whose raw joint values are `f` evaluated at `joint_points(grid)`."""
     return Component.from_raw(0, np.inf, share, grid, f(joint_points(grid)))
+
+
+def _value_at(comp: Component, x: float) -> float:
+    """`comp(x)` through a fresh spline evaluation, independent of anything `argmax` computed."""
+    return float(comp(np.array([x]))[0])
 
 
 def _psd_factor(Z: np.ndarray, ell: float) -> np.ndarray:
@@ -154,8 +162,10 @@ def test_slope_energy_of_an_exact_cubic_matches_its_closed_form() -> None:
 def test_argmax_finds_an_interior_maximum_off_the_knot_grid() -> None:
     # sin(2 pi x) has E_nu = 0 and Var_nu = 1/2, so share = 1/2 leaves it unscaled; its maximum
     # is 1 at x = 1/4, which is not a knot of make_grid(0, 1, 1024) (0.25 * 1023 = 255.75).
-    # A grid search over the 1088 knots would be off in x by up to half a spacing, 4.9e-4,
-    # which is 490x the tolerance asserted here -- this is what "exact" buys.
+    # Measured, for a grid search over the 1088 knots: the nearest knot is 0.2502443793, so it
+    # misses x* by 2.4438e-04 (244x the bound below), reports a maximum 1.1788e-06 short of 1
+    # (1179x the bound below) at a point where f' is -9.6477e-03 (9648x the bound below).
+    # This is what "exact" buys, and none of the three bounds is reachable by a knot search.
     grid = make_grid(0.0, 1.0, N_PROD)
     comp = _analytic_component(grid, 0.5, lambda z: np.sin(2.0 * np.pi * z))
 
@@ -163,6 +173,7 @@ def test_argmax_finds_an_interior_maximum_off_the_knot_grid() -> None:
     assert x_star == pytest.approx(0.25, abs=1e-6)
     assert f_star == pytest.approx(1.0, abs=1e-9)
     assert comp.derivative(x_star) == pytest.approx(0.0, abs=1e-6)
+    assert _value_at(comp, x_star) == pytest.approx(f_star, abs=1e-12)
 
 
 # --- argmax on real draws -------------------------------------------------------------------
@@ -176,11 +187,14 @@ def test_argmax_dominates_dense_and_random_sampling(ell: float) -> None:
     assert 0.0 <= x_star <= 1.0
     assert f_star >= comp(np.linspace(0.0, 1.0, 100_000)).max() - 1e-12
     assert f_star >= comp(np.random.default_rng(3).uniform(0.0, 1.0, 1_000_000)).max() - 1e-12
-    assert comp(x_star) == pytest.approx(f_star, abs=1e-12)
+
+    # Attained: the reported maximum is the value of f at the reported maximizer, checked by a
+    # fresh spline evaluation rather than by reusing what argmax already computed (ruling R19).
+    assert _value_at(comp, x_star) == pytest.approx(f_star, abs=1e-12)
 
     # An interior maximizer of the exact answer is a true critical point of the spline; a grid
     # search would leave a derivative of order |f''| * h / 2, which is O(0.1) here.
-    assert x_star in (0.0, 1.0) or abs(comp.derivative(x_star)) < 1e-8
+    assert x_star == 0.0 or x_star == 1.0 or abs(comp.derivative(x_star)) < 1e-8
 
 
 def test_argmax_respects_lo_and_hi() -> None:
@@ -190,8 +204,27 @@ def test_argmax_respects_lo_and_hi() -> None:
 
     assert lo <= x_star <= hi
     assert f_star >= comp(np.linspace(lo, hi, 100_000)).max() - 1e-12
-    assert comp(x_star) == pytest.approx(f_star, abs=1e-12)
+    assert _value_at(comp, x_star) == pytest.approx(f_star, abs=1e-12)
     assert f_star <= comp.argmax()[1] + 1e-12
+
+
+def test_argmax_rejects_bounds_outside_the_knot_range() -> None:
+    # The spline does not extrapolate, so f is NaN past the knots and a NaN endpoint would win
+    # np.argmax: without the guard argmax returns a silently wrong (lo, nan) pair.
+    unit = _gp_component(0.5, 1.0, N_SMALL, seed=17)
+    with pytest.raises(ValueError, match="outside the knot range"):
+        unit.argmax(-0.25, 1.25)
+    with pytest.raises(ValueError, match="outside the knot range"):
+        unit.argmax(0.0, 1.5)
+
+    # An extended-domain component does accept the wider bounds its knots cover, and maximizes
+    # over all of them -- this is the call Task 6's rotated blocks will make.
+    raw = gp_draw(eigen_factor(-0.25, 1.25, N_SMALL, 0.5), np.random.default_rng(7))
+    ext = Component.from_raw(0, 0.5, 1.0, make_grid(-0.25, 1.25, N_SMALL), raw)
+    x_star, f_star = ext.argmax(-0.2, 1.2)
+    assert -0.2 <= x_star <= 1.2
+    assert f_star >= ext(np.linspace(-0.2, 1.2, 100_000)).max() - 1e-12
+    assert f_star >= ext.argmax()[1] - 1e-12
 
 
 # --- knot vector and reconstruction ----------------------------------------------------------
@@ -214,11 +247,17 @@ def test_knots_within_the_dedupe_tolerance_are_merged() -> None:
     base = make_grid(0.0, 1.0, 49)
     shape = (lambda z: np.sin(3.0 * z) + 0.5 * z)
 
-    exact_dup = np.sort(np.concatenate([base, GL_NODES[[10]]]))
-    assert _analytic_component(exact_dup, 1.0, shape).grid.shape == (113,)
-
-    near_dup = np.sort(np.concatenate([base, [GL_NODES[10] + 5e-13]]))
-    assert _analytic_component(near_dup, 1.0, shape).grid.shape == (113,)
+    # Which of the two colliding knots survives depends on the direction of the displacement:
+    # an exact tie or a grid point below the node keeps the node, a grid point above it keeps
+    # the grid point, so `nu_var` then reads the spline up to KNOT_TOL away from the node.
+    # Assert the share stays exact in all three directions -- the displacement is immaterial.
+    for offset in (0.0, 5e-13, -5e-13):
+        merged = _analytic_component(
+            np.sort(np.concatenate([base, [GL_NODES[10] + offset]])), 1.0, shape
+        )
+        assert merged.grid.shape == (113,)
+        assert merged.nu_var() == pytest.approx(1.0, abs=1e-10)
+        assert merged.nu_mean() == pytest.approx(0.0, abs=1e-12)
 
     # 1e-6 apart is a genuinely distinct knot and must survive.
     distinct = np.sort(np.concatenate([base, [GL_NODES[10] + 1e-6]]))
@@ -262,7 +301,24 @@ def test_extended_domain_component_evaluates_outside_the_unit_interval() -> None
     assert np.all(np.isfinite(comp.derivative(outside)))
     assert comp.nu_mean() == pytest.approx(0.0, abs=1e-12)
     assert comp.nu_var() == pytest.approx(share, abs=1e-8)
-    assert comp.slope_energy() > 0.0
+
+
+def test_extended_domain_quadrature_stays_on_the_unit_interval() -> None:
+    # Same closed form as the cubic test, drawn on the wider box: x^3 has mean 1/4 and variance
+    # 9/112 over [0,1] but mean 0.40626 and variance 0.28911 over [-0.25, 1.25], so a from_raw
+    # that normalized against the extended grid would land 0.53x off in scale and 3.6x off in
+    # slope energy. All three quadratures read GL_NODES, hence [0,1], hence the same numbers as
+    # the unit-domain component -- while the spline itself really does extend past the cube.
+    extended = _analytic_component(make_grid(-0.25, 1.25, N_SMALL), 9.0 / 112.0, lambda z: z**3)
+    unit = _analytic_component(make_grid(0.0, 1.0, N_SMALL), 9.0 / 112.0, lambda z: z**3)
+
+    assert extended.nu_mean() == pytest.approx(0.0, abs=1e-12)
+    assert extended.nu_var() == pytest.approx(9.0 / 112.0, rel=1e-12)
+    assert extended.slope_energy() == pytest.approx(9.0 / 5.0, rel=1e-8)
+    assert extended.slope_energy() == pytest.approx(unit.slope_energy(), rel=1e-8)
+
+    for z in (-0.2, 1.2):
+        assert _value_at(extended, z) == pytest.approx(z**3 - 0.25, abs=1e-12)
 
 
 def test_unit_domain_component_is_nan_outside_its_knot_range() -> None:

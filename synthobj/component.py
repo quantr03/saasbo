@@ -79,8 +79,10 @@ class Component:
         mirrors the result about zero.
 
         The stored knots are `grid` unioned with the GL nodes, sorted and deduplicated at
-        `KNOT_TOL`; on a tie the node's value is the one kept, so the quadrature in `nu_var`
-        stays exact.
+        `KNOT_TOL`. On an exact tie the node is the knot that survives, so the quadrature in
+        `nu_var` reads the value it was solved from; when a grid point sits within `KNOT_TOL`
+        above a node the grid point survives instead, and `nu_var` then reads the spline
+        `KNOT_TOL` away from the node, which moves it by less than 1e-14.
         """
         node_values = raw_joint_values[-kernel.GL_NODES.size :]
         scale = sign * np.sqrt(share / kernel.nu_var(node_values))
@@ -123,7 +125,18 @@ class Component:
         pieces continued outside the knot range. The maximum over those roots that lie in
         [lo, hi], together with the two endpoints, is the global maximum to floating point --
         there is no grid and no iterative search.
+
+        Raises `ValueError` if [lo, hi] is not contained in the knot range. The spline does
+        not extrapolate, so f is NaN there; without this guard the endpoint NaN would win
+        `argmax` and the method would return a silently wrong `(lo, nan)` pair rather than
+        failing. [0, 1] is inside the knot range of every component the plan builds, on the
+        unit grid and on the extended grid alike.
         """
+        if lo < self.grid[0] or hi > self.grid[-1]:
+            raise ValueError(
+                f"argmax bounds [{lo}, {hi}] lie outside the knot range "
+                f"[{self.grid[0]}, {self.grid[-1]}]; the spline does not extrapolate"
+            )
         roots = self.spline.derivative().roots()
         candidates = np.concatenate([roots[(roots >= lo) & (roots <= hi)], [lo, hi]])
         values = self.spline(candidates)
