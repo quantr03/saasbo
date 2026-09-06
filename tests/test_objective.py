@@ -296,6 +296,15 @@ def test_call_rejects_non_finite_input(obj: SyntheticObjective, bad: float) -> N
         obj(X)
 
 
+def test_an_empty_batch_returns_an_empty_result(obj: SyntheticObjective) -> None:
+    # A zero-row batch is a legal request, not an error. It reaches the box test, where min()/max()
+    # would raise "zero-size array to reduction operation minimum" -- an accurate message about
+    # the wrong thing.
+    empty = np.zeros((0, D))
+    assert obj(empty).shape == (0,)
+    assert obj.observe(empty, np.random.default_rng(0)).shape == (0,)
+
+
 def test_call_rejects_the_wrong_number_of_coordinates(obj: SyntheticObjective) -> None:
     with pytest.raises(ValueError, match=re.escape(f"{D} coordinates")):
         obj(np.full((3, D + 1), 0.5))
@@ -464,6 +473,24 @@ def test_spec_fields_are_read_when_a_spec_is_given(
     assert built.labels.monotone is True
 
 
+@pytest.mark.parametrize("missing", ["name", "noise_sd", "generator", "monotone"])
+def test_a_present_spec_missing_a_field_raises(
+    pieces: tuple[tuple[Component, ...], tuple[Interaction, ...]], missing: str
+) -> None:
+    # Ruling R27. The test above can only confirm that objective.py reads the names objective.py
+    # chose, since `FamilySpec` does not exist yet -- it is circular with respect to a rename.
+    # This one is not: the four defaults apply to `spec=None` alone, so a spec that calls its
+    # noise level `noise_sigma` fails loudly at construction instead of recording noise_sd = 0.1
+    # on every regret curve and matern/False on two study variants, with `family` still correct
+    # and the record therefore looking plausible.
+    fields = {"name": "aligned10_sin", "noise_sd": 0.25, "generator": "sinusoid", "monotone": True}
+    del fields[missing]
+    partial = type("_PartialSpec", (), fields)()
+
+    with pytest.raises(AttributeError, match=missing):
+        SyntheticObjective(D, (pieces[0][0],), (), None, partial, 0)
+
+
 def test_family_spec_annotation_is_deferred(obj: SyntheticObjective) -> None:
     # Ruling R15: families.py imports objective.py, so objective.py must not import families.py
     # at runtime. `from __future__ import annotations` keeps the annotation as a string, and the
@@ -507,6 +534,23 @@ def test_duplicate_component_coordinates_are_rejected(
     mains, inters = pieces
     with pytest.raises(ValueError, match="one component per coordinate"):
         SyntheticObjective(D, mains + (mains[0],), inters, None, None, 0)
+
+
+def test_a_paired_coordinate_needs_a_main_effect(
+    pieces: tuple[tuple[Component, ...], tuple[Interaction, ...]]
+) -> None:
+    # The block maximum is over f_i(x) + f_j(y) + h_ij(x, y): drop f_j and there is no block to
+    # maximize. Without the guard this is a bare `KeyError: 11` from the assembly's dict lookup.
+    mains, inters = pieces
+    with pytest.raises(ValueError, match="main effect"):
+        SyntheticObjective(D, (mains[0],), inters, None, None, 0)
+
+
+def test_an_objective_needs_at_least_one_component() -> None:
+    # Otherwise `g` is 0/0, which under -W error fails as a RuntimeWarning from inside the label
+    # assembly rather than as a statement about the input.
+    with pytest.raises(ValueError, match="at least one component"):
+        SyntheticObjective(D, (), (), None, None, 0)
 
 
 def test_precomputed_labels_are_used_verbatim(

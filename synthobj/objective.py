@@ -31,14 +31,17 @@ from this module. It is recorded for downstream posterior scoring and does **not
 `FamilySpec` is imported only under `typing.TYPE_CHECKING` (ruling R15). `families.py` imports this
 module, so a runtime import here would be a cycle; `from __future__ import annotations` keeps the
 annotation readable without one. Only `name`, `noise_sd`, `generator` and `monotone` are read off
-a spec, all through `getattr` with defaults, so `spec=None` is legal and yields a "custom" family
-with the study's noise sd of 0.1.
+a spec, through `_spec_field`: `spec=None` is legal and yields a "custom" family with the study's
+noise sd of 0.1, but a spec that is *present* must carry all four, and a missing one raises
+`AttributeError` at construction rather than silently taking the default (ruling R27). A default
+firing on a real spec whose fields were renamed would put the wrong noise level on every regret
+curve and the wrong generator on two study variants, and nothing downstream would notice.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -104,16 +107,19 @@ class SyntheticObjective:
     Maximization convention: `f_star` is the maximum, and the design brief's regret is
     `f_star - max_t f(x_t)`.
 
-    `components` must hold at most one entry per coordinate and `interactions` must sit on
-    disjoint coordinate pairs -- both are what make the `f_star` assembly a sum of independent
-    per-block maxima. Overlapping pairs raise `ValueError`, or `NotImplementedError` under
-    `allow_overlap=True`: no family in this project uses them, so the joint-grid fallback the plan
-    sketches is not built.
+    `components` must be non-empty and hold exactly one entry per coordinate, and `interactions`
+    must sit on disjoint coordinate pairs inside that set -- together these are what make the
+    `f_star` assembly a sum of independent per-block maxima. Each is checked at construction and
+    raises `ValueError`; overlapping pairs raise `NotImplementedError` instead under
+    `allow_overlap=True`, since no family in this project uses them and the joint-grid fallback
+    the plan sketches is not built.
 
     `rotation` must be `None` in this version; the rotated family (plan decision D2) extends this
     class. `spec` may be `None`, in which case the labels record `family="custom"` and the study's
-    default noise sd of 0.1. `labels` is for the save/load path: when it is given it is stored
-    verbatim and `f_star` is taken from it, so loading never re-runs the block maximizations.
+    default noise sd of 0.1; a spec that is present must carry `name`, `noise_sd`, `generator` and
+    `monotone`, and a missing one raises `AttributeError` (ruling R27). `labels` is for the
+    save/load path: when it is given it is stored verbatim and `f_star` is taken from it, so
+    loading never re-runs the block maximizations.
     """
 
     def __init__(
@@ -138,7 +144,10 @@ class SyntheticObjective:
         self.rotation = rotation
         self.spec = spec
         self.seed = int(seed)
-        self.noise_sd = float(getattr(spec, "noise_sd", 0.1))
+        self.noise_sd = float(self._spec_field("noise_sd", 0.1))
+
+        if not self.components:
+            raise ValueError("at least one component is required; an empty objective has no S")
 
         coords = [comp.coord for comp in self.components]
         if len(set(coords)) != len(coords):
@@ -154,6 +163,12 @@ class SyntheticObjective:
                 )
             raise ValueError(f"interaction pairs must be disjoint; got coordinates {paired}")
 
+        # The block maximum is over f_i(x) + f_j(y) + h_ij(x, y), so a paired coordinate without a
+        # main effect has no block to maximize; every family puts its pairs inside S.
+        missing = sorted(set(paired) - set(coords))
+        if missing:
+            raise ValueError(f"every paired coordinate needs a main effect; {missing} have none")
+
         self.labels = self._compute_labels() if labels is None else labels
         self.f_star = self.labels.f_star
 
@@ -162,6 +177,7 @@ class SyntheticObjective:
 
         Raises `ValueError` if `X` is not `D` coordinates wide, holds a non-finite entry, or lies
         more than `BOX_TOL` outside [0,1]; points inside that tolerance are clipped onto the face.
+        A zero-row batch is legal and returns an empty `(0,)` result.
         """
         points, single = self._as_points(X)
         values = np.zeros(points.shape[0])
@@ -206,9 +222,21 @@ class SyntheticObjective:
         # Before the box test, since every comparison against NaN is False.
         if not np.all(np.isfinite(points)):
             raise ValueError("X has non-finite entries")
-        if points.min() < -BOX_TOL or points.max() > 1.0 + BOX_TOL:
+        # np.any rather than min()/max(): both are vacuously False on a zero-row batch, where the
+        # reductions would instead raise "zero-size array to reduction operation minimum". An
+        # empty batch is a legal request and evaluates to an empty result.
+        if np.any(points < -BOX_TOL) or np.any(points > 1.0 + BOX_TOL):
             raise ValueError(f"X lies outside the unit cube by more than {BOX_TOL}")
         return np.clip(points, 0.0, 1.0), single
+
+    def _spec_field(self, name: str, default: Any) -> Any:
+        """`self.spec`'s `name`, or `default` when there is no spec at all (ruling R27).
+
+        The default is *not* a fallback for a spec that lacks the field: a present spec must carry
+        every field this module reads, and a missing one raises `AttributeError` here rather than
+        recording a plausible-looking wrong label.
+        """
+        return default if self.spec is None else getattr(self.spec, name)
 
     def _compute_labels(self) -> Labels:
         """Assemble `Labels`, including `f_star` and its maximizer (plan decision D1).
@@ -265,9 +293,9 @@ class SyntheticObjective:
             s_axis=s.copy(),
             gamma_axis=gamma,
             scale=1.0,
-            generator=str(getattr(self.spec, "generator", "matern")),
-            monotone=bool(getattr(self.spec, "monotone", False)),
-            family=str(getattr(self.spec, "name", "custom")),
+            generator=str(self._spec_field("generator", "matern")),
+            monotone=bool(self._spec_field("monotone", False)),
+            family=str(self._spec_field("name", "custom")),
             seed=self.seed,
             noise_sd=self.noise_sd,
             active_eps=ACTIVE_EPS,
