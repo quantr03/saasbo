@@ -2,4 +2,678 @@
 % Heading and label are fixed; a later task adds subsections beneath and
 % never renames the heading or the label.
 \SOlevelB{Design decisions}\label{app:so:a4}
-% filled by Task N
+
+The package was built under a decision ledger, and the entries below are the
+subset of its rulings that changed the \emph{design} rather than the process.
+Each is stated in three parts --- what the code does, why it does that rather
+than the alternative that was rejected, and the function and test that pin it
+--- so a reader can check every claim against the source.
+Sections~\ref{app:so:a1} to~\ref{app:so:a3} carry the derivations, the
+fourteen variants and the interfaces; this section carries only the reasons,
+and cross-references them rather than repeating them. No entry below quotes a
+measured number: the tables of~\ref{app:so:a1} to~\ref{app:so:a3} remain the
+only source for those.
+
+\SOlevelC{D1 --- the maximum is exact, and it is a maximum}\label{app:so:a4:d1}
+
+\textbf{Decision.} $\fstar$ is computed, not estimated. Interaction pairs and
+rotation pairs are disjoint and are checked to be so at construction, so the
+coordinates partition into blocks and~\eqref{app:so:a1:eq:fstar} makes $\fstar$
+a sum of per-block maxima: closed form in one dimension, where a component is a
+cubic spline and \SOcode{Component.argmax} takes the best of the roots of its
+piecewise-quadratic derivative and the two endpoints; and a scan refined by
+L-BFGS-B on the analytic gradient in two, where no closed form exists
+(\ref{app:so:a1:fstar}). No joint search over the cube happens anywhere. The
+accuracy claim is the one~\ref{app:so:a1:fstar} makes and
+Table~\ref{app:so:a1:tab:tab_fstar_reopt} carries: re-optimizing from the
+returned point with far tighter tolerances does not improve any archived paired
+block's value beyond floating-point roundoff. No count and no magnitude is
+restated here, and a gap measured against a finite reference grid is never
+quoted as this construction's error, because such a gap bounds the reference
+grid and shrinks as the grid is refined.
+
+\textbf{Why.} Simple regret is $r_t=\fstar-\max_{s\le t}f(x_s)$, so $\fstar$
+enters every curve the study plots. The rejected alternative was to estimate it
+by a dense random or quasi-random sweep of ${[0,1]}^D$, which at
+$D=\SOnumStudyD$ cannot resolve a maximum to anything near this precision and,
+worse, would miss by a different amount in each family --- putting a
+family-dependent floor under every regret curve and making the families
+incomparable, which is the one thing a synthetic benchmark exists to avoid.
+Separability is what makes the exact route affordable: it replaces one
+$D$-dimensional search with a handful of one- and two-dimensional ones. That
+the quantity is a \emph{maximum} is a separate decision, and the sign
+convention it fixes is stated once in~\ref{app:so:a1:fstar} and once
+in~\ref{app:so:a3:botorch}: the SAASBO implementation in this repository
+minimizes, so a caller negates $f$ at the call site, but nothing inside
+\SOcode{synthobj} is ever negated, and every share, every maximizer and every
+$\fstar$ in this appendix is stated in the maximization convention.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{Component.argmax}, \SOcode{interaction.block\_argmax}
+and \SOcode{rotation.rotated\_block\_argmax}, assembled by
+\SOcode{SyntheticObjective.\_compute\_labels}. Pinned by
+\SOtest{test\_f\_star\_matches\_an\_independent\_brute\_force}, which bounds
+$\fstar$ from above by a scan that calls neither block maximizer, and
+\SOtest{test\_f\_star\_attained}, which checks that the reported value belongs
+to the reported maximizer.
+\end{sloppypar}
+
+\SOlevelC{D2 --- rotation on an extended domain, renormalized and recentered}\label{app:so:a4:d2}
+
+\textbf{Decision.} The rotated family's non-additivity is a change of basis and
+nothing else: the objective stays a sum of one-dimensional components, but a
+pair's two components are evaluated at rotated coordinates. Those components
+are therefore drawn not on the unit interval but on the extended grid
+$[\SOnumZLo,\SOnumZHi]$ of~\eqref{app:so:a1:eq:next}, with $\nExt=\SOnumNext$
+draw points and $\knots=\SOnumKnotsExt$ knots --- the bound being the furthest
+a corner of the cube can rotate, widened by the fixed $0.01$ margin carried in
+the code constants \SOcode{rotation.EXT\_LO} and \SOcode{rotation.EXT\_HI}
+(ruling R7). A rotated block's maximum is searched in $x$-space (ruling R8), on
+a uniform grid over ${[0,1]}^2$ rather than on the components' knots. Rotation
+then breaks two invariants, and both are repaired once for the whole objective:
+the variance by the global factor $\kappa$ of~\eqref{app:so:a1:eq:kappa}, and
+the mean by subtracting $\mu$ of~\eqref{app:so:a1:eq:mu} (ruling R30).
+
+\textbf{Why.} Contracting the rotated square back into the cube was the
+rejected alternative, and it fails for a reason that would have been invisible
+in the results: it multiplies every effective lengthscale by
+$|\cos\theta|+|\sin\theta|$, so the rotation sweep would also be a smoothness
+sweep, and the two effects could never be separated afterwards. Extending
+instead keeps the grid spacing no coarser than the unit grid's, so a rotated
+component keeps the resolution --- and hence the nominal lengthscale --- of an
+unrotated one; the margin exists only to absorb the few ulps by which a
+floating-point corner of the cube can overshoot the bound. Searching in
+$x$-space follows from the same extension: a rotated component's knots lie on
+the extended domain and are not a set the block is ever evaluated on, so they
+are the wrong search set. Recentering is not cosmetic, and the mechanism
+is~\ref{app:so:a1:rotation}'s: each component is centered against its own
+coordinate's $U[0,1]$ marginal, but a rotated coordinate is a linear
+combination of two independent uniforms, whose marginal is trapezoidal on a
+wider support and is not $U[0,1]$, so a nonlinear component generically
+integrates to a nonzero value against it. Accepting the resulting offset was
+rejected because $\mu=0$ holds exactly for every other family, and the rotated
+family is the one the study compares against them: an uncentered mean there
+would be a confound sitting in precisely the contrast the family exists to
+make.
+
+\textbf{Why the angle is not the difficulty index (ruling R28).} The nominal
+$\theta$ does not order axis-misspecification. $\gaxis$ vanishes at every
+multiple of $90^\circ$ and is largest near the diagonal, so it is not monotone
+in $\theta$, and~\ref{app:so:a1:rotation} reads off
+Table~\ref{app:so:a1:tab:tab_rotation_angle} how far the seed-to-seed spread
+within one angle reaches. The consequence is an analysis rule rather than a
+design change --- no code moved, because $\gaxis$ is already a recorded label
+--- and the rule is that the sweep is conditioned on the recorded $\gaxis$,
+never on the angle that generated it.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{rotation.EXT\_LO} and \SOcode{rotation.EXT\_HI},
+\SOcode{families.ROTATED\_GRID\_N},
+\SOcode{rotation.rotated\_block\_argmax},
+\SOcode{SyntheticObjective.\_compute\_scale} and
+\SOcode{SyntheticObjective.\_compute\_mu}. Pinned by
+\SOtest{test\_ext\_bounds\_and\_n\_ext\_match\_ruling\_r7} and
+\SOtest{test\_rotated\_grid\_n\_matches\_ruling\_r7s\_formula} (the bounds and
+the knot count),
+\SOtest{test\_forward\_of\_a\_million\_points\_stays\_inside\_the\_extended\_domain}
+(the margin does its job),
+\SOtest{test\_rotated\_block\_argmax\_dominates\_and\_matches\_a\_dense\_grid}
+(the $x$-space search),
+\SOtest{test\_rotated\_objective\_qmc\_variance\_is\_one\_after\_scaling} and
+\SOtest{test\_e\_nu\_f\_is\_zero\_after\_recentering\_at\_a\_non\_symmetric\_angle}
+(the two repairs, each checked under $\refnu$ rather than under the quadrature
+that computed them).
+\end{sloppypar}
+
+\SOlevelC{D3 --- fixed knots, clipped eigenvalues, and no jitter}\label{app:so:a4:d3}
+
+\textbf{Decision.} A component is stored as spline values on a knot vector
+fixed in advance: the sorted, deduplicated union of the uniform draw grid with
+the $64$ Gauss-Legendre nodes of~\ref{app:so:a1:measure}, so the quadrature
+nodes are themselves knots. The covariance is factored by symmetric
+eigendecomposition with eigenvalues below a fixed relative threshold clipped to
+zero; no jitter is ever added to the diagonal. Knots closer together than
+\SOcode{component.KNOT\_TOL} are treated as the same point, and on an exact tie
+the surviving knot is the \emph{node}: the merged values are sorted stably,
+which places a grid point before a node of equal value, and the last entry of
+each near-duplicate run is the one kept.
+
+\textbf{Why no jitter.} The usual ridge is not a small perturbation of the
+right kind. Adding it to the diagonal is exactly adding independent white noise
+at every knot, and the stored object is a spline whose derivative divides
+differences of neighbouring knot values by the knot spacing --- so the noise
+enters slope energy with a contribution that does not shrink as the component
+gets smoother, while by~\eqref{app:so:a1:eq:slopefactor} the quantity it
+pollutes is smallest for exactly the smoothest components. It would therefore
+corrupt the recorded slope-share labels worst where they matter most. Clipping
+is free of that defect because it \emph{removes} energy from the numerically
+null directions instead of adding energy in every direction; what it costs is a
+covariance that matches the target up to the clip rather than exactly, a
+bounded one-sided error confined to directions that carry no signal.
+
+\textbf{Why the nodes are knots.} \SOcode{Component.nu\_var} is a quadrature
+sum over the node values, and the rescale of~\eqref{app:so:a1:eq:rescale} is
+solved for that sum. Were the nodes not knots, the spline would have to be
+interpolated at them and the identity would hold only to interpolation error;
+because they are, the value the quadrature reads is the value the rescale was
+solved from, so the recorded share is exact under $\nuhat$ rather than nearly
+right. The dedup tie-break is not arbitrary for the same reason: keeping the
+node preserves that exactness, and in the one remaining case --- a grid point
+within \SOcode{KNOT\_TOL} above a node --- the quadrature reads the spline a
+tolerance away from the node, which moves it by far less than any label is
+quoted to.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{kernel.eigen\_factor} (the clip),
+\SOcode{kernel.joint\_points} and \SOcode{Component.from\_raw} (the merge and
+the tie-break), \SOcode{Component.nu\_var}. Pinned by
+\SOtest{test\_eigen\_factor\_reconstructs\_normalized\_kernel} and
+\SOtest{test\_eigen\_factor\_clips\_eigenvalues\_below\_the\_threshold},
+\SOtest{test\_knots\_are\_the\_merged\_sorted\_deduplicated\_union} and
+\SOtest{test\_knots\_within\_the\_dedupe\_tolerance\_are\_merged}, and
+\SOtest{test\_centered\_to\_zero\_mean\_and\_rescaled\_to\_exact\_share}, which
+is the exactness the tie-break protects.
+\end{sloppypar}
+
+\SOlevelC{D4 --- monotone components by rejection, and the sign that is not stored}\label{app:so:a4:d4}
+
+\textbf{Decision.} The dense-weak family additionally requires every component
+to be monotone, and it gets them by rejection: \SOcode{draws.draw\_until\_monotone}
+redraws until the grid values are non-decreasing or non-increasing, accepting
+\emph{either} direction. The explicit random $\mathrm{sign}$
+of~\eqref{app:so:a1:eq:rescale} is applied inside \SOcode{Component.from\_raw}
+and consumed there. No field of any object holds it --- not on the component,
+not on the labels, not on the objective --- and ruling R33 removed it from the
+saved file format too, rather than adding a field to carry it.
+
+\textbf{Why.} Rejection is used because at the family's large lengthscale it is
+cheap: the rank-one limit~\eqref{app:so:a1:eq:rankone} says a very smooth
+centered draw is close to a random multiple of a linear function, and a
+multiple of a monotone function is monotone, so the acceptance rate is high and
+no shape-constrained construction is needed. Not storing the sign follows from
+what accepting either direction does to it, and~\ref{app:so:a1:generators}
+gives the argument in one line: the law of a centered Gaussian draw is
+invariant under negation, the acceptance region is symmetric under negation,
+and the rescale map is odd in the raw draw, so flipping both the draw and the
+coin leaves the delivered component's distribution unchanged. The accepted
+draw's direction is therefore already a fair coin, and the requested sign is
+not identifiable from the stored values --- it is marginally unobservable, so
+serializing it would record a quantity no reader could check and no
+reconstruction could use. The rejected alternative was to add a field to
+\SOcode{Component} or \SOcode{Labels} purely to serialize it, which is scope
+paid for an unobservable. A reader who wants a direction reads the realized one
+off the component's derivative, which is the honest quantity in either design.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{draws.draw\_until\_monotone} and
+\SOcode{Component.from\_raw} (where \SOcode{sign} is applied and where it
+stops). Pinned by
+\SOtest{test\_draw\_until\_monotone\_returns\_monotone\_values\_at\_ell\_3},
+\SOtest{test\_sign\_flips\_values\_and\_preserves\_the\_variance\_share} (the
+oddness the argument turns on) and
+\SOtest{test\_dense\_weak\_sign\_is\_not\_collapsed\_to\_one\_direction}, which
+reads each delivered component's own derivative sign rather than any recorded
+attribute.
+\end{sloppypar}
+
+\SOlevelC{D5 --- the sinusoid generator and the regime it is valid in}\label{app:so:a4:d5}
+
+\textbf{Decision.} One variant replaces the Gaussian draw by a sum of a few
+random sinusoids, and its frequency is not free: $\omega(\ell)$
+of~\eqref{app:so:a1:eq:omega} is chosen so that slope energy per unit variance
+matches the Mat\'ern generator's~\eqref{app:so:a1:eq:slopefactor}. The identity
+behind that match needs at least one full cycle on the unit interval, that is
+$\omega(\ell)\ge1$, and \SOcode{draws.omega\_for\_ell} is kept as the closed
+form regardless (ruling R11), with the pinning test parametrized only over
+lengthscales in that regime.
+
+\textbf{Why, and where it does not hold (ruling R23).} Matching the frequency
+is what makes the sinusoid variant an out-of-family check on the generator
+rather than a change of two things at once: the point is to ask whether a
+finding survives fitting Mat\'ern kernels to non-Mat\'ern components, which is
+only a clean question if slope energy per unit variance is held fixed. The
+alternative --- a frequency chosen for convenience --- would have confounded
+generator with roughness. But the study's only sinusoid variant,
+\SOcode{aligned10\_sin}, sits at a lengthscale whose $\omega$ column in
+Table~\ref{app:so:a1:tab:tab_v_ell} is below one, so for that variant the match
+is a design target and \emph{not} a realized equality: on the smooth side of
+the crossing, centering under $U[0,1]$ removes proportionally more variance
+than slope energy and the realized ratio runs above the target. The regime
+restriction is therefore recorded on the test rather than hidden, and the same
+statement is made about the variant in~\ref{app:so:a2:aligned10-sin}.
+Consequently that variant's slope shares are read off the recorded label
+\SOcode{Labels.g}, a realized quantity in the sense of~\ref{app:so:a1:draw},
+and are never inferred from~\eqref{app:so:a1:eq:omega}; the derivation and the
+crossing are in~\ref{app:so:a1:generators}.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{draws.omega\_for\_ell} and
+\SOcode{draws.sinusoid\_draw}. Pinned by
+\SOtest{test\_omega\_for\_ell\_matches\_reference\_table},
+\SOtest{test\_sinusoid\_ratio\_matches\_slope\_factor\_in\_derived\_regime}
+(restricted, deliberately, to the regime the identity is derived in) and
+\SOtest{test\_sinusoid\_and\_matern\_slope\_shares\_agree\_at\_common\_lengthscale};
+\SOtest{test\_aligned10\_sin\_actually\_draws\_from\_the\_sinusoid\_generator}
+confirms which variant uses it.
+\end{sloppypar}
+
+\SOlevelC{D6 --- seeding by spawned sequences}\label{app:so:a4:d6}
+
+\textbf{Decision.} One integer seed spawns three independent
+\SOcode{SeedSequence} children --- one for selecting the active coordinates,
+one for the component draws and one for the pairs --- and the draw child spawns
+one further sequence per rank, so each component is drawn from a stream of its
+own. Observation noise is drawn from a fourth stream, salted so it cannot
+collide with any of them. The whole scheme is set out
+in~\ref{app:so:a3:seeding}, which is the authority for it.
+
+\textbf{Why.} The property being bought is separability: changing one part of a
+\SOcode{FamilySpec} must not perturb a draw or a selection it has no business
+touching. The rejected alternative --- drawing every rank in sequence from one
+generator --- makes every component after the first edited one different, so no
+variant-to-variant comparison at a fixed seed means anything, and a sweep would
+be measuring reshuffled draws rather than the knob it varies. Spawning per rank
+buys the opposite: at one seed, changing a rank's lengthscale leaves every
+other rank's raw draw bit-identical rather than merely close.
+
+\textbf{What this does not say (ruling R29).} The invariance holds at fixed
+$(D, \text{seed}, \SOcode{n\_active}, \SOcode{n\_pairs})$: with those fixed,
+the same pairs are produced whether they go on to carry interactions or to be
+rotated, so the $\gamma$ sweep and the $\theta$ sweep each hold $S$, the pairs
+and the underlying draws fixed and move only their own knob. It does
+\emph{not} say that the two sweeps share $S$ or pairs with each other --- they
+are configured with different \SOcode{n\_active} and \SOcode{n\_pairs}, and a
+permutation of a different number of ranks is a different permutation. The
+correct form, with the same qualifier, is stated in~\ref{app:so:a3:seeding}.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{families.streams}, \SOcode{families.select\_active},
+\SOcode{families.select\_pairs} and \SOcode{families.noise\_rng}. Pinned by
+\SOtest{test\_same\_seed\_gives\_a\_bit\_identical\_objective},
+\SOtest{test\_changing\_one\_coordinates\_ell\_leaves\_the\_others\_bit\_identical},
+\SOtest{test\_n\_active\_nests\_across\_ranks},
+\SOtest{test\_gamma\_sweep\_keeps\_S\_pairs\_and\_component\_shapes\_identical}
+and \SOtest{test\_rotated\_variants\_share\_S\_and\_pairs\_across\_theta} ---
+the last two each holding \SOcode{n\_active} and \SOcode{n\_pairs} fixed, which
+is exactly the scope of the invariance --- and
+\SOtest{test\_noise\_rng\_streams\_are\_independent\_of\_run}.
+\end{sloppypar}
+
+\SOlevelC{R5 --- a deterministic archive}\label{app:so:a4:r5}
+
+\textbf{Decision.} \SOcode{SyntheticObjective.save} writes the \SOfile{.npz}
+through a hand-rolled zip writer rather than through \SOcode{np.savez}: every
+member's timestamp is fixed at the zip format's earliest representable date,
+the compression method is \SOcode{ZIP\_STORED}, and members are written in
+sorted-name order. The
+accompanying JSON is dumped with sorted keys. The same seed therefore produces
+byte-identical files, and the manifest's \SOcode{sha256} values are stable
+across regenerations.
+
+\textbf{Why.} Byte-identity is the global constraint the archive is built to
+satisfy, and the three knobs above are what \SOcode{np.save} itself --- already
+deterministic for a given array --- does not control: a timestamp, a
+compression method whose parameters could vary with the zlib build, and a
+member order. The reason those knobs are not simply applied on top of
+\SOcode{np.savez} is a layout difference: \SOcode{np.savez}'s writer opens each
+member through \SOcode{zipfile}'s streaming, unknown-size-in-advance branch, so
+every member carries a Zip64 extra field this writer's single known-size write
+does not --- a more complex and more version-sensitive layout for no benefit
+here, since every array's size is known before writing. That layout difference
+is the whole of the case for writing the zip by hand, and no other property of
+\SOcode{np.savez} is being argued against. What byte-identity does not survive
+is a change of machine --- the stored values depend on the platform's BLAS, so
+the hashes are local to the environment of
+Table~\ref{app:so:a3:tab:environment}, exactly as~\ref{app:so:a3:files} sets
+out.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{objective.\_write\_npz\_deterministic} and
+\SOcode{SyntheticObjective.save}. Pinned by
+\SOtest{test\_repeated\_save\_is\_byte\_identical},
+\SOtest{test\_npz\_members\_and\_json\_keys\_are\_written\_in\_sorted\_order}
+and \SOtest{test\_overwrite\_produces\_byte\_identical\_files}, which takes the
+same comparison through the command line.
+\end{sloppypar}
+
+\SOlevelC{R13 --- the anti-aligned acceptance criterion}\label{app:so:a4:r13}
+
+\textbf{Decision.} The family whose lengthscales reverse the variance-share
+ranking is accepted on two assertions rather than on the per-seed one the
+design first proposed. The first is deterministic and involves no draw at all:
+the \emph{theoretical} slope shares of~\eqref{app:so:a1:eq:slopeshare} must
+reverse the share ranking exactly. The second is realized but averaged: each
+seed's recorded $g$ is aligned by rank, those rank vectors are averaged over
+the study's seeds, and the Spearman coefficient of that seed-mean vector
+against $s$ must clear a bound. The criterion is never evaluated on a single
+seed.
+
+\textbf{Why.} The per-seed criterion cannot hold, and it fails for a reason
+that belongs to the design rather than to the implementation.
+\SOcode{Labels.g} is a realized slope share computed from one draw, and
+realized slope energy is a high-variance quantity (\ref{app:so:a1:slope}); this
+family puts exactly \emph{one} coordinate at each lengthscale, so within a
+single seed there is nothing to average over and one unlucky component inverts
+a neighbouring pair of ranks. A criterion demanding the reversal at every seed
+would therefore fail on correct code, which makes it a worse test than none.
+The rejected alternative was to keep the per-seed bound and rely on the study's
+own seeds happening to pass it: that is a threshold fitted to a lucky slice,
+and it would not survive a change to the draw sequence. Splitting the criterion
+instead puts the design claim where it is exact and the realized claim where it
+is stable.
+
+\textbf{The statistic, precisely.} The accepted realized statistic is the
+Spearman of the \emph{seed-mean} rank-aligned $g$ against $s$.
+Table~\ref{app:so:a2:tab:anti-aligned} also carries a third coefficient, taken
+over all individual (seed, rank) realized pairs, and it is a different and
+weaker number --- the honest measure of how well a single draw reproduces the
+design, not the criterion. The two were once confused, and
+all three are read apart
+in~\ref{app:so:a2:anti-aligned}.
+
+\begin{sloppypar}
+\textbf{Check.}
+\SOtest{test\_anti\_aligned\_theoretical\_slope\_shares\_reverse\_the\_variance\_ranking}
+(the deterministic half) and
+\SOtest{test\_anti\_aligned\_realized\_slope\_share\_pooled\_over\_seeds\_is\_reversed},
+whose name predates the distinction above but whose assertion is on the
+seed-mean vector: it rank-aligns each seed by sorting that seed's own $s$
+descending --- \SOcode{Labels.g} is indexed by coordinate and every seed draws
+a different $S$, so averaging by position would average incomparable quantities
+--- and correlates the mean against the specification's shares.
+\end{sloppypar}
+
+\SOlevelC{R27 --- strict spec fields}\label{app:so:a4:r27}
+
+\textbf{Decision.} The objective reads its four spec-derived fields through one
+helper, and that helper applies a default only when there is no
+\SOcode{FamilySpec} at all. A spec that is present must
+carry every field the objective reads; a missing one raises
+\SOcode{AttributeError} at construction rather than falling back.
+
+\textbf{Why.} The rejected alternative was the obvious one --- read each field
+with a default, so a partial spec still builds --- and it was rejected because
+it was tried. A spec carrying plausible near-miss field names instead of the
+real ones built without complaint and recorded the default noise level and the
+default generator while the family name came through correctly, so the
+resulting record looked entirely reasonable and was wrong about the noise on
+every regret curve and about the scored ground truth of two variants. That is a
+silent mislabel, the failure class this constructor exists to make impossible,
+reintroduced by the very mechanism meant to be convenient. Failing loudly costs
+a caller nothing, because a spec of \SOcode{None} still yields the same
+defaults it always did.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{SyntheticObjective.\_spec\_field}. Pinned by
+\SOtest{test\_spec\_none\_gives\_the\_custom\_defaults},
+\SOtest{test\_spec\_fields\_are\_read\_when\_a\_spec\_is\_given} and
+\SOtest{test\_a\_present\_spec\_missing\_a\_field\_raises}.
+\end{sloppypar}
+
+\SOlevelC{R29 --- membership, not a threshold}\label{app:so:a4:r29}
+
+\textbf{Decision.} \SOcode{Labels.active} is a boolean mask of membership in
+$S$ --- the coordinates that carry a main effect --- and not a comparison of
+$s$ against a cutoff. The cutoff $\activeeps$ is still recorded, as
+\SOcode{Labels.active\_eps}, so downstream scoring code reads one number
+instead of re-deriving it, but nothing inside the package applies it.
+
+\textbf{Why.} The two definitions come apart on the family built to make them
+come apart. \SOcode{dense\_weak} spreads a share of $1/D$ over every
+coordinate, so its shares fall below $\activeeps$ exactly when $D>1/\activeeps$
+--- true at the study's $D=\SOnumStudyD$, false at the $D=\SOnumTableD$ the
+fast tests build at. Had \SOcode{active} been the thresholded quantity, that
+one family's label would have read all-True at one dimension and all-False at
+the other, and a reader would have had to know $D$ before knowing what the
+field meant. Membership is well defined at every $D$; the threshold is a
+scoring choice, which is why it travels with the labels as a recorded number
+rather than being baked into one. That \SOcode{dense\_weak}'s shares sit under
+the bar at the study dimension is the point of the family --- it is the arm in
+which sparsity fails, and nothing clears the relevance threshold --- and not a
+defect in the label.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{Labels.active}, \SOcode{Labels.active\_eps} and
+\SOcode{objective.ACTIVE\_EPS}. Pinned by
+\SOtest{test\_active\_is\_membership\_in\_S\_not\_a\_cutoff},
+\SOtest{test\_labels\_active\_matches\_S\_on\_the\_main\_objective},
+\SOtest{test\_dense\_weak\_at\_D20\_has\_20\_components\_of\_share\_1\_over\_20}
+and
+\SOtest{test\_dense\_weak\_at\_D100\_share\_clears\_D20\_but\_not\_active\_eps},
+which asserts both halves at once: the share is under the cutoff and
+\SOcode{active} is all-True regardless.
+\end{sloppypar}
+
+\SOlevelC{R31 --- what the component-variance diagnostic reports}\label{app:so:a4:r31}
+
+\textbf{Decision.} \SOcode{SyntheticObjective.component\_variances} returns
+each block's pre-rotation variance under $\nuhat$, excluding \SOcode{scale}.
+Under a rotation those numbers therefore neither sum to the realized $\Varnu f$
+--- which $\kappa$ forces to one --- nor give per-coordinate axis variances.
+The ruling fixed the docstring and added a test; it did not change the return
+value.
+
+\textbf{Why.} The quantity is still meaningful ground truth: it is exactly
+\SOcode{Labels.s} and \SOcode{Labels.s\_pairs}, measured rather than
+prescribed, so it diverges from them precisely when a block was not built to
+the share it claims --- which is what a diagnostic is for. What was false was
+the promise that it reports realized per-block variances summing to $\Varnu f$;
+that holds without a rotation and only by coincidence with one. The rejected
+alternative was to make it rotation-aware, and it was rejected on contract
+grounds rather than on difficulty: the realized axis-aligned quantity is per
+block, not per component, so the return value would change shape, and inventing
+a new contract for a diagnostic mid-branch is how a caller silently starts
+reading a different number. The wider quantity was already one field away, as
+\SOcode{Labels.s\_axis}, so the fix was to say so.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{SyntheticObjective.component\_variances} and
+\SOcode{Labels.s\_axis}. Pinned by
+\SOtest{test\_component\_variances\_are\_the\_realized\_per\_block\_variances},
+\SOtest{test\_component\_variances\_measure\_rather\_than\_echo\_the\_share} and
+\SOtest{test\_component\_variances\_excludes\_rotation\_and\_scale}, the test
+the ruling added.
+\end{sloppypar}
+
+\SOlevelC{R34 --- load restores the stored scale, offset and noise level}\label{app:so:a4:r34}
+
+\textbf{Decision.} \SOcode{SyntheticObjective.load} reads $\kappa$, $\mu$ and
+the observation noise level back from the file --- two of them off the stored
+labels and one out of the JSON --- instead of re-deriving any of them from the
+reloaded components and spec.
+
+\textbf{Why.} The three were treated asymmetrically before the ruling: $\mu$
+was restored, while $\kappa$ and the noise level were recomputed even though
+both already sit in the file. Recomputation was verified to be bit-exact on
+every variant, so there was no live bug; the objection is to the contract. The
+stored $\fstar$ was computed with the stored $\kappa$, and \SOcode{\_\_call\_\_}
+multiplies by whichever $\kappa$ the instance holds, so the moment the
+computation of $\kappa$ changed --- a refactor, a different quadrature, a new
+family --- a loaded objective would evaluate on one scale and report an
+$\fstar$ on another, and every regret curve drawn from it would be quietly
+wrong with nothing to fail. The same argument applies to the noise level, which
+\SOcode{observe} reads. Restoring is also strictly simpler: it deletes a
+computation whose result must already equal a value in the file. The rejected
+alternative --- keep recomputing, since it agrees today --- trades a silent
+future failure for nothing at all.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{SyntheticObjective.load}. Pinned by
+\SOtest{test\_load\_restores\_scale\_from\_the\_file\_rather\_than\_rederiving\_it},
+\SOtest{test\_load\_restores\_noise\_sd\_from\_the\_file\_rather\_than\_rederiving\_it}
+and
+\SOtest{test\_load\_reads\_mu\_from\_the\_file\_rather\_than\_rederiving\_it},
+each of which corrupts the stored value and checks that the corruption is what
+comes back, so a test that merely agreed with a recomputation could not pass.
+\end{sloppypar}
+
+\SOlevelC{R35, R36 and R37 --- the manifest describes the directory}\label{app:so:a4:r35}
+
+\textbf{Decision.} The manifest is built by scanning the output directory after
+generation, not from the pairs the invocation was asked to produce, so it
+describes every objective present rather than the subset this run touched;
+entries for stems it did not write are read back through
+\SOcode{SyntheticObjective.load}. Its top-level fields describe the directory
+too: \SOcode{Ds} is the sorted set of distinct dimensions across entries and
+\SOcode{seeds} the sorted union of entry seeds, with the per-entry \SOcode{D}
+and \SOcode{seed} authoritative, and entries in a canonical order. The exit
+code answers one question --- is the manifest incomplete? --- so it is nonzero
+only when something objective-shaped was excluded, an ordinary stray is warned
+about but does not change it, and a dotfile is skipped in silence.
+
+\textbf{Why.} A manifest that lists only the current run's output is a lie
+about its own location: it sits inside the directory, so anything enumerating
+the grid through it silently loses the stems an earlier, differently scoped run
+wrote. The rejected alternative was to merge the new entries into the existing
+manifest, which fails in the opposite direction --- it preserves entries for
+stems that have since been deleted --- and scanning makes the choice between
+rewriting and merging moot by construction. A scalar top-level dimension had
+the same defect one level up: a directory holding two dimensions cannot
+honestly report one, and the plural name is deliberate so a consumer cannot
+read it as a scalar out of habit. The exit code's rule is the ruling that
+corrects an earlier version of itself: making \emph{any} exclusion fatal was
+tried and was a usability defect on this machine, because macOS writes
+\SOfile{.DS\_Store} into any folder opened in Finder, so a routine run in a
+perfectly good directory would exit nonzero and every script checking the code
+would learn to ignore it. A signal that fires on every run is not a signal. A
+dotfile is silent rather than warned for the same reason: a warning printed
+every time is its own kind of noise.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{generate.\_scan\_directory},
+\SOcode{generate.\_is\_dotfile}, \SOcode{generate.\_entry\_sort\_key} and
+\SOcode{generate.main}. Pinned by
+\SOtest{test\_manifest\_scans\_directory\_across\_differently\_scoped\_runs}
+(the ruling's own scenario, two differently scoped runs into one directory),
+\SOtest{test\_scan\_ignores\_dotfile\_silently\_and\_exits\_zero},
+\SOtest{test\_scan\_warns\_but\_exits\_zero\_on\_ordinary\_non\_dotfile\_stray},
+\SOtest{test\_scan\_exits\_nonzero\_on\_half\_written\_pair},
+\SOtest{test\_scan\_exits\_nonzero\_on\_corrupt\_pair},
+\SOtest{test\_scan\_exits\_nonzero\_on\_objective\_shaped\_pair\_under\_unknown\_variant\_dir}
+and
+\SOtest{test\_rerun\_manifest\_created\_changes\_but\_entries\_stay\_the\_same},
+which separates the write timestamp from the entries it describes.
+\end{sloppypar}
+
+\SOlevelC{R38 --- where the BoTorch adapter applies the sign}\label{app:so:a4:r38}
+
+\textbf{Decision.} The adapter declares
+\SOcode{\_is\_minimization\_by\_default = False}. It overrides one method,
+\SOcode{\_evaluate\_true}, and leaves the \SOcode{negate} flip to BoTorch's own
+\SOcode{forward}; it does not flip the sign itself.
+
+\textbf{Why.} The instruction it was built from said that \SOcode{negate}
+flips the sign of \SOcode{evaluate\_true}, and that is false for the installed
+library: in BoTorch 0.18.1, the version~\ref{app:so:a3:botorch} names,
+\SOcode{evaluate\_true} returns the same values whether or not \SOcode{negate}
+is set, and \SOcode{forward} is what applies the flip. Implementing the
+instruction literally would have negated twice, and a double negation is
+invisible in any test that only checks a magnitude --- it shows up as a
+maximizer the optimizer runs away from. Following the stock pattern instead
+means the flip happens exactly once, where a BoTorch loop expects it. The
+maximization convention needs no special handling either: the
+\SOcode{\_is\_minimization\_by\_default} flag exists in the base class for
+naturally maximized problems and BoTorch's own bundled test functions of that
+shape set it, so there is no library-versus-project conflict to reconcile ---
+which is why the adapter is as thin as it is. What a caller sees is stated
+in~\ref{app:so:a3:botorch}.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{botorch\_adapter.SyntheticObjectiveTestFunction} and
+its \SOcode{\_evaluate\_true}. Pinned by
+\SOtest{test\_optimal\_value\_and\_minimization\_flag\_follow\_our\_maximization\_convention}
+and \SOtest{test\_negate\_flips\_an\_actual\_evaluated\_value}, which exercises
+the flip through the call path rather than through
+\SOcode{evaluate\_true}, because that is where it happens.
+\end{sloppypar}
+
+\SOlevelC{R39 --- rotation with an interaction is rejected}\label{app:so:a4:r39}
+
+\textbf{Decision.} A \SOcode{SyntheticObjective} carrying both an
+\SOcode{Interaction} and a rotation raises at construction with a message
+naming the reason. No family in the study reaches the combination, and the
+command line cannot produce it.
+
+\textbf{Why rejected rather than computed.} The label assembly skips every
+paired coordinate when assigning an unpaired component's $\saxis{i}$, and
+``paired'' there covers interaction pairs as well as rotation pairs, while only
+rotation pairs get an $\saxis{i}$ assigned back. An interaction-paired
+coordinate under a rotation would therefore keep $\saxis{i}=0$ and its true
+first-order variance would be absorbed into $\gaxis$ --- a silent mislabel in
+exactly the label the rotated family exists to report. The alternative was to
+compute the missing value, and it was rejected because there is no obvious
+value to compute: deciding what an axis-aligned first-order share \emph{means}
+for a coordinate that is both interaction-paired and rotated is design work,
+and doing it late, under pressure, for a configuration nothing needs is how
+invented semantics become silent errors. Refusing is one guard and is honest;
+if the combination is ever wanted, it becomes a specified feature rather than a
+quiet fix.
+
+\begin{sloppypar}
+\textbf{Check.} The guard in \SOcode{SyntheticObjective.\_\_init\_\_} and the
+$\saxis{i}$ assignment in \SOcode{SyntheticObjective.\_compute\_labels}. Pinned
+by \SOtest{test\_rotation\_combined\_with\_an\_interaction\_is\_rejected} and
+\SOtest{test\_rotation\_and\_interaction\_together\_is\_rejected\_at\_construction}.
+\end{sloppypar}
+
+\SOlevelC{R4, R6 and R9 --- equality, missing values and tuples on the round trip}\label{app:so:a4:r4}
+
+\textbf{Decision.} \SOcode{Labels}, \SOcode{Component} and
+\SOcode{Interaction} are frozen dataclasses declared \SOcode{eq=False}, so
+equality is identity. \SOcode{Labels.ell} is not-a-number off $S$, and the JSON
+carries it as a bare \SOcode{NaN} token. \SOcode{load} converts the JSON's
+lists back to tuples for every field declared as one, so a round trip
+reproduces the original types and not merely the original values.
+
+\textbf{Why.} A frozen dataclass generates an \SOcode{\_\_eq\_\_} that compares
+its fields as a tuple, which on the array-valued fields here does not return a
+boolean but raises on the ambiguous truth value of an array. Identity equality
+is the honest contract in that situation --- the alternative, an elementwise
+comparison written by hand, invents a notion of equality for ground-truth
+labels that nothing needs, since the round-trip test compares field by field
+anyway. Not-a-number off $S$ is chosen over a sentinel such as zero because a
+lengthscale of zero is a value, and a reader who indexed by coordinate rather
+than by rank would silently get one; the cost is that the JSON is not standard,
+so a non-Python reader needs a not-a-number-tolerant parser. Restoring the
+tuples matters because these dataclasses are the study's ground-truth record: a
+field that came back as a list would compare unequal to the original, and
+worse, would be mutable where the original was not.
+
+\begin{sloppypar}
+\textbf{Check.} \SOcode{objective.\_labels\_from\_json} and
+\SOcode{objective.\_spec\_from\_json}. Pinned by
+\SOtest{test\_labels\_is\_frozen\_and\_compares\_by\_identity},
+\SOtest{test\_component\_uses\_identity\_equality\_and\_is\_frozen},
+\SOtest{test\_family\_spec\_shares\_and\_ells\_round\_trip\_as\_tuples} and
+\SOtest{test\_round\_trip\_agrees\_with\_the\_original\_to\_1e\_15}, which
+compares the reloaded labels field by field, arrays included, treating
+not-a-number as equal to itself.
+\end{sloppypar}
+
+\SOlevelC{Not stored, not enforced}\label{app:so:a4:notstored}
+
+Five things a reader may expect to find and will not. Each is deliberate, and
+each is argued for above.
+
+\begin{itemize}
+  \item \textbf{The requested sign.} Applied inside
+    \SOcode{Component.from\_raw} and consumed there; no object holds it and
+    the file format does not carry it. The realized direction is recoverable
+    from the component's derivative; the requested one is not identifiable at
+    all (D4).
+  \item \textbf{An interaction factor's lengthscale.} The two unit-variance
+    factors of an \SOcode{Interaction} are drawn at a lengthscale, but only
+    their knots and values are saved, so \SOcode{load} rebuilds them with
+    \SOcode{ell} set to not-a-number. The pair's share survives; its
+    smoothness label does not.
+  \item \textbf{The relevance cutoff $\activeeps$.} Recorded on every
+    \SOcode{Labels} as \SOcode{active\_eps} and applied by nothing in the
+    package. \SOcode{Labels.active} is membership in $S$ (R29).
+  \item \textbf{Overlapping pairs.} Two blocks sharing a coordinate are
+    rejected at construction, and the opt-in argument that names the case does
+    not enable them either --- it raises, as not implemented. $\fstar$
+    separates into per-block maxima only when the blocks partition the
+    coordinates (D1).
+  \item \textbf{Rotation together with an interaction.} Rejected at
+    construction rather than given semantics (R39).
+\end{itemize}
