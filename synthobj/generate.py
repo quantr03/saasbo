@@ -22,9 +22,14 @@ Ruling R35 -- the manifest describes `<out>`, not this invocation: `main` writes
 *whole* `entries` list by scanning `<out>` itself, after generation finishes. Two runs into the
 same `--out` with different `--D`/`--seeds`/`--families` leave files from both; a manifest built
 only from "what this run touched" would describe a run, not a directory, and silently drop
-everything from an earlier invocation. Measured cost: `SyntheticObjective.load` is ~5 ms cold and
-~0.6 ms warm at D=100, so scanning a full 140-file grid costs about the same as building a single
-objective -- negligible next to actually building 140. None of this is wrapped around the
+everything from an earlier invocation. Measured cost: the original "~5 ms cold / ~0.6 ms warm"
+figure here did not reproduce (measured ~20 ms cold / ~4.4 ms warm at D=100 on `rotated_t45`,
+before the fix-round finding below). `SyntheticObjective.load` re-measures cheaper still after it:
+`__init__` used to run `_compute_scale`/`_compute_mu` unconditionally even when `load` was about to
+overwrite both, measured at ~3.06 ms of that ~4.4 ms warm figure (`objective.py`'s `__init__`
+docstring) -- skipping them when `labels` is supplied re-measures at ~20 ms cold / ~1.4 ms warm at
+D=100 on `rotated_t45`. Scanning a full 140-file grid still costs about the same as building a
+single objective -- negligible next to actually building 140. None of this is wrapped around the
 generation loop's own `load` call on a stem this run explicitly asked to skip-and-reuse: that
 failure must reach the user, with `--overwrite` as the stated repair, not vanish into a manifest
 that still claims success.
