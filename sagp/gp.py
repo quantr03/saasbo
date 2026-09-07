@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import math
 import time
+import warnings
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from functools import partial
 
 import jax
@@ -40,6 +41,7 @@ from scipy.optimize import brentq
 from scipy.stats import qmc, spearmanr
 
 import saasgp
+from synthobj.families import noise_rng
 from synthobj.kernel import GL_NODES as _GL_NODES_NUMPY
 from synthobj.kernel import GL_WEIGHTS as _GL_WEIGHTS_NUMPY
 from synthobj.objective import ACTIVE_EPS
@@ -1278,4 +1280,104 @@ def manipulation_checks(readout: dict[str, object], labels: object) -> dict[str,
         "spearman_sobol_vs_s": float(spearmanr(sobol_hat, labels.s)[0]),
         "spearman_native_vs_sobol": float(spearmanr(native_median, sobol_hat)[0]),
         "amplitude_vs_realized": np.column_stack([stated[active], labels.s[active]]),
+    }
+
+
+# --- identification ---
+
+# SQ1: the thesis's first study fits one cell to a fixed Sobol design and reads off every summary
+# in one call, with no acquisition loop. `standardize` lives here rather than in `bo.py` (ruling
+# R11), since both this function and the loop need it and the loop already imports this module for
+# `fit`/`FittedGP`.
+
+
+def standardize(y: ArrayLike) -> tuple[np.ndarray, float, float]:
+    """Standardize `y` to zero mean, unit variance (ddof 0), and negate it: z = -(y - mean) / std.
+
+    The negation turns `synthobj`'s maximization convention into the one the vendored NUTS models
+    were written for -- `saasgp.py`/`saasbo.py` minimize -- applied once here rather than at every
+    call site. `mean` and `std` come back as plain Python floats, not numpy scalars, since
+    `identify` records them verbatim in a plain dict.
+    """
+    y = np.asarray(y)
+    mean, std = float(y.mean()), float(y.std())
+    return -(y - mean) / std, mean, std
+
+
+def identify(
+    objective: object,
+    cell: CellKey,
+    n: int,
+    seed: int,
+    *,
+    sobol_n: int = 2048,
+    **fit_kwargs: object,
+) -> dict[str, object]:
+    """SQ1: fit `cell` once to a fixed Sobol design of `objective` and flatten every readout and
+    diagnostic into one record -- no acquisition, no loop, just identification.
+
+    The design is one `n`-point scrambled Sobol sequence on [0,1]^`objective.D`, observed through
+    `objective.observe` with its own noise stream (`synthobj.families.noise_rng(seed, run=0)`) --
+    both seeded from `seed` alone, so two calls at the same `(objective, cell, n, seed)` fit the
+    same data and `samples` compares equal draw for draw. `qmc.Sobol`'s balance-property warning is
+    suppressed the way the reference suppresses it, since a caller-chosen `n` need not be a power
+    of two. `y` is standardized and negated by `standardize` before it reaches `fit`, as every cell
+    expects; the HMC key comes from `(seed, n)` salted by `0x1D` so it can collide with neither the
+    design's own Sobol seed nor `synthobj`'s own streams, which are seeded independently of it.
+
+    `**fit_kwargs` (`alpha`, `fixed_noise`, `nuts`, `thresholds`, `ell_prior`) reaches `fit`
+    verbatim, so the same design can be run through every cell and every sampler budget the study
+    needs without this function knowing about any of them. The record merges the run's identity
+    (`family`, `seed`, `cell` as `"structure/prior"`, `n`, `D`, the `alpha` actually used), the
+    fit's outcome (`status`, `status_reason`, `nuts_attempts`, and the retained attempt's
+    `Diagnostics`, prefixed `diag_`), the total wall time, the standardization constants, the
+    coordinate-level `readouts` (`native` and `share_hat` are per-sample and left out; their
+    summaries `native_median`/`p_active` are not), the ground truth (`labels_s`, `labels_g`,
+    `labels_active`), the `manipulation_checks` entries, and `samples`, the retained posterior
+    draws as numpy -- a plain `dict`, ready for a run log or an npz row with no schema of its own.
+    """
+    start = time.perf_counter()
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        X = qmc.Sobol(objective.D, scramble=True, seed=seed).random(n)
+    y = objective.observe(X, noise_rng(seed, run=0))
+    z, y_mean, y_std = standardize(y)
+
+    # 0x1D salts (seed, n) so this key can never collide with the design's own Sobol seed or with
+    # synthobj's own streams (`streams`, `noise_rng`), which are seeded independently of it.
+    key = jax.random.PRNGKey(int(np.random.SeedSequence([seed, n, 0x1D]).generate_state(1)[0]))
+    fitted = fit(X, z, key, cell, **fit_kwargs)
+    r = readouts(fitted, sobol_n=sobol_n)
+    checks = manipulation_checks(r, objective.labels)
+
+    diag = {f"diag_{field}": value for field, value in asdict(fitted.attempts[-1]).items()}
+    samples = {site: np.asarray(draws) for site, draws in fitted.samples.items()}
+    wall_s = time.perf_counter() - start
+
+    return {
+        "family": objective.labels.family,
+        "seed": seed,
+        "cell": "/".join(cell),
+        "n": n,
+        "D": objective.D,
+        "alpha": fit_kwargs.get("alpha", CELLS[cell].alpha_default),
+        "status": fitted.status,
+        "status_reason": fitted.status_reason,
+        "nuts_attempts": len(fitted.attempts),
+        **diag,
+        "wall_s": wall_s,
+        "y_mean": y_mean,
+        "y_std": y_std,
+        "native_median": r["native_median"],
+        "p_active": r["p_active"],
+        "sobol_hat": r["sobol_hat"],
+        "total_var_hat": r["total_var_hat"],
+        "active_neutral": r["active_neutral"],
+        "active_native": r["active_native"],
+        "labels_s": np.asarray(objective.labels.s),
+        "labels_g": np.asarray(objective.labels.g),
+        "labels_active": np.asarray(objective.labels.active),
+        **checks,
+        "samples": samples,
     }
