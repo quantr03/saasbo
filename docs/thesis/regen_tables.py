@@ -99,6 +99,16 @@ def fmt_shape(shape) -> str:
     return "(" + ", ".join(str(s) for s in shape) + ")"
 
 
+def fmt_signed(x: float, spec: str = ".4f") -> str:
+    """`x` formatted to `spec`, with a "-0.0000"-shaped result stripped to "0.0000": a value that
+    is zero only to floating-point epsilon (e.g. -2.2e-16) must not render as a *negative* zero,
+    which reads as a sign the underlying quantity does not actually have."""
+    s = f"{x:{spec}}"
+    if s.startswith("-") and float(s) == 0.0:
+        s = s[1:]
+    return s
+
+
 def ceil_pow10_label(x: float) -> str:
     """`x`'s magnitude as a power-of-ten ceiling, e.g. 3.2e-16 -> ``$<10^{-15}$``."""
     ax = abs(x)
@@ -207,16 +217,19 @@ def tab_families(outdir: Path, stats: dict) -> None:
         r"\toprule",
         row([
             "variant", "family", r"$|S|$", "shares", r"$\ell$", r"$n_{\text{pairs}}$",
-            r"$\gamma$", r"$\theta$", "generator", "monotone", r"$\knots$", r"noise\_sd",
+            r"$\gamma$", r"$\theta$", "generator", "monotone", r"$\knots$", code("noise_sd"),
         ]),
         r"\midrule",
     ]
     for variant, family, _overrides in STUDY_GRID:
         obj = make_family(variant, seed=0, D=20)
         spec = obj.spec
-        n_active = len(obj.labels.S)
+        S = list(obj.labels.S)
+        n_active = len(S)
         if spec.shares is None:
-            shares_str = r"$(1-\gamma)/|S|$"
+            # Equal split of (1 - gamma) / |S|; printed as the computed scalar (not the formula
+            # string) since all n_active shares are identical here -- reviewer ruling, fix round 1.
+            shares_str = f"{float(obj.labels.s[S][0]):.4f}"
         else:
             shares_str = fmt_tuple(spec.shares, ".2f")
         if isinstance(spec.ells, (int, float)):
@@ -375,7 +388,14 @@ def tab_anti_aligned(outdir: Path, stats: dict) -> None:
     mean_g = np.mean(rank_aligned, axis=0)
 
     rho_theory = spearmanr(theoretical, shares).correlation
-    rho_realized = spearmanr(mean_g, shares).correlation
+    # Two distinct "realized" statistics (reviewer ruling R16, fix round 1): the seed-mean vector
+    # correlated against s (n=6), and every individual (seed, rank) realized-g/s pair pooled into
+    # one sample (n=60) -- these are materially different numbers (-1.0 vs the pooled figure) and
+    # the pooled one is not recoverable from the "mean realized g" data column alone.
+    rho_seedmean = spearmanr(mean_g, shares).correlation
+    all_g = np.concatenate(rank_aligned)
+    all_s = np.tile(shares, len(rank_aligned))
+    rho_pooled = spearmanr(all_g, all_s).correlation
 
     lines = [
         r"\begin{tabular}{rrrrrrr}",
@@ -393,7 +413,12 @@ def tab_anti_aligned(outdir: Path, stats: dict) -> None:
         ]))
     lines.append(r"\midrule")
     lines.append(multicol_note(7, f"Spearman(theoretical, $s$) $= {rho_theory:.4f}$"))
-    lines.append(multicol_note(7, f"Spearman(pooled realized $g$, $s$) $= {rho_realized:.4f}$"))
+    lines.append(multicol_note(
+        7, f"Spearman of the seed-mean realized $g$ against $s$ ($n=6$) $= {rho_seedmean:.4f}$"
+    ))
+    lines.append(multicol_note(
+        7, f"Spearman over all sixty (seed, rank) realized pairs ($n=60$) $= {rho_pooled:.4f}$"
+    ))
     lines += [r"\bottomrule", r"\end{tabular}"]
     write_generated(outdir / "tab_anti_aligned.tex", [], lines)
 
@@ -402,33 +427,40 @@ def tab_anti_aligned(outdir: Path, stats: dict) -> None:
 # Table 6: tab_decoupled.tex
 # =================================================================================================
 
-_DECOUPLED_CELLS = [
-    ("strong-rough", 0.21, 0.08),
-    ("weak-rough", 0.04, 0.08),
-    ("strong-smooth", 0.21, 1.5),
-    ("weak-smooth", 0.04, 1.5),
-]
+def _decoupled_cell_name(s: float, ell: float, s_hi: float, ell_lo: float) -> str:
+    """"strong"/"weak" from `s` against the spec's own high share; "rough"/"smooth" from `ell`
+    against the spec's own low lengthscale -- so a relabeled or rescaled spec still names its
+    cells correctly rather than reproducing a hand-typed table."""
+    strength = "strong" if s == s_hi else "weak"
+    roughness = "rough" if ell == ell_lo else "smooth"
+    return f"{strength}-{roughness}"
 
 
 def tab_decoupled(outdir: Path, stats: dict) -> None:
     spec = FAMILIES["decoupled"](D=100)
     shares, ells = spec.shares, spec.ells
+    # Every distinct (s, ell) cell the spec actually uses, in a deterministic sorted order --
+    # never a hand-typed list, so a cell added to the spec cannot be silently dropped (reviewer
+    # ruling, fix round 1).
+    cells = sorted(set(zip(shares, ells)))
+    s_hi, ell_lo = max(shares), min(ells)
 
     # Total theoretical slope energy over all 8 active coordinates (each cell counted with its
     # multiplicity in the spec), so a cell's normalized share matches how Labels.g normalizes.
     total_energy = sum(s * 5.0 / (3.0 * ell**2 * kernel.v(ell)) for s, ell in zip(shares, ells))
 
     grid100 = get_grid100()
-    realized: dict[tuple[float, float], list[float]] = {(s, ell): [] for _, s, ell in _DECOUPLED_CELLS}
+    # `labels.s[coord]`/`labels.ell[coord]` are the exact `spec.shares[rank]`/`spec.ells[rank]`
+    # floats `families.build` passed straight through to `Component.from_raw` -- no arithmetic in
+    # between -- so exact equality (not a tolerance) is the correct match here, and a coordinate
+    # whose (s, ell) is not one of `cells` raises KeyError instead of being silently dropped.
+    realized: dict[tuple[float, float], list[float]] = {cell: [] for cell in cells}
     for seed in range(10):
         obj = grid100[("decoupled", seed)]
         labels = obj.labels
         for c in obj.components:
-            key = (round(float(labels.s[c.coord]), 6), round(float(labels.ell[c.coord]), 6))
-            for cell_key in realized:
-                if math.isclose(cell_key[0], key[0], abs_tol=1e-6) and math.isclose(cell_key[1], key[1], abs_tol=1e-6):
-                    realized[cell_key].append(float(labels.g[c.coord]))
-                    break
+            key = (float(labels.s[c.coord]), float(labels.ell[c.coord]))
+            realized[key].append(float(labels.g[c.coord]))
 
     lines = [
         r"\begin{tabular}{lrrrrr}",
@@ -437,7 +469,8 @@ def tab_decoupled(outdir: Path, stats: dict) -> None:
              r"mean realized $g$"]),
         r"\midrule",
     ]
-    for cell_name, s, ell in _DECOUPLED_CELLS:
+    for s, ell in cells:
+        cell_name = _decoupled_cell_name(s, ell, s_hi, ell_lo)
         energy = s * 5.0 / (3.0 * ell**2 * kernel.v(ell))
         share = energy / total_energy
         g_values = realized[(s, ell)]
@@ -553,7 +586,7 @@ def tab_rotation_angle(outdir: Path, stats: dict) -> None:
         r"\begin{tabular}{rrrrrrrr}",
         r"\toprule",
         row([r"$\theta$", r"$\gaxis$ min", r"$\gaxis$ median", r"$\gaxis$ max", r"$\kappa$ min",
-             r"$\kappa$ max", r"count($\kappa>1$)", r"max$|\mu|$"]),
+             r"$\kappa$ max", r"count($\kappa>1$)", r"$\max|\mu|$"]),
         r"\midrule",
     ]
     for theta in _ROTATION_ANGLES:
@@ -574,13 +607,20 @@ def tab_rotation_angle(outdir: Path, stats: dict) -> None:
         mu = np.array([o.mu for o in objs])
         lines.append(row([
             f"{theta:.0f}",
-            f"{gamma_axis.min():.4f}", f"{float(np.median(gamma_axis)):.4f}", f"{gamma_axis.max():.4f}",
+            fmt_signed(gamma_axis.min()), fmt_signed(float(np.median(gamma_axis))), fmt_signed(gamma_axis.max()),
             f"{kappa.min():.4f}", f"{kappa.max():.4f}",
             str(int(np.sum(kappa > 1.0))),
             f"{np.max(np.abs(mu)):.4f}",
         ]))
     lines += [r"\bottomrule", r"\end{tabular}"]
-    write_generated(outdir / "tab_rotation_angle.tex", [], lines)
+    write_generated(
+        outdir / "tab_rotation_angle.tex",
+        [r"% theta in {0, 90} is exact for kappa (scale == 1.0 at every one of seeds 0-9)."
+         r" gamma_axis there is exact only to floating-point epsilon, never a genuinely negative"
+         r" quantity: at theta=90, 8 of 10 seeds are exactly 0.0, one is +1.11e-16, one is"
+         r" -2.22e-16; at theta=0, all ten seeds measure >= 0.0 here."],
+        lines,
+    )
 
 
 # =================================================================================================
@@ -600,8 +640,8 @@ def tab_grid_summary(outdir: Path, stats: dict) -> None:
     lines = [
         r"\begin{tabular}{lrlrrr}",
         r"\toprule",
-        row(["variant", r"$\knots$", r"$\fstar$ median [min, max]", r"QMC $\Varhat$ min",
-             r"QMC $\Varhat$ max", r"max$|\Ehat|$"]),
+        row(["variant", r"$\knots$", r"$\fstar$ median [min, max]", r"QMC $\Varnu$ min",
+             r"QMC $\Varnu$ max", r"$\max|\Enu|$"]),
         r"\midrule",
     ]
     worst_var_dev = 0.0
@@ -640,7 +680,13 @@ def tab_grid_summary(outdir: Path, stats: dict) -> None:
         f"{fine_obj.f_star:.4f} [---, ---]", f"{fine_var:.4f}", f"{fine_var:.4f}", f"{abs(fine_mean):.2e}",
     ]))
     lines += [r"\bottomrule", r"\end{tabular}"]
-    write_generated(outdir / "tab_grid_summary.tex", [], lines)
+    write_generated(
+        outdir / "tab_grid_summary.tex",
+        [r"% Var_nu/E_nu columns are QMC estimates of the TRUE nu-moments -- a fresh"
+         r" qmc.Sobol(d=100, scramble=True, seed=0).random(2**16) per objective -- not the"
+         r" 64-node nu-hat quadrature (Varhat/Ehat) tab_orthogonality uses"],
+        lines,
+    )
 
     stats["worst_var_dev"] = worst_var_dev
     stats["worst_mean"] = worst_mean
@@ -679,7 +725,13 @@ def tab_orthogonality(outdir: Path, stats: dict) -> None:
                 orth_i = float((w2 * H * fi_vals[:, None]).sum())
                 orth_j = float((w2 * H * fj_vals[None, :]).sum())
                 max_orth = max(max_orth, abs(orth_i), abs(orth_j))
-                max_var = max(max_var, abs(inter.nu_var() - inter.c**2))
+                # Var_hat h from H/w2 directly (the same 64-node quadrature the row two cells
+                # over already computes on), NOT via Interaction.nu_var() -- that method is the
+                # algebraic factorization c**2 * Var(u_i) * Var(u_j), i.e. the identity this row
+                # claims to check, not an independent measurement of it (reviewer ruling).
+                mean_h = float((w2 * H).sum())
+                var_h = float((w2 * H**2).sum() - mean_h**2)
+                max_var = max(max_var, abs(var_h - inter.c**2))
 
     lines = [
         r"\begin{tabular}{lrl}",
@@ -720,9 +772,20 @@ _REOPT_OPTIONS = {"ftol": 1e-18, "gtol": 1e-14, "maxiter": 10000}
 
 def _reopt_stats(block_iter) -> tuple[int, int, float, float]:
     """`block_iter` yields (value_and_grad_fn, x0) pairs; returns
-    (n_blocks, n_exact_zero_gain, max_gain, max_projected_grad_norm_at_x0)."""
+    (n_blocks, n_exact_zero_gain, max_gain, max_projected_grad_norm_at_x0).
+
+    `gain` is `vg_fn(result.x)[0] - value0`: `vg_fn` is called fresh at the point L-BFGS-B
+    reports, never `-result.fun` (scipy's own tracked value at that point). The two are not
+    always bit-identical -- one block was found where `result.x` is bit-identical to `x0` yet
+    `-result.fun` differs from a fresh `vg_fn(result.x)` by a ulp, which is scipy's internal
+    bookkeeping, not the objective (reviewer finding, fix round 1: 13 of the module's original 15
+    "non-zero" gains were negative one-ulp artifacts of exactly this). `max_gain` starts at
+    `None` and is set from the first computed gain rather than seeded at `0.0`: if every real gain
+    happens to be <= 0 (as here), flooring at a literal `0.0` would silently misreport the true
+    (negative) worst case as an implausible exact zero.
+    """
     n = n_exact_zero = 0
-    max_gain = 0.0
+    max_gain: float | None = None
     max_proj = 0.0
     for vg_fn, x0 in block_iter:
         n += 1
@@ -735,11 +798,12 @@ def _reopt_stats(block_iter) -> tuple[int, int, float, float]:
 
         result = minimize(negated, x0, jac=True, method="L-BFGS-B",
                            bounds=[(0.0, 1.0), (0.0, 1.0)], options=_REOPT_OPTIONS)
-        gain = -float(result.fun) - value0
+        reopt_value = float(vg_fn(np.asarray(result.x))[0])
+        gain = reopt_value - value0
         if gain == 0.0:
             n_exact_zero += 1
-        max_gain = max(max_gain, gain)
-    return n, n_exact_zero, max_gain, max_proj
+        max_gain = gain if max_gain is None else max(max_gain, gain)
+    return n, n_exact_zero, max_gain if max_gain is not None else 0.0, max_proj
 
 
 def _interaction_block_iter(grid100):
@@ -815,7 +879,7 @@ def tab_fstar_reopt(outdir: Path, stats: dict) -> None:
 
 def collect_test_count() -> int:
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "tests"],
         cwd=str(REPO_ROOT), capture_output=True, text=True,
     )
     for line in reversed(result.stdout.splitlines()):
@@ -873,7 +937,7 @@ def _peak_rss_mib() -> float:
 
 
 def tab_environment(outdir: Path, stats: dict) -> None:
-    get_grid100()  # ensure _grid100_build_seconds is set, whichever table built it first
+    grid100 = get_grid100()  # ensure _grid100_build_seconds is set, whichever table built it first
     import scipy
 
     lines = [
@@ -881,7 +945,7 @@ def tab_environment(outdir: Path, stats: dict) -> None:
         r"\toprule",
         row(["quantity", "value"]),
         r"\midrule",
-        row(["grid build wall time (140 objects, D=100)", f"{_grid100_build_seconds:.2f} s"]),
+        row([f"grid build wall time ({len(grid100)} objects, D=100)", f"{_grid100_build_seconds:.2f} s"]),
         row(["peak RSS", f"{_peak_rss_mib():.1f} MiB"]),
         row(["Python", esc(sys.version.split()[0])]),
         row(["numpy", esc(np.__version__)]),
