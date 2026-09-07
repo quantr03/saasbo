@@ -16,7 +16,7 @@ import pytest
 from synthobj import kernel
 from synthobj.component import Component
 from synthobj.draws import gp_draw
-from synthobj.families import make_family
+from synthobj.families import STUDY_GRID, FamilySpec, make_family
 from synthobj.rotation import rotated_block_stats
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -107,6 +107,39 @@ def test_two_part_rotation_identity() -> None:
         var_phi, var_a, var_b = rotated_block_stats(by_coord[i], by_coord[j], obj.rotation)
         remainder_sum += var_phi - var_a - var_b
     assert labels.gamma_axis == pytest.approx(labels.scale**2 * remainder_sum, abs=1e-10)
+
+
+@pytest.mark.slow
+def test_dense_weak_x_star_is_a_corner_on_the_archived_grid() -> None:
+    """`dense_weak`'s recorded maximizer is a cube corner at every seed of the archived grid.
+
+    Pins the measurement A2's `dense_weak` entry states (fix round 1, review Minor 1). Monotone
+    grid values do not *prove* an endpoint maximum -- `Component` interpolates with
+    `CubicSpline(bc_type="not-a-knot")`, which is not monotonicity-preserving, and
+    `draw_until_monotone` constrains only the grid values -- so the appendix states it as a
+    property of the archived grid and this test is what makes that statement checkable.
+
+    Both directions must occur, which is the observable consequence of `_draw_component`'s random
+    per-coordinate sign: a build that collapsed every component to one direction would put every
+    coordinate of `x_star` at the same endpoint and still pass the corner assertion alone.
+
+    Seeds 0-9 and the study's own dimension: `D` is left at `make_family`'s default, which is
+    `FamilySpec.D = 100`, the dimension the archived grid is built at and the one A2 quotes as
+    `\\SOnumStudyD`. Builds ten dense D=100 objectives, hence `slow`.
+    """
+    variant = next(name for name, family, _ in STUDY_GRID if family == "dense_weak")
+    for seed in range(10):
+        obj = make_family(variant, seed=seed)
+        assert obj.D == FamilySpec.D
+        x_star = obj.labels.x_star
+        assert x_star.shape == (obj.D,)
+        assert np.all((x_star == 0.0) | (x_star == 1.0)), (
+            f"seed {seed}: interior maximizer at coordinates "
+            f"{np.flatnonzero((x_star != 0.0) & (x_star != 1.0)).tolist()}"
+        )
+        assert (x_star == 0.0).any() and (x_star == 1.0).any(), (
+            f"seed {seed}: every coordinate at the same endpoint"
+        )
 
 
 @pytest.mark.slow

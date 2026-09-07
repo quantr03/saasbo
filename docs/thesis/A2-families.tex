@@ -49,7 +49,7 @@ brief's own terms; and what the archived grid measured on it.
   \centering
   \caption[The study variants and their parameters]{
   The $\SOnumVariants$ study variants and their parameters. Generated from
-  \SOcode{FAMILIES} and \SOcode{STUDY\_GRID} by \SOcode{regen\_tables.py}, so
+  \SOcode{FAMILIES} and \SOcode{STUDY\_GRID} by \SOfile{regen\_tables.py}, so
   no parameter printed here can drift from the specification the study built.
   Exact: every column is a field of the \SOcode{FamilySpec} the registry
   returns, or --- for $\knots$ --- the length of the grid that spec's components
@@ -75,9 +75,9 @@ brief's own terms; and what the archived grid measured on it.
   file's own header comment: the $\Varnu$ and $\Enu$ columns are QMC estimates
   of the \emph{true} $\refnu$-moments --- a fresh scrambled Sobol' sample per
   objective --- ``not the $64$-node $\nuhat$ quadrature ($\Varhat$/$\Ehat$)
-  \SOfile{tab\_orthogonality} uses''. Across the whole grid the worst deviation
-  of $\Varnu f$ from one is $\SOnumWorstVar$ and the worst $|\Enu f|$ is
-  $\SOnumWorstMean$. The final row repeats one rotated objective at a
+  \SOcode{tab\_orthogonality} uses''. Across the whole grid the worst deviation
+  of $\Varnu f$ from one is \SOnumWorstVar{} and the worst $|\Enu f|$ is
+  \SOnumWorstMean. The final row repeats one rotated objective at a
   sixteen-fold larger Sobol' sample, so the residual visible in the
   \SOcode{rotated\_t45} row above can be read as sampling error rather than a
   defect in the objective.}\label{app:so:a2:tab:grid}
@@ -184,9 +184,11 @@ subtract; there are no pairs, $\gamma=0$, the generator is Mat\'ern, there is no
 monotone rejection, and the grid is the unit-interval one.
 Table~\ref{app:so:a2:tab:families} gives the shares and lengthscales per rank
 rather than as one broadcast value, because a cell needs a specific share paired
-with a specific lengthscale and not merely the right multiset --- the
-constructor rejects a shares tuple whose length does not match $|S|$ for exactly
-that reason. Since shares and lengthscales are assigned by rank, cell membership
+with a specific lengthscale and not merely the right multiset. The check is at
+build time rather than in the specification: \SOcode{FamilySpec} is a plain
+frozen record that validates nothing, and it is
+\SOcode{families.\_resolve\_shares}, called from \SOcode{build}, that rejects a
+shares tuple whose length does not match $|S|$. Since shares and lengthscales are assigned by rank, cell membership
 is fixed while the coordinates filling the cells are redrawn at every seed.
 
 \textbf{What it isolates.} The design brief's ``the two senses of relevance
@@ -287,8 +289,8 @@ per-seed realized ranking is therefore unreliable, and no analysis in the thesis
 should treat a single seed's realized $g$ order as the family's ground truth;
 the reversal is a property of the design and of the seed-averaged behaviour, not
 of every draw. This is precisely why the family's acceptance criterion is
-stated on the theoretical shares plus a pooled realized check rather than
-per seed (design decision R13,~\ref{app:so:a4}). Its row of
+stated on the theoretical shares plus the seed-averaged realized check rather
+than per seed (design decision R13,~\ref{app:so:a4}). Its row of
 Table~\ref{app:so:a2:tab:grid} gives $\fstar$ and the invariants.
 
 \begin{table}[htbp]
@@ -531,14 +533,18 @@ same share $1/D$, all at one large lengthscale; no pairs, $\gamma=0$, Mat\'ern
 generator, and --- alone among the fourteen --- the monotone rejection wrapper
 is on, so each component is redrawn until its grid values are monotone
 (\ref{app:so:a1:generators}). The direction is drawn per coordinate, so a
-component is as likely to be decreasing as increasing. A component whose values
-rise or fall monotonically across the grid takes its largest value at an end of
-the interval, and on the archived grid this holds without exception: at every
-seed the maximizer $x^\star$ the labels record is a corner of the cube, every
-coordinate at exactly $0$ or $1$, with both directions represented. The explicit
-direction draw is in fact redundant in law, as shown
+component is as likely to be decreasing as increasing. A component whose grid
+values rise or fall monotonically is expected to take its largest value at an
+end of the interval, though the rejection alone does not guarantee it: what is
+stored is a not-a-knot cubic spline through those values, which may overshoot
+between knots, and the rejection constrains only the knots. On the archived grid
+it nevertheless holds without exception --- at every seed the maximizer
+$x^\star$ the labels record is a corner of the cube, every coordinate at exactly
+$0$ or $1$, and both endpoints occur --- which is the measurement
+\SOtest{test\_dense\_weak\_x\_star\_is\_a\_corner\_on\_the\_archived\_grid}
+pins. The explicit direction draw is in fact redundant in law, as shown
 in~\ref{app:so:a1:generators} --- the rejection already accepts either direction
---- so the corner structure follows from the monotonicity and not from the coin.
+--- so the mix of endpoints is a property of the rejection, not of the coin.
 
 This is the one variant whose row in Table~\ref{app:so:a2:tab:families} is not
 the study's own configuration: $|S|$ and the share both track $D$, and that
