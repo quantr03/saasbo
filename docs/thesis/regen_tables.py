@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import functools
 import hashlib
 import json
 import math
@@ -213,20 +214,25 @@ def tab_v_ell(outdir: Path, stats: dict) -> None:
 
 
 # =================================================================================================
-# Table 2: tab_families.tex
+# Table 2: tab_families.tex + tab_families_flags.tex
 # =================================================================================================
 
+_FAMILIES_HEADER = [
+    f"% built at D={TABLE_D} per variant (family shape is D-invariant; dense_weak's |S|"
+    " equals D here)"
+]
 
-def tab_families(outdir: Path, stats: dict) -> None:
-    lines = [
-        r"\begin{tabular}{llrllrrrlcrr}",
-        r"\toprule",
-        row([
-            "variant", "family", r"$|S|$", "shares", r"$\ell$", r"$n_{\text{pairs}}$",
-            r"$\gamma$", r"$\theta$", "generator", "monotone", r"$\knots$", code("noise_sd"),
-        ]),
-        r"\midrule",
-    ]
+
+@functools.cache
+def _families_rows() -> tuple[tuple[str, ...], ...]:
+    """One tuple per study variant: every cell the two family tables print, built once.
+
+    `tab_families` and `tab_families_flags` are the same fourteen rows cut into a shape column
+    group and a flag column group (ruling R26: the single twelve-column table was 165 pt wider
+    than the text block even at \\tiny). They share this builder so the two halves cannot drift
+    from each other or from `FAMILIES`/`STUDY_GRID`.
+    """
+    rows = []
     for variant, family, _overrides in STUDY_GRID:
         obj = make_family(variant, seed=0, D=TABLE_D)
         spec = obj.spec
@@ -242,21 +248,51 @@ def tab_families(outdir: Path, stats: dict) -> None:
             ells_str = f"{float(spec.ells):.2f}"
         else:
             ells_str = fmt_tuple(spec.ells, ".2f")
-        theta_str = "---" if spec.theta_deg is None else f"{spec.theta_deg:.0f}"
-        monotone_str = "yes" if spec.monotone else "no"
-        knots = obj.components[0].grid.size
-        lines.append(row([
-            code(variant), esc(family), str(n_active), shares_str, ells_str, str(spec.n_pairs),
-            f"{spec.gamma:.2f}", theta_str, code(spec.generator), monotone_str, str(knots),
-            f"{spec.noise_sd:.2f}",
-        ]))
+        rows.append((
+            code(variant), esc(family), str(n_active), shares_str, ells_str,
+            str(spec.n_pairs), f"{spec.gamma:.2f}",
+            "---" if spec.theta_deg is None else f"{spec.theta_deg:.0f}",
+            code(spec.generator), "yes" if spec.monotone else "no",
+            str(obj.components[0].grid.size), f"{spec.noise_sd:.2f}",
+        ))
+    return tuple(rows)
+
+
+def tab_families(outdir: Path, stats: dict) -> None:
+    """Shape half: what each variant's main effects look like.
+
+    `shares` and `$\\ell$` are `p{}` columns, not `l`: `decoupled` and `anti_aligned` print
+    eight- and six-entry tuples there, and as unbreakable `l` columns those two rows alone kept
+    this half 140pt wider than the text block even after the split. Wrapped at the spaces the
+    tuples already contain, the table fits at \\footnotesize.
+    """
+    lines = [
+        r"\begin{tabular}{llrp{2.9cm}p{2.9cm}}",
+        r"\toprule",
+        row(["variant", "family", r"$|S|$", "shares", r"$\ell$"]),
+        r"\midrule",
+    ]
+    for variant, family, n_active, shares, ells, *_flags in _families_rows():
+        lines.append(row([variant, family, n_active, shares, ells]))
     lines += [r"\bottomrule", r"\end{tabular}"]
-    write_generated(
-        outdir / "tab_families.tex",
-        [f"% built at D={TABLE_D} per variant (family shape is D-invariant; dense_weak's |S|"
-         " equals D here)"],
-        lines,
-    )
+    write_generated(outdir / "tab_families.tex", _FAMILIES_HEADER, lines)
+
+
+def tab_families_flags(outdir: Path, stats: dict) -> None:
+    """Flag half: the structural switches, one row per variant, keyed by the same variant name."""
+    lines = [
+        r"\begin{tabular}{lrrrlcrr}",
+        r"\toprule",
+        row([
+            "variant", r"$n_{\text{pairs}}$", r"$\gamma$", r"$\theta$", "generator", "monotone",
+            r"$\knots$", code("noise_sd"),
+        ]),
+        r"\midrule",
+    ]
+    for variant, _family, _n_active, _shares, _ells, *flags in _families_rows():
+        lines.append(row([variant, *flags]))
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    write_generated(outdir / "tab_families_flags.tex", _FAMILIES_HEADER, lines)
 
 
 # =================================================================================================
@@ -300,8 +336,15 @@ def tab_labels_fields(outdir: Path, stats: dict) -> None:
             f"missing from dict: {sorted(have - want)}; stale entries in dict: {sorted(want - have)}"
         )
 
+    # The two prose-ish columns are `p{}`, not `l` (ruling R26, task-6 item 0f): `type` carries
+    # annotation strings as long as "tuple[tuple[int, int], ...]" and `meaning` full sentences,
+    # and as unbreakable `l` columns they forced A3 to place the table at \tiny with \tabcolsep
+    # 1pt just to fit a 345pt block. Wrapped, it fits at \footnotesize with normal column
+    # separation. The widths are the narrowest that still take each column's longest
+    # unbreakable token -- "tuple[tuple[int," for `type` -- without an overfull box inside the
+    # cell; `field` and `shape` stay `l` because both are short and must not wrap.
     lines = [
-        r"\begin{tabular}{lllp{6.5cm}}",
+        r"\begin{tabular}{lp{2.8cm}lp{4.8cm}}",
         r"\toprule",
         row(["field", "type", "shape", "meaning"]),
         r"\midrule",
@@ -358,13 +401,11 @@ def tab_npz_json_layout(outdir: Path, stats: dict) -> None:
     lines.append(multicol_note(4, r"\textbf{top-level JSON keys} (Python type of the stored value)"))
     for key, ta, tb in json_rows:
         lines.append(row([code(key), esc(ta), esc(tb), "---"]))
-    lines.append(r"\midrule")
-    lines.append(multicol_note(
-        4,
-        r"Note: \SOcode{active}/\SOcode{s}/\SOcode{ell} in the npz are ordered by component "
-        r"RANK (build order), one entry per active coordinate -- not by coordinate index the way "
-        r"the JSON-side \SOcode{Labels.active}/\SOcode{s}/\SOcode{ell} are (length D, 0/NaN off S).",
-    ))
+    # The rank-order-versus-coordinate-order note used to be a final \multicolumn{4}{l} row.
+    # A `l` multicolumn cannot wrap, so that one sentence made the table 806pt wide against a
+    # 345pt block -- 580pt of the overhang was the note alone (ruling R26, task-6 item 0f). It is
+    # prose, not a measurement, so it now lives in A3's caption for this table, where it wraps;
+    # A3's "Rank order versus coordinate order" paragraph states the same rule at length.
     lines += [r"\bottomrule", r"\end{tabular}"]
     write_generated(outdir / "tab_npz_json_layout.tex", [], lines)
 
@@ -698,11 +739,15 @@ def _qmc_var_mean(obj: SyntheticObjective, D: int, n_points: int, seed: int = 0)
 def tab_grid_summary(outdir: Path, stats: dict) -> None:
     grid100 = get_grid100()
 
+    # Headers are abbreviated to their symbols (ruling R26, task-6 item 0f): spelled out, the
+    # header row alone made the table 71pt wider than the text block. A2's caption carries the
+    # legend that expands them, and the file's header comment below still states in full what
+    # the two moment columns are estimates of.
     lines = [
         r"\begin{tabular}{lrlrrr}",
         r"\toprule",
-        row(["variant", r"$\knots$", r"$\fstar$ median [min, max]", r"QMC $\Varnu$ min",
-             r"QMC $\Varnu$ max", r"$\max|\Enu|$"]),
+        row(["variant", r"$\knots$", r"$\fstar$ med.\ [min, max]", r"$\Varnu$ min",
+             r"$\Varnu$ max", r"$\max|\Enu|$"]),
         r"\midrule",
     ]
     worst_var_dev = 0.0
@@ -731,13 +776,16 @@ def tab_grid_summary(outdir: Path, stats: dict) -> None:
             f"{var_arr.min():.4f}", f"{var_arr.max():.4f}", f"{np.max(np.abs(mean_arr)):.2e}",
         ]))
 
-    # Extra row: convergence check at 2**20 for rotated_t45 seed 6 alone.
-    fine_obj = grid100[("rotated_t45", 6)]
+    # Extra row: convergence check at 2**20 for rotated_t45 seed 6 alone. The seed is named in
+    # the header comment and in A2's caption rather than in the row label, which spelled out
+    # cost 27pt of a table already over the text block (ruling R26, task-6 item 0f).
+    fine_seed = 6
+    fine_obj = grid100[("rotated_t45", fine_seed)]
     fine_var, fine_mean = _qmc_var_mean(fine_obj, 100, 2**20)
     knots_fine = fine_obj.components[0].grid.size
     lines.append(r"\midrule")
     lines.append(row([
-        code("rotated_t45") + " (seed 6, $N=2^{20}$)", str(knots_fine),
+        code("rotated_t45") + ", $N=2^{20}$", str(knots_fine),
         f"{fine_obj.f_star:.4f} [---, ---]", f"{fine_var:.4f}", f"{fine_var:.4f}", f"{abs(fine_mean):.2e}",
     ]))
     lines += [r"\bottomrule", r"\end{tabular}"]
@@ -745,7 +793,11 @@ def tab_grid_summary(outdir: Path, stats: dict) -> None:
         outdir / "tab_grid_summary.tex",
         [r"% Var_nu/E_nu columns are QMC estimates of the TRUE nu-moments -- a fresh"
          r" qmc.Sobol(d=100, scramble=True, seed=0).random(2**16) per objective -- not the"
-         r" 64-node nu-hat quadrature (Varhat/Ehat) tab_orthogonality uses"],
+         r" 64-node nu-hat quadrature (Varhat/Ehat) tab_orthogonality uses",
+         "% column headers are abbreviated: Var_nu min/max and max|E_nu| are those QMC"
+         " estimates over the ten seeds, f* med. [min, max] the median and range of f_star"
+         f" over them; the final row is rotated_t45 at seed {fine_seed} alone, re-measured at"
+         " N = 2**20"],
         lines,
     )
 
@@ -893,8 +945,11 @@ def _rotated_block_iter(grid100):
                 yield (lambda p, f_a=f_a, f_b=f_b, rot=obj.rotation: rotated_block_value_and_grad(f_a, f_b, rot, p)), x0
 
 
+_UNPAIRED_GRID_N = 10**5
+
+
 def _unpaired_component_gap(grid100) -> tuple[int, float]:
-    xs = np.linspace(0.0, 1.0, 10**5)
+    xs = np.linspace(0.0, 1.0, _UNPAIRED_GRID_N)
     n = 0
     max_gap = 0.0
     for variant, _family, _overrides in STUDY_GRID:
@@ -928,11 +983,25 @@ def tab_fstar_reopt(outdir: Path, stats: dict) -> None:
         row(["rotated blocks", str(n_r), str(zero_r), f"{gain_r:.2e}", f"{proj_r:.2e}"]),
         row(["all paired blocks", str(n_all), str(zero_all), f"{gain_all:.2e}", f"{proj_all:.2e}"]),
         r"\midrule",
-        row([r"1-D unpaired components ($|f_i(x_i^\star) - \max_{\text{grid}} f_i|$)", str(n_1d), "---", f"{max_gap_1d:.2e}", "---"]),
+        row([r"1-D components", str(n_1d), "---", f"{max_gap_1d:.2e}", "---"]),
         r"\bottomrule",
         r"\end{tabular}",
     ]
-    write_generated(outdir / "tab_fstar_reopt.tex", [], lines)
+    # The last row's label is deliberately bare (ruling R21, task-6 item 0d). Spelled out as
+    # "1-D unpaired components ($|f_i(x_i^\star) - \max_{\text{grid}} f_i|$)" it alone made the
+    # table 446.9pt wide against a 345pt text block; even the brief's shorter suggestion,
+    # "1-D components, $|f_i(x_i^\star)-\max f_i|$", still measures 390.5pt, because the formula
+    # costs 67pt in a column the other four leave 22pt for. Naming the row by block type, as the
+    # three rows above it are named, is what fits (323.3pt at \small). What the label leaves out
+    # -- that these are the components in no pair, and what exactly is differenced against what
+    # -- is in the header comment below and spelled out in A1's caption.
+    write_generated(
+        outdir / "tab_fstar_reopt.tex",
+        [f"% last row: the {n_1d} components in no interaction and no rotation pair; the value is"
+         f" |f_i(x_i*) - max_grid f_i|, Component.argmax's closed-form maximum against the max"
+         f" over a {_UNPAIRED_GRID_N}-point uniform grid on [0, 1]"],
+        lines,
+    )
 
 
 # =================================================================================================
@@ -1070,6 +1139,7 @@ def report_manifest_hash_match(grid100: dict) -> None:
 TABLE_REGISTRY: list[tuple[str, "callable"]] = [
     ("tab_v_ell.tex", tab_v_ell),
     ("tab_families.tex", tab_families),
+    ("tab_families_flags.tex", tab_families_flags),
     ("tab_labels_fields.tex", tab_labels_fields),
     ("tab_npz_json_layout.tex", tab_npz_json_layout),
     ("tab_anti_aligned.tex", tab_anti_aligned),

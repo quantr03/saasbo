@@ -42,25 +42,47 @@ about which coordinates the objective actually varies in. Only
 \SOcode{dense\_weak} makes the two disagree, and that disagreement is its point.
 
 Each entry below has three paragraphs: the parameters, read off
-Table~\ref{app:so:a2:tab:families}; what the variant isolates, in the design
-brief's own terms; and what the archived grid measured on it.
+Tables~\ref{app:so:a2:tab:families}
+and~\ref{app:so:a2:tab:families-flags}; what the variant isolates, in the
+design brief's own terms; and what the archived grid measured on it.
 
 \begin{table}[htbp]
   \centering
-  \caption[The study variants and their parameters]{
-  The $\SOnumVariants$ study variants and their parameters. Generated from
+  \caption[The study variants: main effects]{
+  The $\SOnumVariants$ study variants, main effects: which coordinates carry
+  one and how the variance budget is split among them. The same variants'
+  structural switches --- pairs, $\gamma$, $\theta$, generator, monotone,
+  $\knots$, noise --- are in
+  Table~\ref{app:so:a2:tab:families-flags}; the two halves are one twelve-column
+  table cut in two so that each fits a text block, and are generated together
+  from the same rows. Generated from
   \SOcode{FAMILIES} and \SOcode{STUDY\_GRID} by \SOfile{regen\_tables.py}, so
   no parameter printed here can drift from the specification the study built.
   Exact: every column is a field of the \SOcode{FamilySpec} the registry
-  returns, or --- for $\knots$ --- the length of the grid that spec's components
-  are drawn on; no draw enters. Protocol, from the file's own header comment:
+  returns; no draw enters. Protocol, from the file's own header comment:
   built at $D=\SOnumTableD$ per variant, ``family shape is $D$-invariant;
   \SOcode{dense\_weak}'s $|S|$ equals $D$ here''. Every row but
   \SOcode{dense\_weak}'s is therefore the study's configuration verbatim at its
   own $D=\SOnumStudyD$; \SOcode{dense\_weak}'s $|S|$ and its share scale with
   $D$, as its entry explains.}\label{app:so:a2:tab:families}
-  \tiny\setlength{\tabcolsep}{1pt}
+  \small\setlength{\tabcolsep}{3pt}
   \input{\SOroot/tables/tab_families}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption[The study variants: structural switches]{
+  The same $\SOnumVariants$ variants, structural switches: the number of
+  interaction pairs, the interaction budget $\gamma$, the rotation angle
+  $\theta$ (``---'' where there is no rotation), the component generator,
+  whether the monotone-rejection wrapper was used, the knot count $\knots$ ---
+  the length of the grid that variant's components are drawn on --- and the
+  observation noise. Same source, same generator and same
+  $D=\SOnumTableD$ protocol as
+  Table~\ref{app:so:a2:tab:families}, whose caption states them
+  once.}\label{app:so:a2:tab:families-flags}
+  \small\setlength{\tabcolsep}{3pt}
+  \input{\SOroot/tables/tab_families_flags}
 \end{table}
 
 \begin{table}[htbp]
@@ -77,7 +99,11 @@ brief's own terms; and what the archived grid measured on it.
   objective --- ``not the $64$-node $\nuhat$ quadrature ($\Varhat$/$\Ehat$)
   \SOcode{tab\_orthogonality} uses''. Across the whole grid the worst deviation
   of $\Varnu f$ from one is \SOnumWorstVar{} and the worst $|\Enu f|$ is
-  \SOnumWorstMean. The final row repeats one rotated objective at a
+  \SOnumWorstMean. The column headers are abbreviated: $\knots$ is the knot
+  count, ``$\fstar$ med.\ [min, max]'' the median of $\fstar$ over the ten
+  seeds with their range beside it, and the last three columns those QMC
+  estimates over the same ten seeds. The final row repeats one rotated
+  objective --- \SOcode{rotated\_t45} at seed $6$ --- at a
   sixteen-fold larger Sobol' sample, so the residual visible in the
   \SOcode{rotated\_t45} row above can be read as sampling error rather than a
   defect in the objective.}\label{app:so:a2:tab:grid}
@@ -90,8 +116,9 @@ brief's own terms; and what the archived grid measured on it.
 \textbf{Parameters.} Three active coordinates carrying equal shares $1/|S|$,
 one lengthscale for all of them, no pairs, $\gamma=0$, no rotation, the
 Mat\'ern generator, no monotone rejection, and the unit-interval grid
-($\knots=\SOnumKnotsUnit$); Table~\ref{app:so:a2:tab:families} gives the
-values. $S$ is a fresh random subset at each seed, and its three coordinates
+($\knots=\SOnumKnotsUnit$); Tables~\ref{app:so:a2:tab:families}
+and~\ref{app:so:a2:tab:families-flags} give the values. $S$ is a fresh random
+subset at each seed, and its three coordinates
 are the first three \SOcode{aligned10} activates at the same seed, in the rank
 order shares and lengthscales are assigned in --- the nesting
 of~\ref{app:so:a3:seeding}. So the pair \SOcode{aligned3}/\SOcode{aligned10} is
@@ -236,7 +263,7 @@ the design asks of it: the disagreement it manufactures survives the draw.
 decreasing order and lengthscales decreasing alongside them --- the brief's
 ``weak ones rough'', taken to its limit, with one distinct lengthscale per
 coordinate. No pairs, $\gamma=0$, Mat\'ern, not monotone, unit grid;
-Table~\ref{app:so:a2:tab:families} and Table~\ref{app:so:a2:tab:anti-aligned}
+Tables~\ref{app:so:a2:tab:families-flags} and~\ref{app:so:a2:tab:anti-aligned}
 give the values.
 
 This is the one variant whose parameters the design brief's own family table no
@@ -355,7 +382,7 @@ blocks the other four rows sample over contribute nothing.
 \textbf{Parameters.} The same shape as \SOcode{interaction\_g0.00} --- five
 active coordinates, one lengthscale, two disjoint pairs, Mat\'ern, not
 monotone, unit grid --- with the interaction budget $\gamma$ raised to the
-value Table~\ref{app:so:a2:tab:families} prints, split equally between the two
+value Table~\ref{app:so:a2:tab:families-flags} prints, split equally between the two
 pairs as $s_{ij}=\gamma/n_{\text{pairs}}$ with $c_{ij}=\sqrt{s_{ij}}$
 (\eqref{app:so:a1:eq:hshare}). The main shares fall to $(1-\gamma)/|S|$ so that
 $\sum_i s_i+\gamma=1$ and $\Varnu f$ is still one
@@ -376,7 +403,7 @@ Table~\ref{app:so:a2:tab:grid}.
 \SOlevelC{\SOcode{interaction\_g0.25}}\label{app:so:a2:interaction-g0-25}
 
 \textbf{Parameters.} As \SOcode{interaction\_g0.10} with $\gamma$ at the next
-value in Table~\ref{app:so:a2:tab:families}: five active coordinates, one
+value in Table~\ref{app:so:a2:tab:families-flags}: five active coordinates, one
 lengthscale, two disjoint pairs sharing $\gamma$ equally, main shares
 $(1-\gamma)/|S|$. Active set, pairs and raw draws are again unchanged from the
 rest of the sweep at the same seed.
@@ -393,7 +420,7 @@ Table~\ref{app:so:a2:tab:grid}.
 \SOlevelC{\SOcode{interaction\_g0.50}}\label{app:so:a2:interaction-g0-50}
 
 \textbf{Parameters.} As the rest of the sweep, with $\gamma$ at the value
-Table~\ref{app:so:a2:tab:families} prints: half the variance budget in the two
+Table~\ref{app:so:a2:tab:families-flags} prints: half the variance budget in the two
 pairs and half spread equally over the five main effects, each of which now
 carries a smaller share than its pair does.
 
@@ -440,7 +467,7 @@ explicit interaction: $\gamma$ is exactly zero and no \SOcode{Interaction}
 object is built at all, because with $\theta$ set the pairs are what the
 rotation acts on and the shares alone already sum to one. Every component sits
 on the extended grid, $\knots=\SOnumKnotsExt$ rather than $\SOnumKnotsUnit$
-(Table~\ref{app:so:a2:tab:families}), since a rotated coordinate's argument
+(Table~\ref{app:so:a2:tab:families-flags}), since a rotated coordinate's argument
 runs outside the unit interval (\eqref{app:so:a1:eq:next}).
 
 That last point has a consequence worth stating plainly, because it is easy to
@@ -472,8 +499,9 @@ the renormalization $\kappa$, are therefore inactive here.
 \SOlevelC{\SOcode{rotated\_t15}}\label{app:so:a2:rotated-t15}
 
 \textbf{Parameters.} As \SOcode{rotated\_t0} in every field but $\theta$, which
-Table~\ref{app:so:a2:tab:families} gives: ten coordinates, equal shares, one
-lengthscale, five disjoint rotated pairs, $\gamma$ exactly zero, extended grid.
+Tables~\ref{app:so:a2:tab:families}
+and~\ref{app:so:a2:tab:families-flags} give: ten coordinates, equal shares,
+one lengthscale, five disjoint rotated pairs, $\gamma$ exactly zero, extended grid.
 
 \textbf{What it isolates.} ``Axis alignment failing'' at a small angle. The
 function is still additive in a rotated basis and still exactly the same

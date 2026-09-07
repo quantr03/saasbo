@@ -167,7 +167,7 @@ Compare them field by field.
   is what distinguishes them from the same-named, rank-ordered members of the
   npz (Table~\ref{app:so:a3:tab:npz}). \SOcode{active\_eps} is recorded, never
   enforced.}\label{app:so:a3:tab:labels}
-  \tiny\setlength{\tabcolsep}{1pt}
+  \footnotesize\setlength{\tabcolsep}{3pt}
   \input{\SOroot/tables/tab_labels_fields}
 \end{table}
 
@@ -386,8 +386,12 @@ everything else, including the entire \SOcode{Labels} record.
   anything fixed; the two columns differ in exactly the places where those
   differ. The empty-shaped members of the rotated column are the interaction
   members of a variant that has no interactions, written at length zero rather
-  than omitted, so a reader can index them
-  unconditionally.}\label{app:so:a3:tab:npz}
+  than omitted, so a reader can index them unconditionally. Note:
+  \SOcode{active}, \SOcode{s} and \SOcode{ell} in the npz are ordered by
+  component \emph{rank} (build order), one entry per active coordinate --- not
+  by coordinate index the way the JSON-side \SOcode{Labels.active},
+  \SOcode{Labels.s} and \SOcode{Labels.ell} are (length $D$, $0$/NaN off
+  $S$).}\label{app:so:a3:tab:npz}
   \footnotesize\setlength{\tabcolsep}{4pt}
   \input{\SOroot/tables/tab_npz_json_layout}
 \end{table}

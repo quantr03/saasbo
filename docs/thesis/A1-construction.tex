@@ -792,9 +792,11 @@ error.
   the block at the point the tighter re-optimization returns, minus the value
   at the point already stored; the projected gradient is L-BFGS-B's own
   first-order criterion at that stored point, with a component pushing out of
-  an active bound zeroed. The last row is a different quantity: the
-  closed-form one-dimensional maximum against a dense grid maximum, which
-  bounds the grid and not
+  an active bound zeroed. The last row is a different quantity, over the
+  components that sit in no interaction and no rotation pair: it is
+  $|f_i(x_i^\star)-\max_{\text{grid}} f_i|$, \SOcode{Component.argmax}'s
+  closed-form one-dimensional maximum against the maximum over a dense uniform
+  grid, so it bounds the grid and not
   \SOcode{Component.argmax}.}\label{app:so:a1:tab:tab_fstar_reopt}
   \small\setlength{\tabcolsep}{3pt}
   \input{\SOroot/tables/tab_fstar_reopt}
