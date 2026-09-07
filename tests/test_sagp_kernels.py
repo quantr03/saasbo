@@ -28,11 +28,17 @@ import numpy as np
 import pytest
 
 import saasgp
+from synthobj.kernel import centered, normalized
 from synthobj.kernel import v as v_numpy
 
 D = 7
 CELL_KEYS = list(KERNELS)
 CELL_IDS = ["/".join(key) for key in CELL_KEYS]
+
+# The three cells built out of the centered component; ("product", "lengthscale") is pinned
+# against `saasgp.matern_kernel` instead.
+CENTERED_CELL_KEYS = [key for key in CELL_KEYS if key != ("product", "lengthscale")]
+CENTERED_CELL_IDS = ["/".join(key) for key in CENTERED_CELL_KEYS]
 
 # The lengthscales the brief exercises the centered component at: rough, middling and so smooth
 # that v(ell) is down at 0.015 and the centering is a near-total cancellation.
@@ -70,6 +76,26 @@ def _params() -> dict[str, jax.Array | float]:
 def _points(n: int, seed: int) -> jax.Array:
     """n points drawn uniformly from the unit cube [0,1]^D, the domain every cell assumes."""
     return jnp.asarray(np.random.default_rng(seed).uniform(0.0, 1.0, (n, D)))
+
+
+def _numpy_oracle(key, X, Z, params) -> np.ndarray:
+    """Cell `key` rebuilt one coordinate at a time out of `synthobj.kernel`, in numpy.
+
+    This is the file's only independent statement of *which* centering each cell uses:
+    `normalized` for the amplitude cells, where a_sq_i has to be component i's variance under
+    U[0,1]; plain `centered` at ell_i = rho_i^-0.5 for the lengthscale cell, whose shrinkage
+    lives in v(ell_i) and would be undone by dividing it out. Nothing else here can see those
+    two choices -- the JAX kernel and its `_diag_*` helper share them, so a flag flipped in both
+    cancels -- and nothing else pins the *sign* of the rho -> ell exponent.
+    """
+    X, Z = np.asarray(X), np.asarray(Z)
+    if key[1] == "amplitude":
+        a_sq, ell = np.asarray(params["a_sq"]), np.asarray(params["kernel_ell"])
+        terms = np.array([a_sq[i] * normalized(X[:, i], Z[:, i], ell[i]) for i in range(D)])
+        return terms.sum(axis=0) if key[0] == "additive" else (1.0 + terms).prod(axis=0)
+    ell = np.asarray(params["kernel_inv_length_sq"]) ** -0.5
+    terms = np.array([centered(X[:, i], Z[:, i], ell[i]) for i in range(D)])
+    return params["kernel_var"] * terms.sum(axis=0)
 
 
 @pytest.mark.parametrize("normalize", [False, True])
@@ -146,6 +172,22 @@ def test_product_lengthscale_cell_is_the_reference_matern_kernel(include_noise):
 
     assert np.array_equal(
         np.asarray(ours), np.asarray(saasgp.matern_kernel(X, Z, var, rho, noise, include_noise))
+    )
+
+
+@pytest.mark.parametrize("key", CENTERED_CELL_KEYS, ids=CENTERED_CELL_IDS)
+def test_centered_cells_match_the_numpy_oracle(key):
+    # X and Z differ in length: the only test here that exercises the n != m path the acquisition
+    # optimizer always takes.
+    rng = np.random.default_rng(5)
+    X = jnp.asarray(rng.uniform(0.0, 1.0, (11, D)))
+    Z = jnp.asarray(rng.uniform(0.0, 1.0, (9, D)))
+    params = _params()
+
+    K = KERNELS[key][0](X, Z, params, 0.0, False)
+
+    np.testing.assert_allclose(
+        np.asarray(K), _numpy_oracle(key, X, Z, params), atol=1.0e-12, rtol=0.0
     )
 
 
