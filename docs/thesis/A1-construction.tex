@@ -59,7 +59,7 @@ product-measure argument below (Fubini, uncorrelatedness, the ANOVA
 decomposition of~\ref{app:so:a1:rotation}) applies to it verbatim, with no
 approximation of its own.
 
-{\raggedright{}
+\begin{sloppypar}
 \textbf{Code / Test.} \SOcode{kernel.GL\_NODES} and
 \SOcode{kernel.GL\_WEIGHTS} hold $(t_q,w_q)$; \SOcode{kernel.nu\_mean} and
 \SOcode{kernel.nu\_var} are~\eqref{app:so:a1:eq:quad}. Pinned by
@@ -68,7 +68,7 @@ approximation of its own.
 $\Enu x=\tfrac12$ and $\Varnu x=\tfrac1{12}$ for the identity, both integrands
 of degree $\le2$ and so exact) and
 \SOtest{test\_slope\_energy\_of\_an\_exact\_cubic\_matches\_its\_closed\_form}.
-\par}
+\end{sloppypar}
 
 \SOlevelC{Centered kernel and $\vell{\ell}$}\label{app:so:a1:kernel}
 
@@ -88,7 +88,8 @@ orthogonal complement of the constants under $\refnu_1$,
   \qquad z,z'\sim\refnu_1\ \text{i.i.d.}
 \end{equation}
 The reason this is the right object is one line: for $r\sim\mathrm{GP}(0,\kl)$
-set $\bar r=r-\int r\,d\refnu_1$; then $\operatorname{Cov}\bigl(\bar r(x),\bar r(y)\bigr)
+set $\bar r=r-\int r\,d\refnu_1$; then
+$\operatorname{Cov}\bigl(\bar r(x),\bar r(y)\bigr)
 =\Ex{}\bigl[\bar r(x)\bar r(y)\bigr]$, and expanding the product
 and exchanging $\Ex{}$ with the two path integrals (Fubini, the paths being
 continuous and $\refnu_1$ finite) reproduces exactly the four terms
@@ -112,7 +113,8 @@ which is \SOcode{kernel.v} verbatim: a single double sum subtracted from one.
 The two subtractions collapsing into one is the whole content of the identity,
 and it is why $\vell{\ell}$ can be evaluated without ever forming $\ktil$.
 
-Divide by it. With $\bar k_\ell:=\ktil/\vell{\ell}$ --- so that $\kbar=\bar k_{\ell_i}$
+Divide by it. With $\bar k_\ell:=\ktil/\vell{\ell}$ --- so that
+$\kbar=\bar k_{\ell_i}$
 is component $i$'s kernel --- we get $\Ex{x}\bar k_\ell(x,x)=1$ by
 construction, and for $f_i\sim\mathrm{GP}\bigl(0,a_i^2\,\kbar\bigr)$: $\int
 f_i\,d\refnu_1$ is Gaussian with variance
@@ -155,10 +157,14 @@ so
   \kl=1-\tfrac56\tau^2+\tfrac{25}{24}\tau^4-\tfrac{5\sqrt5}{9}\tau^5
        +O(\tau^6).
 \end{equation}
-There is \emph{no cubic term} --- that vanishing is exactly why a
-Mat\'ern-$5/2$ path is twice mean-square differentiable, and it is what
-makes~\eqref{app:so:a1:eq:slopekernel} below finite. The first odd power is
-the quintic, and the leading correction to the rank-one limit is the quartic.
+There is \emph{no cubic term}, and the first odd power is the quintic. What
+the vanishing cubic buys is twice mean-square differentiability, and a
+correction to the rank-one limit of order $\ell^{-4}$ rather than $\ell^{-3}$
+in~\eqref{app:so:a1:eq:rankone} --- hence a \emph{relative} correction of
+order $\ell^{-2}$ rather than $\ell^{-1}$ in~\eqref{app:so:a1:eq:vasym}. It is
+not what makes~\eqref{app:so:a1:eq:slopekernel} below finite; that is the
+absent \emph{linear} term, and~\ref{app:so:a1:slope} says why. The leading
+correction to the rank-one limit is therefore the quartic.
 
 Keeping only the quadratic term,
 $\kl\approx1-\tfrac{5}{6\ell^2}\bigl(x^2-2xy+y^2\bigr)$. Double centering
@@ -185,18 +191,20 @@ $\Ex{}|x-x'|^n=2/\bigl((n+1)(n+2)\bigr)$, and
 \end{equation}
 The relative correction is algebraic of order $\ell^{-2}$, not exponential:
 that is why the ratio column of Table~\ref{app:so:a1:tab:tab_v_ell} climbs to
-one so slowly. Equivalently, $\ell^2$ times the deviation of that column from
-one tends to the constant $\tfrac12$, which is the $O(\ell^{-2})$ signature
-of~\eqref{app:so:a1:eq:vasym}. The practical consequence is the one the design
-brief flags: at the study's largest lengthscale $\vell{\ell}$ is smaller than
-one by orders of magnitude, so a component's amplitude and its variance are
-entirely different numbers, and only~\eqref{app:so:a1:eq:unitvar} makes the
-second of them the label.
+one so slowly, and --- by the sign of that correction --- from \emph{below}:
+writing $R(\ell)$ for the ratio column,
+$\ell^2\bigl(1-R(\ell)\bigr)\to\tfrac12$, which is the $O(\ell^{-2})$
+signature of~\eqref{app:so:a1:eq:vasym}. The practical consequence is the one
+the design brief flags: at the study's largest lengthscale $\vell{\ell}$ is
+smaller than one by orders of magnitude, so a component's amplitude and its
+variance are entirely different numbers, and only~\eqref{app:so:a1:eq:unitvar}
+makes the second of them the label.
 
 \begin{table}[htbp]
   \centering
   \caption[$\vell{\ell}$ and the quantities derived from it]{
-  $\vell{\ell}$ at every lengthscale the study uses, with its
+  $\vell{\ell}$ at every lengthscale the study uses and at the further
+  reference lengthscales \SOfile{tests/test\_kernel.py} pins, with its
   large-$\ell$ limit $5/(36\ell^2)$ and their ratio, the slope factor
   $5/(3\ell^2\vell{\ell})$ of~\eqref{app:so:a1:eq:slopefactor}, and the
   matched sinusoid frequency $\omega(\ell)$ of~\eqref{app:so:a1:eq:omega}.
@@ -208,9 +216,12 @@ second of them the label.
   \input{\SOroot/tables/tab_v_ell}
 \end{table}
 
-{\raggedright{}
-\textbf{Code / Test.} \SOcode{kernel.matern52}, \SOcode{kernel.centered},
-\SOcode{kernel.v}, \SOcode{kernel.normalized}; the first three are verbatim
+\begin{sloppypar}
+\textbf{Code / Test.} The kernel~\eqref{app:so:a1:eq:matern} is
+\SOcode{kernel.matern52}, the centering~\eqref{app:so:a1:eq:centered} is
+\SOcode{kernel.centered}, the average marginal
+variance~\eqref{app:so:a1:eq:vell} is \SOcode{kernel.v}, and their quotient
+$\bar k_\ell$ is \SOcode{kernel.normalized}; the first three are verbatim
 copies of the thesis's Gate-1 check script, so their numbers reproduce it bit
 for bit. Pinned by
 \SOtest{test\_centered\_is\_orthogonal\_to\_reference\_measure} (the
@@ -222,7 +233,7 @@ projection property of~\eqref{app:so:a1:eq:centered}),
 \SOtest{test\_rank\_one\_collapse\_at\_large\_ell}, which
 measures~\eqref{app:so:a1:eq:rankone} directly, as a relative Frobenius error
 against the rank-one outer product.
-\par}
+\end{sloppypar}
 
 \SOlevelC{Slope energy}\label{app:so:a1:slope}
 
@@ -233,14 +244,22 @@ the slope energy is the mixed second derivative on the diagonal. Since $\kl$
 depends only on $x-y$, differentiating~\eqref{app:so:a1:eq:expansion} once in
 $x$ and once in $y$ turns the quadratic term $-\tfrac{5}{6\ell^2}{(x-y)}^2$
 into $+\tfrac{5}{3\ell^2}$, and the $\tau^4$ and $\tau^5$ terms contribute
-nothing at $x=y$ because their second derivatives vanish at zero lag --- which
-is the place the absent cubic term would have spoiled. Hence, exactly and
-independently of $x$,
+nothing at $x=y$ because their second derivatives vanish at zero lag. Hence,
+exactly and independently of $x$,
 \begin{equation}\label{app:so:a1:eq:slopekernel}
   \Ex{}\bigl[{(r'(x))}^2\bigr]
   =\partial_x\partial_y\kl(x,y)\Big|_{y=x}
   =\frac{5}{3\ell^2}.
 \end{equation}
+What would break this is an odd \emph{linear} term in the expansion: the
+second derivative of $|u|$ is not a function at zero lag, which is why
+Mat\'ern-$1/2$ has no slope energy at all. A \emph{cubic} term would not break
+it --- the second derivative of ${|u|}^3$ is $6|u|$, which vanishes at zero
+lag exactly as the quartic and quintic terms do, and Mat\'ern-$3/2$, whose
+expansion does carry a cubic, has the finite slope energy $3/\ell^2$. It is
+Mat\'ern-$5/2$'s vanishing \emph{linear} coefficient (\ref{app:so:a1:kernel})
+that~\eqref{app:so:a1:eq:slopekernel} rests on.
+
 Centering does not disturb this: it subtracts the random \emph{constant} $\int
 r\,d\refnu_1$ from the path, so $\bar r'=r'$ pointwise. Dividing the kernel by
 $\vell{\ell}$ divides the slope energy by $\vell{\ell}$. So for
@@ -284,7 +303,7 @@ $s_i$ ranking, and the decoupled family crosses strength against roughness so
 that the two orderings disagree cell by cell; both are reported
 in~\ref{app:so:a2}.
 
-{\raggedright{}
+\begin{sloppypar}
 \textbf{Code / Test.} \SOcode{Component.slope\_energy} evaluates $\sum_q w_q
 {f_i'(t_q)}^2$ on the stored spline; \SOcode{draws.omega\_for\_ell}
 consumes~\eqref{app:so:a1:eq:slopefactor}. Pinned by
@@ -293,20 +312,20 @@ $\ell\to\infty$ limit, on the exact linear function),
 \SOtest{test\_decoupled\_theoretical\_slope\_energy\_matches\_the\_closed\_form}
 (\eqref{app:so:a1:eq:slopeshare} against the family's own labels) and
 \SOtest{test\_raw\_draw\_slope\_energy\_matches\_kernel\_curvature}, which
-measures~\eqref{app:so:a1:eq:slopekernel} on centered but unrescaled
-draws.
-\par}
+measures~\eqref{app:so:a1:eq:slopekernel} on centered but unrescaled draws.
+\end{sloppypar}
 
 \SOlevelC{Draw and exact rescale}\label{app:so:a1:draw}
 
-\textbf{The draw.} A component is drawn on the joint grid $Z$, the union of
-$1024$ evenly spaced knots on $[0,1]$ with the $64$ quadrature nodes, so
-$\knots=\SOnumKnotsUnit$ points with the nodes placed last (downstream code
-slices the trailing $64$ rows, so the ordering is part of the contract). The
-package factors $\kbar(Z,Z)=FF^{\!\top}$ by symmetric eigendecomposition, with
-eigenvalues below $10^{-12}$ times the largest clipped to zero, and draws
-$r_i=F\xi$ with $\xi\sim N(0,I)$; the covariance of $r_i$ is then $\kbar(Z,Z)$
-exactly, up to that clip.
+\textbf{The draw.} A component is drawn on the joint grid $Z$: the $1024$
+evenly spaced points of the draw grid on $[0,1]$, concatenated with the $64$
+quadrature nodes, so $\knots=\SOnumKnotsUnit$ rows with the nodes last
+(downstream code slices the trailing $64$, so the ordering is part of the
+contract). The stored knot vector is the sorted, deduplicated union of the
+same two sets. The package factors $\kbar(Z,Z)=FF^{\!\top}$ by symmetric
+eigendecomposition, with eigenvalues below $10^{-12}$ times the largest
+clipped to zero, and draws $r_i=F\xi$ with $\xi\sim N(0,I)$; the covariance of
+$r_i$ is then $\kbar(Z,Z)$ exactly, up to that clip.
 
 No jitter is ever added to the covariance (decision D3,~\ref{app:so:a4}). The
 usual $10^{-8}$ ridge is independent white noise of standard deviation
@@ -340,11 +359,10 @@ in~\eqref{app:so:a1:eq:exactshare} are identities of the discrete measure
 $\nuhat$, not of $\refnu_1$. They survive storage because the $64$ nodes are
 themselves knots of the stored cubic spline --- the knot merge keeps the node
 on a tie --- so \SOcode{Component.nu\_var} re-reads precisely the values the
-rescale was solved from and returns $s_i$ to roundoff, with no interpolation
-error in between. Under $\refnu$ itself there \emph{is} a gap: the
-Gauss-Legendre error committed on a piecewise cubic, which is governed by
-roughness, since $64$ nodes on the unit interval is only a few nodes per
-lengthscale for the study's roughest components.
+rescale was solved from and returns $s_i$ to roundoff. Under $\refnu$ itself
+there \emph{is} a gap: the Gauss-Legendre error committed on a piecewise
+cubic, which is governed by roughness, since $64$ nodes on the unit interval
+is only a few nodes per lengthscale for the study's roughest components.
 Table~\ref{app:so:a1:tab:tab_quadrature_gap} measures it. Stated plainly: the
 ground truth $\Varnu f=1$ is exact under $\nuhat$, and under $\refnu$ it holds
 to the order the table's roughest rows report for the two families that
@@ -381,12 +399,12 @@ $\mathrm{SE}(f_i)=(s_i/\hat V)\,\mathrm{SE}(r_i)$, so
   \frac{\Ex{}\mathrm{SE}(r_i)}{\Ex{}\hat V},
 \end{equation}
 because numerator and denominator are quadratic forms in the same Gaussian
-vector $\xi$, and correlated. (Their ratio is bounded by the largest
-generalized eigenvalue of the pair, so the left-hand expectation exists; it
-simply does not factor.) The denominator is pinned exactly:
+vector $\xi$, and correlated: the expectation of the quotient is not the
+quotient of the expectations. The denominator is pinned exactly:
 $\Ex{}\hat V=\Ehat\kbar(x,x)-\sum_{q,q'}w_q w_{q'}\kbar(t_q,t_{q'})=1-0=1$,
-the first term by~\eqref{app:so:a1:eq:vell} and the second because $\ktil$ is
-doubly centered at exactly the nodes the double sum runs over. So the raw-draw column
+the first
+term by~\eqref{app:so:a1:eq:vell} and the second because $\ktil$ is doubly
+centered at exactly the nodes the double sum runs over. So the raw-draw column
 of Table~\ref{app:so:a1:tab:tab_slope_ratio} sits
 on~\eqref{app:so:a1:eq:slopefactor}, and the rescaled column exceeds it by a
 lengthscale-dependent factor.
@@ -419,7 +437,7 @@ for the seed-mean realized $g$ against $s$, and one over all (seed, rank)
 realized pairs. They differ precisely by this scatter, and~\ref{app:so:a2}
 reads both.
 
-{\raggedright{}
+\begin{sloppypar}
 \textbf{Code / Test.} \SOcode{kernel.eigen\_factor}, \SOcode{draws.gp\_draw},
 \SOcode{Component.from\_raw}, \SOcode{Component.nu\_var}. Pinned by
 \SOtest{test\_eigen\_factor\_reconstructs\_normalized\_kernel},
@@ -431,7 +449,7 @@ reads both.
 interpolation error alone, isolated from the quadrature error) and
 \SOtest{test\_slope\_energy\_converges\_under\_grid\_refinement} (the recorded
 $g_i$ does not depend on the storage resolution).
-\par}
+\end{sloppypar}
 
 \SOlevelC{Product interactions}\label{app:so:a1:interaction}
 
@@ -500,7 +518,7 @@ $\refnu$ they inherit the gap of~\ref{app:so:a1:draw} and nothing worse.
   \input{\SOroot/tables/tab_orthogonality}
 \end{table}
 
-{\raggedright{}
+\begin{sloppypar}
 \textbf{Code / Test.} \SOcode{Interaction} and \SOcode{Interaction.nu\_var}.
 Pinned by \SOtest{test\_conditional\_mean\_zero} (identity \emph{(i)} in both
 coordinates), \SOtest{test\_orthogonal\_to\_main\_effects} (identity
@@ -511,7 +529,7 @@ prescribed budget~\eqref{app:so:a1:eq:budget}) and
 \SOtest{test\_total\_variance\_qmc}, which checks the same budget under
 $\refnu$ by a scrambled Sobol sample of the whole cube --- a measurement that
 knows nothing about the decomposition.
-\par}
+\end{sloppypar}
 
 \SOlevelC{Rotation}\label{app:so:a1:rotation}
 
@@ -597,8 +615,12 @@ far $\kappa$ departs from one; the \emph{sign} of $\kappa-1$ is seed-dependent
 --- rotation can move variance either way across the boundary of $[0,1]$ ---
 as the count column records.
 
-\textbf{(iii) The first-order shares, derived.} Under a product measure the
-Hoeffding decomposition of a two-variable function is
+\textbf{(iii) The first-order shares, derived.} Every expectation and variance
+in this part is under $\nuhat\otimes\nuhat$, the product rule
+of~\ref{app:so:a1:measure}; a subscript $x_a$ or $x_b$ names which coordinate
+is integrated, not a different measure, so $\Varx{}\phip$ and $\Varhat\phip$
+are the same number. Under a product measure the Hoeffding decomposition of a
+two-variable function is
 $\phip=\Ex{}\phip+\bigl(\Ex{x_b}\phip-\Ex{}\phip\bigr)
 +\bigl(\Ex{x_a}\phip-\Ex{}\phip\bigr)+\phip^{ab}$, the four terms mutually
 orthogonal, so the variances add:
@@ -635,9 +657,14 @@ surely.
 At an \emph{odd} multiple of $90^\circ$ the pair comes out \emph{swapped}, and
 this is the one place a reader is likely to get the identity backwards. At
 $\theta=90^\circ$,~\eqref{app:so:a1:eq:rotmap} gives $z_a=1-x_b$ and
-$z_b=x_a$, so $\phip=f_a(1-x_b)+f_b(x_a)$ and the first-order term of $x_a$ is
-$f_b$, not $f_a$: $\Varx{x_a}\Ex{x_b}\phip=\Varnu f_b=s_b$ while
-$\Varx{x_b}\Ex{x_a}\phip=s_a$. Only at an even multiple do the two come back
+$z_b=x_a$, so $\phip=f_a(1-x_b)+f_b(x_a)$. Integrating out $x_b$ annihilates
+the first summand --- the Gauss-Legendre nodes are symmetric about $\tfrac12$
+with matching weights, so $\Ex{x_b}f_a(1-x_b)=\Ehat f_a=0$ --- leaving the
+first-order term of $x_a$ equal to $f_b$, not to $f_a$:
+$\Varx{x_a}\Ex{x_b}\phip=\Varhat f_b=s_b$ while
+$\Varx{x_b}\Ex{x_a}\phip=\Varhat f_a=s_a$, both exact under $\nuhat$
+by~\eqref{app:so:a1:eq:exactshare} and, like every share in this appendix,
+only approximate under $\refnu$. Only at an even multiple do the two come back
 in order. A test on this branch once asserted the unswapped identity here and
 passed, because both shares in its fixture happened to be equal.
 
@@ -665,10 +692,10 @@ $\gamma=0$, and that is the point of it.
 axis-misspecification. $\gaxis$ vanishes at every multiple of $90^\circ$ and
 is largest near the diagonal, so it is not monotone in $\theta$; the ranges at
 the $30^\circ$, $45^\circ$ and $60^\circ$ rows of
-Table~\ref{app:so:a1:tab:tab_rotation_angle} overlap one another, and the
-spread across seeds within one angle exceeds the gap between the medians of
-adjacent angles. The study therefore conditions on the recorded $\gaxis$
-label, never on $\theta$.
+Table~\ref{app:so:a1:tab:tab_rotation_angle} overlap one another, and among
+those three rows the spread across seeds within one angle exceeds the gap
+between the medians of adjacent angles. The study therefore conditions on the
+recorded $\gaxis$ label, never on $\theta$.
 
 \begin{table}[htbp]
   \centering
@@ -687,7 +714,7 @@ label, never on $\theta$.
   \input{\SOroot/tables/tab_rotation_angle}
 \end{table}
 
-{\raggedright{}
+\begin{sloppypar}
 \textbf{Code / Test.} \SOcode{PairRotation.forward}
 is~\eqref{app:so:a1:eq:rotmap}; \SOcode{rotation.rotated\_block\_mean}
 is~\eqref{app:so:a1:eq:mu}; \SOcode{rotation.rotated\_block\_stats}
@@ -711,7 +738,8 @@ and \SOtest{test\_rotated\_objective\_qmc\_variance\_is\_one\_after\_scaling}
 \SOtest{test\_two\_part\_rotation\_identity}, whose second half
 recomputes~\eqref{app:so:a1:eq:gammaaxis} from the per-pair quadrature
 independently of the stored labels. (Its first half is vacuous by
-construction, as its own docstring states, and is not the citation here.)\par}
+construction, as its own docstring states, and is not the citation here.)
+\end{sloppypar}
 
 \SOlevelC{The maximum $\fstar$}\label{app:so:a1:fstar}
 
@@ -773,19 +801,21 @@ error.
 \end{table}
 
 \medskip \noindent\textbf{Sign convention --- read this once.} $\fstar$ is a
-\textbf{maximum}, and simple regret is $r_t=\fstar-\max_{s\le t}f(x_s)$,
-decreasing towards zero. The SAASBO implementation in this repository
-\textbf{minimizes}, so a caller negates $f$ at the call site; the BoTorch
-adapter's \SOcode{negate} flag does exactly that, and~\ref{app:so:a3:botorch}
-states where. Nothing inside \SOcode{synthobj} is ever negated: $\fstar$,
-\SOcode{Labels.x\_star} and every share in this appendix are stated in the
-maximization convention.
+\textbf{maximum}, and simple regret is the design brief's
+$r_t=\fstar-\max_{s\le t}f(x_s)$, decreasing towards zero --- indexed by
+budget, and unrelated to the raw draws $r_i$ of~\ref{app:so:a1:draw}. The
+SAASBO implementation in this repository \textbf{minimizes}, so a caller
+negates $f$ at the call site; the BoTorch adapter's \SOcode{negate} flag does
+exactly that, and~\ref{app:so:a3:botorch} states where. Nothing inside
+\SOcode{synthobj} is ever negated: $\fstar$, \SOcode{Labels.x\_star} and every
+share in this appendix are stated in the maximization convention.
 \medskip
 
-{\raggedright{}
-\textbf{Code / Test.} \SOcode{Component.argmax},
-\SOcode{interaction.block\_argmax}, \SOcode{rotation.rotated\_block\_argmax}.
-Pinned by
+\begin{sloppypar}
+\textbf{Code / Test.} The one-dimensional maximum is
+\SOcode{Component.argmax}; the two-dimensional ones are
+\SOcode{interaction.block\_argmax} for an interaction block and
+\SOcode{rotation.rotated\_block\_argmax} for a rotated one. Pinned by
 \SOtest{test\_argmax\_finds\_an\_interior\_maximum\_off\_the\_knot\_grid},
 \SOtest{test\_block\_argmax\_dominates\_a\_million\_random\_pairs},
 \SOtest{test\_f\_star\_matches\_an\_independent\_brute\_force} (which bounds
@@ -794,7 +824,7 @@ that maximized a block's two coordinates separately would fail),
 \SOtest{test\_f\_star\_attained} (the reported value belongs to the reported
 maximizer) and
 \SOtest{test\_rotated\_block\_argmax\_dominates\_and\_matches\_a\_dense\_grid}.
-\par}
+\end{sloppypar}
 
 \SOlevelC{Other generators}\label{app:so:a1:generators}
 
@@ -813,11 +843,22 @@ to~\eqref{app:so:a1:eq:slopefactor} and solving,
 The identity behind it needs the averages of $\sin^2$ and $\cos^2$ over
 $[0,1]$ to be equal and the mean over $[0,1]$ to vanish, which requires at
 least one full cycle on the interval --- that is, $\omega(\ell)\ge1$. The
-$\omega$ column of Table~\ref{app:so:a1:tab:tab_v_ell} shows where the
-crossing falls; above it, centering under $U[0,1]$ removes proportionally more
-variance than slope energy and the realized ratio drifts above the target
-(ruling R11,~\ref{app:so:a4}). The one variant that uses this generator sits
-below the crossing.
+$\omega$ column of Table~\ref{app:so:a1:tab:tab_v_ell} shows where that
+crossing falls; at every lengthscale smoother than it --- the rows whose
+$\omega$ is below one --- centering under $U[0,1]$ removes proportionally more
+variance than slope energy, and the realized ratio runs above the target
+(ruling R11,~\ref{app:so:a4}).
+
+\SOcode{aligned10\_sin}, the study's only sinusoid variant, is the aligned
+family with its generator swapped and its lengthscale unchanged
+(\ref{app:so:a2}), and the $\omega$ column puts that lengthscale below one. It
+therefore sits on the smooth side of the crossing, in the drift regime, not in
+the one where the identity was derived: for it,~\eqref{app:so:a1:eq:omega} is
+a design target rather than a realized equality, and the pinning test below is
+parametrized only at lengthscales with $\omega(\ell)\ge1$ for exactly that
+reason. So the sinusoid variant's slope shares are read off the recorded label
+\SOcode{Labels.g}, a realized quantity in the sense of~\ref{app:so:a1:draw},
+and are never inferred from~\eqref{app:so:a1:eq:omega}.
 
 \textbf{Monotone rejection.} The dense-weak family, which puts a share of
 $1/D$ on every coordinate at a large lengthscale, additionally requires each
@@ -843,7 +884,7 @@ whether the coin is tossed or not. The coin is therefore not identifiable from
 the stored values, which is why no sign is stored --- and why the test below
 reads each component's realized direction rather than any recorded attribute.
 
-{\raggedright{}
+\begin{sloppypar}
 \textbf{Code / Test.} \SOcode{draws.sinusoid\_draw},
 \SOcode{draws.omega\_for\_ell}, \SOcode{draws.draw\_until\_monotone}. Pinned
 by \SOtest{test\_sinusoid\_ratio\_matches\_slope\_factor\_in\_derived\_regime}
@@ -852,4 +893,4 @@ derived),
 \SOtest{test\_draw\_until\_monotone\_returns\_monotone\_values\_at\_ell\_3}
 and \SOtest{test\_dense\_weak\_sign\_is\_not\_collapsed\_to\_one\_direction},
 which reads each delivered component's own derivative sign.
-\par}
+\end{sloppypar}
