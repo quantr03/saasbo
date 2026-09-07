@@ -258,6 +258,21 @@ def test_stem_path_builds_expected_literal_path(tmp_path: Path) -> None:
     assert stem == tmp_path / "interaction_g0.25" / "seed03_D20"
 
 
+def test_npz_and_json_paths_use_fstring_concatenation_not_with_suffix() -> None:
+    """Pins `_npz_and_json` in isolation: fed a stem whose *final* path segment itself carries a
+    dot (never produced by `_stem_path` today, since the dotted variant name always lands one
+    level up in the directory component -- but this helper should not rely on that to stay safe),
+    `Path.with_suffix` would silently truncate at that dot and return `out/interaction_g0.npz`
+    instead of `out/interaction_g0.25.npz`. `test_npz_and_json_paths_are_literal_and_do_not_collide_across_gamma_variants`
+    below, using the directory-shaped stems the CLI actually builds, cannot tell f-string
+    concatenation apart from `with_suffix` -- both give the right answer when the final segment has
+    no dot -- so this test exists specifically to close that gap.
+    """
+    npz, js = generate._npz_and_json(Path("out/interaction_g0.25"))
+    assert npz == Path("out/interaction_g0.25.npz")
+    assert js == Path("out/interaction_g0.25.json")
+
+
 def test_npz_and_json_paths_are_literal_and_do_not_collide_across_gamma_variants() -> None:
     npz_25, json_25 = generate._npz_and_json(Path("out/interaction_g0.25/seed00_D100"))
     npz_50, json_50 = generate._npz_and_json(Path("out/interaction_g0.50/seed00_D100"))
