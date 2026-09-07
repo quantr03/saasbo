@@ -633,3 +633,33 @@ def test_precomputed_labels_are_used_verbatim(
 
     assert rebuilt.labels is stored
     assert rebuilt.f_star == -123.5
+
+
+def test_supplied_labels_with_a_rotation_still_evaluate_correctly() -> None:
+    # Skipping `_compute_scale`/`_compute_mu` on the supplied-`labels` path (the load-cost fix) is
+    # only safe because `scale` is read back from `labels` and `mu` is still computed. An earlier
+    # version left both at placeholders, which was silent and wrong in the worst way: `f_star` came
+    # from the stored labels and stayed correct while `__call__` was scaled and centred wrongly, so
+    # the object reported an optimum its own evaluator could not attain. `load` overwrites both
+    # from the file, so only a non-`load` caller of the public constructor was exposed -- and the
+    # package root now exports that constructor. A rotated family is the discriminating case:
+    # without a rotation `scale` is 1.0 and `mu` is 0.0, so placeholders would be accidentally
+    # right and this test would pass against the bug.
+    # Imported here, not at module scope: this file's R15 guard is about `synthobj.objective`'s
+    # own import graph, and keeping `families` out of the module surface keeps that honest.
+    from synthobj.families import make_family
+
+    built = make_family("rotated_t45", 0, D=20)
+    assert built.scale != 1.0 and built.mu != 0.0  # the fixture must actually discriminate
+
+    hand = SyntheticObjective(
+        built.D, built.components, built.interactions, built.rotation,
+        built.spec, built.seed, labels=built.labels,
+    )
+
+    assert hand.scale == built.scale
+    assert hand.mu == built.mu
+    X = np.random.default_rng(0).random((300, built.D))
+    assert np.array_equal(hand(X), built(X))
+    # The invariant the bug broke: the reported optimum is one this object can actually reach.
+    assert float(hand(built.labels.x_star[None, :])[0]) == pytest.approx(hand.f_star, abs=1e-9)

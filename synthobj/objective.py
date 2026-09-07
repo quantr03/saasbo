@@ -20,12 +20,12 @@ Which quantities are exact and which are quadrature:
 - `f_star` is exact per unpaired component (`Component.argmax` finds every critical point of a
   piecewise-quadratic spline derivative in closed form). Per paired block (`block_argmax` for an
   interaction, `rotated_block_argmax` for a rotated pair) it is not closed form: both scan a grid
-  and refine with L-BFGS-B, and a fix-round re-measurement against an independent 4097x4097 grid
-  (finer than either method's own search) found the returned maximum within 5.2e-8 (interaction
-  block, ell=0.5, share=0.1875, s_ij=0.25) / 6.5e-8 (rotated block, ell=0.5, share=0.25,
-  theta=45deg) of that grid's own maximum -- see `interaction.block_argmax`'s and
-  `rotation.rotated_block_argmax`'s docstrings for the full configuration. The previously stated
-  "accurate to about 1e-10" here was never measured (fix-round finding). Pairs are disjoint, so
+  and refine with L-BFGS-B. Re-optimizing from the returned point with far tighter tolerances
+  moves the value by exactly 0.0, so it is a converged optimum of the spline surface; see
+  `interaction.block_argmax`'s and `rotation.rotated_block_argmax`'s docstrings, which also
+  explain why a gap against a finite reference grid bounds the reference rather than the method.
+  Two earlier figures here -- "accurate to about 1e-10" and "within 5.2e-8" -- were wrong, the
+  first never measured and the second measured on blocks other than the ones it named. Pairs are disjoint, so
   each block is an independent function of its own two coordinates and the maximum separates
   exactly into a sum of per-block maxima (plan decision D1).
 
@@ -219,15 +219,22 @@ class SyntheticObjective:
         # `load` overwrites both `scale` and `mu` right after construction anyway (see `load`'s
         # own docstring) -- computing them here would be pure waste, and measured expensive:
         # `_compute_scale`/`_compute_mu` are 67% of `load`'s own cost at D=100 on rotated_t45
-        # (fix-round finding). The placeholder values are never read: nothing else in `__init__`
-        # touches `self.scale`/`self.mu` when `labels is not None`.
+        # (fix-round finding). Only `_compute_labels` is skipped unconditionally, because that is
+        # where the real cost sits and `labels` replaces its whole output. `scale` comes from
+        # `labels`, where it is already stored and exactly right, so it costs nothing to be
+        # correct. `mu` has no home in `Labels`, so it is computed: `_compute_mu` early-returns
+        # 0.0 without rotation, so this is free for 11 of the 14 study variants, and for the three
+        # rotated ones it buys correctness for any supplied-`labels` caller that is not `load`.
+        # `load` overwrites it from the file immediately afterwards. That matters because
+        # `__call__` reads `scale` and `mu` on every evaluation -- leaving either at a placeholder
+        # gave a rotated objective an `f_star` its own `__call__` could not attain.
         if labels is None:
             self.scale = self._compute_scale()
             self.mu = self._compute_mu()
             self.labels = self._compute_labels()
         else:
-            self.scale = 1.0
-            self.mu = 0.0
+            self.scale = labels.scale
+            self.mu = self._compute_mu()
             self.labels = labels
         self.f_star = self.labels.f_star
 
@@ -310,8 +317,11 @@ class SyntheticObjective:
         are rank `k`'s share/lengthscale, whereas `Labels.s[c]`/`Labels.ell[c]` are coordinate `c`'s
         (0/NaN if `c` is not in `S`). A script that opens the npz directly and indexes `s[i]` by
         coordinate silently reads a different coordinate's share whenever `S` (a random permutation
-        subset of `range(D)`) does not happen to equal `range(n_active)`. `pairs`/`c_pairs` and
-        `inter_values` are similarly rank-ordered (row `p` is `self.interactions[p]`); `x_star`, by
+        subset of `range(D)`) does not happen to equal `range(n_active)`. The same trap applies to
+        `Labels.S`, which is `tuple(sorted(...))` while `npz["active"]` is unsorted rank order --
+        joining `npz["s"][k]` to `Labels.S[k]` pairs a share with the wrong coordinate. `pairs` and
+        `c_pairs` are rank-ordered too (row `p` is `self.interactions[p]`), while `inter_values`
+        holds *two* rows per pair -- `2p` and `2p+1` are pair `p`'s two factors; `x_star`, by
         contrast, is stored straight from `Labels.x_star` and so *is* `(D,)` by coordinate, like
         every other JSON-side `Labels` field this method does not re-derive.
 
@@ -535,9 +545,8 @@ class SyntheticObjective:
         Pairs are disjoint, so each paired block is an independent function of its own two
         coordinates and the maximum separates: `f_star` is `(sum - self.mu) * self.scale`, where
         `sum` is the raw total of the per-block maxima (`block_argmax` for an interaction,
-        `rotated_block_argmax` for a rotated pair -- both measured within about 6e-8 of an
-        independent fine grid, not the previously stated "1e-10", which was never measured; see
-        the module docstring) and the per-component maxima from `Component.argmax` (exact to
+        `rotated_block_argmax` for a rotated pair -- both converged optima, in the sense that
+        re-optimizing from the returned point does not improve it; see the module docstring) and the per-component maxima from `Component.argmax` (exact to
         floating point) -- matching `__call__`, which recenters and scales the whole sum once
         rather than each block (ruling R30: `rotated_block_argmax`'s own `phi` is never
         recentered, since L-BFGS-B's relative

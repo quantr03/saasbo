@@ -38,10 +38,11 @@ The package's only runtime dependencies are NumPy and SciPy; PyTorch/BoTorch are
 
 **Maximization convention.** A `SyntheticObjective`'s `f_star` is its **maximum**, and
 `x_star`/`f_star` are exact for every unpaired coordinate. For a paired block (an interaction or a
-rotated pair) they are not closed form: `f_star` is measured within about `6e-8` of an independent
-fine grid (see `synthobj/interaction.py`'s `block_argmax` docstring and
-`synthobj/rotation.py`'s `rotated_block_argmax` docstring for the exact configurations and
-figures) -- not the previously stated `1e-10`, which had never actually been measured. This is the
+rotated pair) they are not closed form: the block maximum is found by a grid scan refined with
+L-BFGS-B, and re-optimizing from the returned point with tighter tolerances does not improve it.
+See `synthobj/interaction.py`'s `block_argmax` and `synthobj/rotation.py`'s
+`rotated_block_argmax` docstrings, which also explain why a gap measured against a finite
+reference grid bounds that grid rather than the method. This is the
 opposite of the SAASBO implementation in this repository, which
 *minimizes* its objective — a caller wiring `synthobj` into `saasbo_demo.py` or similar must
 negate `f` (e.g. `-obj(X)`, or `SyntheticObjectiveTestFunction(obj, negate=True)` for the BoTorch

@@ -111,16 +111,21 @@ def block_argmax(
     on the module docstring's four-block configuration -- accurate but not closed form, unlike
     the exact 1-D `Component.argmax`.
 
-    Fix-round re-measurement, distance-to-truth rather than first-order optimality (`objective.py`
-    and the README had separately, and wrongly, stated this as "accurate to about 1e-10" without
-    ever measuring it -- that claim did not originate here): an independent 4097x4097 chunked
-    grid -- finer than both this function's own 1088x1088 knot scan and every existing
-    dominance/two-sided test -- was built and its max compared to `block_argmax`'s returned value
-    on the module docstring's own four blocks (ell=0.5, main shares 0.1875, s_ij=0.25).
-    `block_argmax` always came out >= the dense grid's max, by 0 to 5.2e-8 across the four blocks;
-    since a not-a-knot cubic spline's second derivative is bounded, this dense grid's own distance
-    to the true continuous maximum is smaller still, so 5.2e-8 is itself already a fairly tight
-    two-sided bound, not merely a floor.
+    How accurate, stated without quoting a reference grid. Re-running L-BFGS-B from the returned
+    point with far tighter tolerances (`ftol=1e-18`, `gtol=1e-14`) improves the value by **exactly
+    0.0** on all seven blocks measured (the module docstring's four, plus three more), so the
+    returned point is a fully converged optimum of the spline surface, not merely a good one.
+
+    Comparisons against a finite reference grid are reported elsewhere on this branch; treat them
+    as bounding the *reference*, not this function. `block_argmax`'s value dominated an independent
+    4097x4097 chunked grid on every block tried, and the residual gap (order 1e-7) shrinks as that
+    reference is refined -- which is what a measurement of the reference's own coarseness looks
+    like. Do not restate such a gap as this function's error.
+
+    Two earlier figures here were wrong and are recorded so they are not reintroduced: "accurate to
+    about 1e-10" was never measured at all, and a later "0 to 5.2e-8 across the four blocks" quoted
+    a block set other than the four it named -- the named blocks measure roughly an order of
+    magnitude larger, and neither of two independent reconstructions reproduced 5.2e-8.
 
     `u_i` and `u_j` are assumed to cover [0,1], which holds for every component the plan builds.
     """
