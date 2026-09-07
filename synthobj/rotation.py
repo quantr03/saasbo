@@ -175,6 +175,14 @@ def rotated_block_argmax(
     best cells are each refined by L-BFGS-B with the analytic gradient of
     `rotated_block_value_and_grad`, bounds `[(0,1), (0,1)]`, `ftol=1e-15` and `gtol=1e-12`. `z` is
     clamped into each component's knot range before every evaluation, coarse grid included.
+
+    Fix-round re-measurement (`objective.py`'s own docstring and the README had extended
+    `interaction.block_argmax`'s "accurate to about 1e-10" to this function too, without measuring
+    it here either): on `tests/test_rotation.py`'s dispatch configuration (D=20, ell=0.5, share
+    0.25, theta=45deg, extended grid N=1469), this function's returned maximum came out 6.5e-8
+    above the max of an independent 4097x4097 chunked grid in x-space -- finer than this function's
+    own 1024x1024 search grid and the existing tests' 2048x2048 one -- matching
+    `interaction.block_argmax`'s own order-of-magnitude re-measurement.
     """
     theta = np.deg2rad(rot.theta_deg)
     c, s = np.cos(theta), np.sin(theta)
