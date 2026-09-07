@@ -7,23 +7,43 @@ JSON round trip. The load-bearing checks here instead cross a real boundary:
 
 - `test_writes_stems_matching_disk_hashes_and_independent_rebuild` hashes the files *on disk* with
   a fresh `hashlib.sha256` call (not `synthobj.generate._sha256`) and compares to the manifest's
-  claim, and separately rebuilds each (variant, seed) from scratch with `make_family` -- an
+  claim; separately rebuilds each (variant, seed) from scratch with `make_family` -- an
   independent evaluator, not a readback of stored state -- and compares `f_star`/`gamma`/`S` to
-  the manifest entry.
+  the manifest entry; and separately again, `SyntheticObjective.load`s the stem straight off disk
+  (the brief's own literal spec) and checks `f_star` a third, independent way. `family` is checked
+  against a hand-written literal mapping, not `entry["family"] in (...)`, which a hardcoded wrong
+  constant could satisfy for every entry.
 - `test_rerun_without_overwrite_skips_and_does_not_rebuild` monkeypatches `generate.make_family`
   to raise, then reruns without `--overwrite`: if skip logic ever degraded into "rebuild every
   time", this fails loudly instead of merely reading back files that happen to already exist.
+- `test_overwrite_actually_rebuilds_not_just_reruns` is that monkeypatch's mirror image: it spies
+  on `make_family` under `--overwrite` and asserts it *was* called.
+  `test_overwrite_produces_byte_identical_files` below it is explicitly kept as a *weak* test --
+  "byte-identical across two runs" is exactly what "the second run did nothing" also produces, and
+  a fix-round review confirmed deleting `and not args.overwrite` from the skip condition (making
+  `--overwrite` a complete no-op) left it, and the rest of the original suite, green.
 - `test_two_gamma_variants_do_not_collide_on_disk` is the concrete regression the brief's path
   hazard section warns about (Task 8's `Path.with_suffix` bug collapsed every `interaction_g0.*`
   variant onto one file): two gamma variants at the same seed must produce four distinct files
   with distinct hashes, not silently merge.
-- `test_stem_path_builds_expected_literal_path` and
-  `test_npz_and_json_paths_are_literal_and_do_not_collide_across_gamma_variants` compare
-  `generate._stem_path`/`_npz_and_json`'s output against hand-written literal `Path(...)` strings,
-  not against a second call to the same helpers -- so a regression in the helper itself (e.g.
-  reintroducing `Path.with_suffix`, or flattening `<out>/<variant>/seed...` into
-  `<out>/<variant>_seed...`, which *would* put the dotted variant name back into the final path
-  segment) has something independent to disagree with.
+- `test_stem_path_builds_expected_literal_path`,
+  `test_npz_and_json_paths_are_literal_and_do_not_collide_across_gamma_variants`, and
+  `test_npz_and_json_paths_use_fstring_concatenation_not_with_suffix` compare the path helpers'
+  output against hand-written literal `Path(...)` strings, not against a second call to the same
+  helpers.
+- `test_manifest_scans_directory_across_differently_scoped_runs` and
+  `test_scan_warns_counts_and_exits_nonzero_on_debris_without_crashing` /
+  `test_scan_reports_exact_issue_count_and_exits_nonzero` cover ruling R35/R36: the manifest
+  describes `--out` itself (built by scanning it after generation), not just the (variant, seed)
+  pairs the most recent invocation asked for, and the scan tolerates and counts debris (a stray
+  file, an unknown variant directory, a half-written pair, an unrecognized file) rather than
+  crashing or silently dropping it.
+- `test_dry_run_prints_full_grid_via_subprocess_and_writes_nothing` checks row *content*
+  (140 distinct lines, one specific literal row present), not just a row *count* -- a `print("x")`
+  substituted for the real row would still print 140 lines.
+- The `wrote N stem(s), skipped M stem(s)` stdout counters (the brief's own "report how many were
+  skipped") are asserted directly in `test_writes_stems_matching_disk_hashes_and_independent_rebuild`
+  and `test_rerun_without_overwrite_skips_and_does_not_rebuild`, not merely implied by file counts.
 
 One test exercises the module entry point through `subprocess` (`--dry-run` on the default grid,
 which builds nothing and is fast regardless of process startup cost); everything else goes through
@@ -41,6 +61,7 @@ import pytest
 
 from synthobj import generate
 from synthobj.families import make_family
+from synthobj.objective import SyntheticObjective
 
 PYTHON = "/opt/anaconda3/envs/saasbo/bin/python"
 D = 20
@@ -49,7 +70,9 @@ D = 20
 # --- the main write path -------------------------------------------------------------------
 
 
-def test_writes_stems_matching_disk_hashes_and_independent_rebuild(tmp_path: Path) -> None:
+def test_writes_stems_matching_disk_hashes_and_independent_rebuild(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
     """The brief's own literal command: 2 variants x 2 seeds -> 4 stems + a manifest, and every
     manifest claim checked against something other than the CLI's own in-memory state.
     """
@@ -62,6 +85,7 @@ def test_writes_stems_matching_disk_hashes_and_independent_rebuild(tmp_path: Pat
         ]
     )
     assert code == 0
+    assert "wrote 4 stem(s), skipped 0 stem(s)" in capsys.readouterr().out
 
     expected_files = [
         tmp_path / "aligned3" / "seed00_D20.npz",
@@ -83,9 +107,13 @@ def test_writes_stems_matching_disk_hashes_and_independent_rebuild(tmp_path: Pat
 
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["version"] == 1
-    assert manifest["D"] == D
+    assert manifest["Ds"] == [D]
     assert manifest["seeds"] == [0, 1]
     assert len(manifest["entries"]) == 4
+
+    # Independently written, not derived from generate._FAMILY_OF: a hardcoded wrong constant for
+    # every entry would pass `entry["family"] in ("aligned", "interaction")` but not this.
+    expected_family = {"aligned3": "aligned", "interaction_g0.25": "interaction"}
 
     for entry in manifest["entries"]:
         npz_path = tmp_path / entry["npz"]
@@ -100,7 +128,13 @@ def test_writes_stems_matching_disk_hashes_and_independent_rebuild(tmp_path: Pat
         assert rebuilt.f_star == entry["f_star"]
         assert rebuilt.labels.gamma == entry["gamma"]
         assert len(rebuilt.labels.S) == entry["n_active"]
-        assert entry["family"] in ("aligned", "interaction")
+
+        # Boundary 3: the brief's own literal spec item -- load the stem straight off disk (a
+        # literal stem, not built via generate._stem_path) and compare f_star a third way.
+        stem = tmp_path / entry["variant"] / f"seed{entry['seed']:02d}_D{entry['D']}"
+        assert SyntheticObjective.load(stem).f_star == entry["f_star"]
+
+        assert entry["family"] == expected_family[entry["variant"]]
         assert entry["overrides"] == {}
 
 
@@ -147,6 +181,10 @@ def test_dry_run_prints_full_grid_via_subprocess_and_writes_nothing(tmp_path: Pa
     no files -- driven through `python -m synthobj.generate` to prove the module entry point
     itself works, not just `main(argv)`. Cheap regardless of grid size, since dry-run never builds
     an objective.
+
+    Checks content, not just count: `len(set(lines)) == 140` fails a `print("x")`-style mutant
+    that would still satisfy `len(lines) == 140`, and the literal spot-check pins the actual
+    (variant, seed, D) format of a specific row.
     """
     repo_root = Path(__file__).resolve().parent.parent
     result = subprocess.run(
@@ -159,6 +197,8 @@ def test_dry_run_prints_full_grid_via_subprocess_and_writes_nothing(tmp_path: Pa
     assert result.returncode == 0, result.stderr
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     assert len(lines) == 140
+    assert len(set(lines)) == 140
+    assert "interaction_g0.25 seed=03 D=100" in lines
     assert list(tmp_path.iterdir()) == []
 
 
@@ -166,7 +206,7 @@ def test_dry_run_prints_full_grid_via_subprocess_and_writes_nothing(tmp_path: Pa
 
 
 def test_rerun_without_overwrite_skips_and_does_not_rebuild(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     argv = [
         "--out", str(tmp_path),
@@ -175,6 +215,7 @@ def test_rerun_without_overwrite_skips_and_does_not_rebuild(
         "--families", "aligned3,interaction_g0.25",
     ]
     assert generate.main(argv) == 0
+    capsys.readouterr()  # discard the first run's output
 
     written = [p for p in tmp_path.rglob("*") if p.is_file() and p.name != "manifest.json"]
     assert len(written) == 8
@@ -186,12 +227,44 @@ def test_rerun_without_overwrite_skips_and_does_not_rebuild(
     monkeypatch.setattr(generate, "make_family", _boom)
 
     assert generate.main(argv) == 0  # no --overwrite; must not touch _boom at all
+    assert "wrote 0 stem(s), skipped 4 stem(s)" in capsys.readouterr().out
 
     after = {p: p.read_bytes() for p in written}
     assert after == before
 
 
+def test_overwrite_actually_rebuilds_not_just_reruns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`test_overwrite_produces_byte_identical_files` below is deliberately weak: a second run
+    that did nothing at all also produces byte-identical files. A fix-round review confirmed this
+    directly -- deleting `and not args.overwrite` from the skip condition, making `--overwrite` a
+    complete no-op, left that test (and the rest of the original 15) green. This test instead
+    spies on `make_family`, mirroring `test_rerun_without_overwrite_skips_and_does_not_rebuild`'s
+    monkeypatch in the opposite direction, and asserts it *was* called under `--overwrite`.
+    """
+    argv = ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
+    assert generate.main(argv) == 0
+
+    calls: list[tuple[object, ...]] = []
+    real_make_family = generate.make_family
+
+    def _spy(*args: object, **kwargs: object) -> SyntheticObjective:
+        calls.append((args, kwargs))
+        return real_make_family(*args, **kwargs)
+
+    monkeypatch.setattr(generate, "make_family", _spy)
+
+    assert generate.main(argv + ["--overwrite"]) == 0
+    assert len(calls) == 1
+
+
 def test_overwrite_produces_byte_identical_files(tmp_path: Path) -> None:
+    """Weak by itself (see module docstring and `test_overwrite_actually_rebuilds_not_just_reruns`
+    above) -- kept because the brief asks for it, and it does confirm ruling R5's byte-identity
+    survives a real CLI round trip when combined with the stronger test proving a rebuild actually
+    happened.
+    """
     argv = ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
     assert generate.main(argv) == 0
 
@@ -219,6 +292,95 @@ def test_rerun_manifest_created_changes_but_entries_stay_the_same(tmp_path: Path
     assert manifest_1["entries"] == manifest_2["entries"]
 
 
+# --- ruling R35/R36: the manifest scans <out>, not just this run's requests -----------------
+
+
+def test_manifest_scans_directory_across_differently_scoped_runs(tmp_path: Path) -> None:
+    """Ruling R35: the manifest must describe everything under `--out`, not just what the most
+    recent invocation was asked to produce. Two runs with different D/seeds/families into the
+    same `--out` leave three `.npz` files on disk; a run-scoped manifest would report only the
+    second run's one entry and silently drop the first run's two -- the defect a fix-round review
+    measured directly and ruled on.
+    """
+    assert generate.main(
+        ["--out", str(tmp_path), "--D", "20", "--seeds", "0-1", "--families", "aligned3"]
+    ) == 0
+    assert generate.main(
+        ["--out", str(tmp_path), "--D", "100", "--seeds", "5", "--families", "decoupled"]
+    ) == 0
+
+    npz_on_disk = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.npz"))
+    assert npz_on_disk == [
+        "aligned3/seed00_D20.npz",
+        "aligned3/seed01_D20.npz",
+        "decoupled/seed05_D100.npz",
+    ]
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest_npz = sorted(e["npz"] for e in manifest["entries"])
+    assert manifest_npz == npz_on_disk
+    assert len(manifest["entries"]) == 3
+
+    # Ruling R36: top-level fields summarize the whole directory, not the last invocation.
+    assert manifest["Ds"] == [20, 100]
+    assert manifest["seeds"] == [0, 1, 5]
+
+
+def test_scan_warns_counts_and_exits_nonzero_on_debris_without_crashing(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """The fix round's blocking check: a half-written pair, a stray file, an unknown variant
+    directory, and an unrecognized file inside a valid variant directory must all be tolerated --
+    warned about, counted, excluded from the manifest -- without crashing the run, and the run
+    must still exit non-zero to say the output directory has something in it the manifest could
+    not account for.
+    """
+    assert generate.main(
+        ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
+    ) == 0
+
+    # Half-written pair: a Ctrl-C between save's sequential .npz-then-.json writes leaves exactly
+    # this. Not part of the second run's request below, so the scan finds it undisturbed.
+    (tmp_path / "aligned3" / "seed00_D20.json").unlink()
+    # An unrecognized file inside that same, otherwise-valid, variant directory.
+    (tmp_path / "aligned3" / "notes.txt").write_text("junk")
+    # A stray file directly under --out (".DS_Store" is close to guaranteed on this checkout).
+    (tmp_path / ".DS_Store").write_bytes(b"\x00")
+    # A directory that is not a known STUDY_GRID variant, holding an otherwise well-formed pair --
+    # must not even be descended into.
+    unknown_dir = tmp_path / "not_a_real_variant"
+    unknown_dir.mkdir()
+    (unknown_dir / "seed00_D20.npz").write_bytes(b"")
+    (unknown_dir / "seed00_D20.json").write_text("{}")
+
+    code = generate.main(
+        ["--out", str(tmp_path), "--D", str(D), "--seeds", "1", "--families", "decoupled"]
+    )
+
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.err  # warnings were actually printed, not swallowed
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    variants_in_manifest = {e["variant"] for e in manifest["entries"]}
+    assert variants_in_manifest == {"decoupled"}  # the only complete, recognized pair present
+
+
+def test_scan_reports_exact_issue_count_and_exits_nonzero(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    argv = ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
+    assert generate.main(argv) == 0
+    capsys.readouterr()  # discard the first run's output
+
+    (tmp_path / ".DS_Store").write_bytes(b"")
+
+    code = generate.main(argv)  # same request; aligned3/seed00 already exists -> skip-eligible
+    assert code == 1
+    captured = capsys.readouterr()
+    assert "warning: 1 item(s) under --out were ignored" in captured.err
+
+
 # --- bad arguments -----------------------------------------------------------------------------
 
 
@@ -241,6 +403,7 @@ def test_help_exits_0_and_documents_hash_portability_caveat(capsys: pytest.Captu
     assert code == 0
     captured = capsys.readouterr()
     assert "platform" in captured.out.lower()
+    assert "windows" in captured.out.lower()
 
 
 def test_manifest_documents_hash_portability_caveat(tmp_path: Path) -> None:
@@ -248,6 +411,8 @@ def test_manifest_documents_hash_portability_caveat(tmp_path: Path) -> None:
     assert generate.main(argv) == 0
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert "platform" in manifest["hash_note"].lower()
+    assert "windows" in manifest["hash_note"].lower()
+    assert "scope_note" in manifest
 
 
 # --- path-building helpers, checked against literals, not against each other -----------------
