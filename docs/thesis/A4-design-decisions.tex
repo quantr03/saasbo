@@ -16,9 +16,10 @@ only source for those.
 
 \SOlevelC{D1 --- the maximum is exact, and it is a maximum}\label{app:so:a4:d1}
 
-\textbf{Decision.} $\fstar$ is computed, not estimated. Interaction pairs and
-rotation pairs are disjoint and are checked to be so at construction, so the
-coordinates partition into blocks and~\eqref{app:so:a1:eq:fstar} makes $\fstar$
+\textbf{Decision.} $\fstar$ is computed, not estimated. Paired blocks ---
+interaction pairs and rotation pairs alike --- are checked to be disjoint at
+construction, so the coordinates partition into blocks
+and~\eqref{app:so:a1:eq:fstar} makes $\fstar$
 a sum of per-block maxima: closed form in one dimension, where a component is a
 cubic spline and \SOcode{Component.argmax} takes the best of the roots of its
 piecewise-quadratic derivative and the two endpoints; and a scan refined by
@@ -94,17 +95,15 @@ integrates to a nonzero value against it. Accepting the resulting offset was
 rejected because $\mu=0$ holds exactly for every other family, and the rotated
 family is the one the study compares against them: an uncentered mean there
 would be a confound sitting in precisely the contrast the family exists to
-make.
-
-\textbf{Why the angle is not the difficulty index (ruling R28).} The nominal
-$\theta$ does not order axis-misspecification. $\gaxis$ vanishes at every
-multiple of $90^\circ$ and is largest near the diagonal, so it is not monotone
-in $\theta$, and~\ref{app:so:a1:rotation} reads off
+make. One further consequence is an analysis rule rather than a design change,
+and it is ruling R28: the nominal $\theta$ does not order
+axis-misspecification. $\gaxis$ vanishes at every multiple of $90^\circ$ and is
+largest near the diagonal, so it is not monotone in $\theta$,
+and~\ref{app:so:a1:rotation} reads off
 Table~\ref{app:so:a1:tab:tab_rotation_angle} how far the seed-to-seed spread
-within one angle reaches. The consequence is an analysis rule rather than a
-design change --- no code moved, because $\gaxis$ is already a recorded label
---- and the rule is that the sweep is conditioned on the recorded $\gaxis$,
-never on the angle that generated it.
+within one angle reaches. No code moved for that one, because $\gaxis$ is
+already a recorded label; the rule is simply that the sweep is conditioned on
+the recorded $\gaxis$, never on the angle that generated it.
 
 \begin{sloppypar}
 \textbf{Check.} \SOcode{rotation.EXT\_LO} and \SOcode{rotation.EXT\_HI},
@@ -121,8 +120,11 @@ the knot count),
 (the $x$-space search),
 \SOtest{test\_rotated\_objective\_qmc\_variance\_is\_one\_after\_scaling} and
 \SOtest{test\_e\_nu\_f\_is\_zero\_after\_recentering\_at\_a\_non\_symmetric\_angle}
-(the two repairs, each checked under $\refnu$ rather than under the quadrature
-that computed them).
+(the two repairs, checked differently: the variance under $\refnu$ by a
+scrambled-Sobol estimate, the mean through the objective's public evaluator on
+the same quadrature $\mu$ was computed from, so that it exercises the rotation,
+$\mu$ and $\kappa$ together rather than restating
+\SOcode{\_compute\_mu}'s formula).
 \end{sloppypar}
 
 \SOlevelC{D3 --- fixed knots, clipped eigenvalues, and no jitter}\label{app:so:a4:d3}
@@ -138,30 +140,35 @@ the surviving knot is the \emph{node}: the merged values are sorted stably,
 which places a grid point before a node of equal value, and the last entry of
 each near-duplicate run is the one kept.
 
-\textbf{Why no jitter.} The usual ridge is not a small perturbation of the
-right kind. Adding it to the diagonal is exactly adding independent white noise
-at every knot, and the stored object is a spline whose derivative divides
-differences of neighbouring knot values by the knot spacing --- so the noise
-enters slope energy with a contribution that does not shrink as the component
-gets smoother, while by~\eqref{app:so:a1:eq:slopefactor} the quantity it
-pollutes is smallest for exactly the smoothest components. It would therefore
-corrupt the recorded slope-share labels worst where they matter most. Clipping
-is free of that defect because it \emph{removes} energy from the numerically
-null directions instead of adding energy in every direction; what it costs is a
-covariance that matches the target up to the clip rather than exactly, a
-bounded one-sided error confined to directions that carry no signal.
+\textbf{Why.} Two independent arguments, one for each half of the decision.
 
-\textbf{Why the nodes are knots.} \SOcode{Component.nu\_var} is a quadrature
-sum over the node values, and the rescale of~\eqref{app:so:a1:eq:rescale} is
-solved for that sum. Were the nodes not knots, the spline would have to be
-interpolated at them and the identity would hold only to interpolation error;
-because they are, the value the quadrature reads is the value the rescale was
-solved from, so the recorded share is exact under $\nuhat$ rather than nearly
-right. The dedup tie-break is not arbitrary for the same reason: keeping the
-node preserves that exactness, and in the one remaining case --- a grid point
-within \SOcode{KNOT\_TOL} above a node --- the quadrature reads the spline a
-tolerance away from the node, which moves it by far less than any label is
-quoted to.
+\begin{itemize}
+  \item \emph{No jitter.} The usual ridge is not a small perturbation of the
+    right kind. Adding it to the diagonal is exactly adding independent white
+    noise at every knot, and the stored object is a spline whose derivative
+    divides differences of neighbouring knot values by the knot spacing --- so
+    the noise enters slope energy with a contribution that does not shrink as
+    the component gets smoother, while by~\eqref{app:so:a1:eq:slopefactor} the
+    quantity it pollutes is smallest for exactly the smoothest components. It
+    would therefore corrupt the recorded slope-share labels worst where they
+    matter most. Clipping, the alternative that was taken, is free of that
+    defect because it \emph{removes} energy from the numerically null
+    directions instead of adding energy in every direction; what it costs is a
+    covariance that matches the target up to the clip rather than exactly, a
+    bounded one-sided error confined to directions that carry no signal.
+  \item \emph{The nodes are knots.} \SOcode{Component.nu\_var} is a quadrature
+    sum over the node values, and the rescale
+    of~\eqref{app:so:a1:eq:rescale} is solved for that sum. Were the nodes not
+    knots, the spline would have to be interpolated at them and the identity
+    would hold only to interpolation error; because they are, the value the
+    quadrature reads is the value the rescale was solved from, so the recorded
+    share is exact under $\nuhat$ rather than nearly right. The dedup
+    tie-break is not arbitrary for the same reason: keeping the node preserves
+    that exactness, and in the one remaining case --- a grid point within
+    \SOcode{KNOT\_TOL} above a node --- the quadrature reads the spline a
+    tolerance away from the node, which moves it by far less than any label is
+    quoted to.
+\end{itemize}
 
 \begin{sloppypar}
 \textbf{Check.} \SOcode{kernel.eigen\_factor} (the clip),
@@ -227,15 +234,16 @@ $\omega(\ell)\ge1$, and \SOcode{draws.omega\_for\_ell} is kept as the closed
 form regardless (ruling R11), with the pinning test parametrized only over
 lengthscales in that regime.
 
-\textbf{Why, and where it does not hold (ruling R23).} Matching the frequency
-is what makes the sinusoid variant an out-of-family check on the generator
-rather than a change of two things at once: the point is to ask whether a
-finding survives fitting Mat\'ern kernels to non-Mat\'ern components, which is
-only a clean question if slope energy per unit variance is held fixed. The
+\textbf{Why.} Matching the frequency is what makes the sinusoid variant an
+out-of-family check on the generator rather than a change of two things at
+once: the point is to ask whether a finding survives fitting Mat\'ern kernels
+to non-Mat\'ern components, which is only a clean question if slope energy per
+unit variance is held fixed. The
 alternative --- a frequency chosen for convenience --- would have confounded
-generator with roughness. But the study's only sinusoid variant,
-\SOcode{aligned10\_sin}, sits at a lengthscale whose $\omega$ column in
-Table~\ref{app:so:a1:tab:tab_v_ell} is below one, so for that variant the match
+generator with roughness. Where the match does \emph{not} hold is ruling R23's
+subject: the study's only sinusoid variant, \SOcode{aligned10\_sin}, sits at a
+lengthscale whose $\omega$ column in Table~\ref{app:so:a1:tab:tab_v_ell} is
+below one, so for that variant the match
 is a design target and \emph{not} a realized equality: on the smooth side of
 the crossing, centering under $U[0,1]$ removes proportionally more variance
 than slope energy and the realized ratio runs above the target. The regime
@@ -274,17 +282,16 @@ generator --- makes every component after the first edited one different, so no
 variant-to-variant comparison at a fixed seed means anything, and a sweep would
 be measuring reshuffled draws rather than the knob it varies. Spawning per rank
 buys the opposite: at one seed, changing a rank's lengthscale leaves every
-other rank's raw draw bit-identical rather than merely close.
-
-\textbf{What this does not say (ruling R29).} The invariance holds at fixed
-$(D, \text{seed}, \SOcode{n\_active}, \SOcode{n\_pairs})$: with those fixed,
-the same pairs are produced whether they go on to carry interactions or to be
-rotated, so the $\gamma$ sweep and the $\theta$ sweep each hold $S$, the pairs
-and the underlying draws fixed and move only their own knob. It does
-\emph{not} say that the two sweeps share $S$ or pairs with each other --- they
-are configured with different \SOcode{n\_active} and \SOcode{n\_pairs}, and a
-permutation of a different number of ranks is a different permutation. The
-correct form, with the same qualifier, is stated in~\ref{app:so:a3:seeding}.
+other rank's raw draw bit-identical rather than merely close. Ruling R29 fixes
+the scope of that invariance, and the scope matters: it holds at fixed
+$(D, \text{seed}, \SOcode{n\_active}, \SOcode{n\_pairs})$, where the same pairs
+are produced whether they go on to carry interactions or to be rotated, so the
+$\gamma$ sweep and the $\theta$ sweep each hold $S$, the pairs and the
+underlying draws fixed and move only their own knob. It does \emph{not} say
+that the two sweeps share $S$ or pairs with each other --- they are configured
+with different \SOcode{n\_active} and \SOcode{n\_pairs}, and a permutation of a
+different number of ranks is a different permutation. The correct form, with
+the same qualifier, is stated in~\ref{app:so:a3:seeding}.
 
 \begin{sloppypar}
 \textbf{Check.} \SOcode{families.streams}, \SOcode{families.select\_active},
@@ -360,15 +367,13 @@ The rejected alternative was to keep the per-seed bound and rely on the study's
 own seeds happening to pass it: that is a threshold fitted to a lucky slice,
 and it would not survive a change to the draw sequence. Splitting the criterion
 instead puts the design claim where it is exact and the realized claim where it
-is stable.
-
-\textbf{The statistic, precisely.} The accepted realized statistic is the
-Spearman of the \emph{seed-mean} rank-aligned $g$ against $s$.
-Table~\ref{app:so:a2:tab:anti-aligned} also carries a third coefficient, taken
-over all individual (seed, rank) realized pairs, and it is a different and
+is stable. Which realized statistic is meant needs saying precisely, because
+two were once confused: the accepted one is the Spearman of the
+\emph{seed-mean} rank-aligned $g$ against $s$, whereas
+Table~\ref{app:so:a2:tab:anti-aligned} carries a third coefficient as well,
+taken over all individual (seed, rank) realized pairs, which is a different and
 weaker number --- the honest measure of how well a single draw reproduces the
-design, not the criterion. The two were once confused, and
-all three are read apart
+design, and not the criterion. All three are read apart
 in~\ref{app:so:a2:anti-aligned}.
 
 \begin{sloppypar}
@@ -447,16 +452,17 @@ which asserts both halves at once: the share is under the cutoff and
 \SOlevelC{R31 --- what the component-variance diagnostic reports}\label{app:so:a4:r31}
 
 \textbf{Decision.} \SOcode{SyntheticObjective.component\_variances} returns
-each block's pre-rotation variance under $\nuhat$, excluding \SOcode{scale}.
-Under a rotation those numbers therefore neither sum to the realized $\Varnu f$
+each component's, and each interaction's, pre-rotation variance under $\nuhat$,
+excluding \SOcode{scale}. Under a rotation those numbers therefore neither sum
+to the realized $\Varnu f$
 --- which $\kappa$ forces to one --- nor give per-coordinate axis variances.
 The ruling fixed the docstring and added a test; it did not change the return
 value.
 
 \textbf{Why.} The quantity is still meaningful ground truth: it is exactly
 \SOcode{Labels.s} and \SOcode{Labels.s\_pairs}, measured rather than
-prescribed, so it diverges from them precisely when a block was not built to
-the share it claims --- which is what a diagnostic is for. What was false was
+prescribed, so it diverges from them precisely when one of them was not built
+to the share it claims --- which is what a diagnostic is for. What was false was
 the promise that it reports realized per-block variances summing to $\Varnu f$;
 that holds without a rotation and only by coincidence with one. The rejected
 alternative was to make it rotation-aware, and it was rejected on contract
@@ -558,8 +564,8 @@ which separates the write timestamp from the entries it describes.
 \SOlevelC{R38 --- where the BoTorch adapter applies the sign}\label{app:so:a4:r38}
 
 \textbf{Decision.} The adapter declares
-\SOcode{\_is\_minimization\_by\_default = False}. It overrides one method,
-\SOcode{\_evaluate\_true}, and leaves the \SOcode{negate} flip to BoTorch's own
+\SOcode{\_is\_minimization\_by\_default = False}. It overrides one evaluation
+method, \SOcode{\_evaluate\_true}, and leaves the \SOcode{negate} flip to BoTorch's own
 \SOcode{forward}; it does not flip the sign itself.
 
 \textbf{Why.} The instruction it was built from said that \SOcode{negate}
@@ -594,18 +600,18 @@ the flip through the call path rather than through
 naming the reason. No family in the study reaches the combination, and the
 command line cannot produce it.
 
-\textbf{Why rejected rather than computed.} The label assembly skips every
+\textbf{Why.} Rejecting is the choice rather than computing the missing value,
+and the reason is that no value is well defined. The label assembly skips every
 paired coordinate when assigning an unpaired component's $\saxis{i}$, and
 ``paired'' there covers interaction pairs as well as rotation pairs, while only
 rotation pairs get an $\saxis{i}$ assigned back. An interaction-paired
 coordinate under a rotation would therefore keep $\saxis{i}=0$ and its true
 first-order variance would be absorbed into $\gaxis$ --- a silent mislabel in
-exactly the label the rotated family exists to report. The alternative was to
-compute the missing value, and it was rejected because there is no obvious
-value to compute: deciding what an axis-aligned first-order share \emph{means}
-for a coordinate that is both interaction-paired and rotated is design work,
-and doing it late, under pressure, for a configuration nothing needs is how
-invented semantics become silent errors. Refusing is one guard and is honest;
+exactly the label the rotated family exists to report. Supplying a value
+instead would mean deciding what an axis-aligned first-order share
+\emph{means} for a coordinate that is both interaction-paired and rotated ---
+real design work, and doing it late, under pressure, for a configuration
+nothing needs is how invented semantics become silent errors. Refusing is one guard and is honest;
 if the combination is ever wanted, it becomes a specified feature rather than a
 quiet fix.
 
