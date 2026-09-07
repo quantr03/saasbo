@@ -104,9 +104,11 @@ neither the realized axis-aligned variance --- that is \SOcode{Labels.s\_axis}
 --- nor anything \SOcode{scale} has touched.
 
 \textbf{\SOcode{SyntheticObjective}: construction guards.} All five raise at
-construction rather than at the first evaluation, because each one breaks the
-separability that makes $\fstar$ a sum of per-block maxima
-(\ref{app:so:a1:fstar}) rather than a joint search. An empty
+construction rather than at the first evaluation, because each one would
+otherwise yield an objective whose $\fstar$ or whose labels are silently wrong.
+Three of the five protect the separability that makes $\fstar$ a sum of
+per-block maxima (\ref{app:so:a1:fstar}) rather than a joint search; the first
+and the last protect the labels instead. An empty
 \SOcode{components} raises \SOcode{ValueError} (an objective with no $S$ has
 nothing to label); two components on one coordinate raise \SOcode{ValueError}
 (\SOcode{\_\_call\_\_} would sum both, but only one would reach the $\fstar$
@@ -151,7 +153,7 @@ with active entries exactly on a face of the cube; every coordinate outside $S$ 
 left at the cube's midpoint, since $f$ ignores it. Finally, \SOcode{Labels} is
 declared \SOcode{eq=False} (ruling R4 of the code plan): the generated
 \SOcode{\_\_eq\_\_} of a frozen dataclass compares the fields as a tuple, which
-raises on the five ndarray fields, so equality falls back to identity and two
+raises on the six ndarray fields, so equality falls back to identity and two
 independently built but numerically identical records compare \emph{unequal}.
 Compare them field by field.
 
@@ -161,7 +163,7 @@ Compare them field by field.
   The \SOcode{Labels} record: the ground truth a posterior is scored against.
   Generated from the \SOcode{Labels} dataclass itself, so the field list cannot
   drift from the code. Shapes are given in terms of the ambient dimension $D$;
-  the four array fields written $(D,)$ are indexed \emph{by coordinate}, which
+  the six array fields written $(D,)$ are indexed \emph{by coordinate}, which
   is what distinguishes them from the same-named, rank-ordered members of the
   npz (Table~\ref{app:so:a3:tab:npz}). \SOcode{active\_eps} is recorded, never
   enforced.}\label{app:so:a3:tab:labels}
@@ -259,9 +261,10 @@ unsorted rank order, and~\ref{app:so:a3:files} is where that distinction bites.
 children off \SOcode{main}
 gives rank $k$ its own sequence, and rank $k$'s component is drawn from that
 child alone. So changing one coordinate's lengthscale --- or its share, or the
-generator's parameters at that rank --- leaves every other rank's draw
-bit-identical, not merely close. A scheme that drew every rank from one
-generator in sequence would instead reshuffle every component after the first
+generator's parameters at that rank --- leaves every other rank's raw draw
+bit-identical, not merely close; a rank's draw depends on its own child stream
+and its own lengthscale, never on any share. A scheme that drew every rank from
+one generator in sequence would instead reshuffle every component after the first
 edited one, and no variant-to-variant comparison at a fixed seed would mean
 anything.
 
@@ -308,20 +311,23 @@ repetitions.
   What each part of the scheme isolates: for a change made at a fixed seed, what
   is allowed to move and what is bit-identical. ``Bit-identical'' is meant
   literally --- these are equalities of stored floating-point arrays, not
-  tolerances --- with the single exception noted in the $\gamma$ row, where the
-  \emph{raw} draw is bit-identical and the stored values differ from it by the
-  new share's rescale alone. Every row but the fifth is pinned by a test named
-  in the Code / Test paragraph below; the fifth is a property of
-  \SOcode{build}'s control flow, which selects the pairs before it reads
-  \SOcode{theta\_deg}, and no test asserts it
+  tolerances --- with the exception noted in the \SOcode{n\_active} and
+  $\gamma$ rows, where the \emph{raw} draw is what is bit-identical and the
+  stored values differ from it by the new share's rescale alone. The Code / Test
+  paragraph below names the test behind each row, with two caveats a reader
+  should not have to discover: the first row is pinned only for the
+  coordinates, its test comparing coordinate sets and never draws, and the fifth
+  is a property of \SOcode{build}'s control flow --- it selects the pairs before
+  it reads \SOcode{theta\_deg} --- that no test asserts
   directly.}\label{app:so:a3:tab:seeding}
   \footnotesize\setlength{\tabcolsep}{4pt}
   \begin{tabular}{p{2.5cm}p{3.6cm}p{4.4cm}}
     \toprule
     change at one seed & what moves & what is bit-identical \\
     \midrule
-    \SOcode{n\_active} & the ranks appended past the old end of $S$ &
-      every earlier rank's coordinate and its draw \\
+    \SOcode{n\_active} & the ranks appended past the old end of $S$, and the
+      equal split of $1-\gamma$ over all of them &
+      every earlier rank's coordinate, and its raw draw up to that rescale \\
     one entry of \SOcode{ells} & that rank's component alone &
       every other rank's grid and values \\
     \SOcode{gamma} & the pair coefficients $c_{ij}$ and the main shares &
@@ -390,9 +396,9 @@ everything else, including the entire \SOcode{Labels} record.
 before opening an npz with numpy alone. The members \SOcode{active},
 \SOcode{s} and \SOcode{ell} are $(|S|,)$ in \emph{rank} order --- the order
 \SOcode{self.components} was built in, which is the truncated permutation
-\SOcode{select\_active} returned and therefore not sorted. They share their
-names with
-$(D,)$ \SOcode{Labels} fields that are indexed by \emph{coordinate}, and the
+\SOcode{select\_active} returned and therefore in general not sorted. They
+share their names with $(D,)$ \SOcode{Labels} fields that are indexed by
+\emph{coordinate}, and the
 names collide where the arrays do not. Concretely: \SOcode{npz['active']} is
 the rank-to-coordinate map, and it is the file's only record of that map;
 \SOcode{npz['s'][k]} and \SOcode{npz['ell'][k]} are rank $k$'s share and
@@ -554,7 +560,10 @@ integers --- two alternative forms, not combinable into one string.
 \emph{variant} names, the entries of \SOcode{STUDY\_GRID}, not the coarser
 family labels that group them; an unrecognized name is reported with the full
 list of valid ones. The defaults are exactly the study's grid: $\SOnumVariants$
-variants at ten seeds, the $\SOnumFiles$ files of~\ref{app:so:a3:files}.
+variants at ten seeds, the $\SOnumFiles$ files of~\ref{app:so:a3:files} --- a
+``file'' throughout this appendix being one \emph{objective}, which is the npz
+and JSON pair \SOcode{save} writes together, so $\SOnumFiles$ counts objectives
+and twice that many files sit on disk.
 
 \textbf{Layout, and the dotted name.} An objective's two files are named
 \SOfile{<out>/<variant>/seed<seed>\_D<D>.npz}
