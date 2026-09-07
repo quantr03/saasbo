@@ -597,9 +597,30 @@ def _describe_scale_column(kappa: np.ndarray) -> str:
     return f"not exactly 1.0 at every seed (max $|\\kappa - 1| = {max_dev:.2e}$)"
 
 
+_EPSILON_TOL = 1e-12
+
+
 def _describe_epsilon_column(values: np.ndarray) -> str:
     """How many of `values` are exactly `0.0`, and the actual signed non-zero values (grouped by
-    value, formatted `+d.de-dd`) -- again, every number here is read off `values`."""
+    value, formatted `+d.de-dd`) -- again, every number here is read off `values`.
+
+    Called only for `gamma_axis` at `_EXACT_ANGLES`, where `rotation.py`'s ANOVA-remainder
+    property makes the quantity exactly zero. `tab_rotation_angle`'s closing header line
+    ("exact only to floating-point epsilon, never a genuinely negative quantity") is emitted
+    unconditionally, so it needs a guard that the data cannot falsify while the sentence stands
+    (task-6 item 0b): every non-zero entry must be epsilon-scale. `_EPSILON_TOL` is four orders
+    of magnitude above the largest residual actually observed (2.2e-16), so it fails on a real
+    remainder rather than on the last bit of a rounding.
+    """
+    off = np.abs(values[values != 0.0])
+    if off.size and float(off.max()) >= _EPSILON_TOL:
+        raise AssertionError(
+            "tab_rotation_angle: a non-zero gamma_axis at theta in "
+            f"{{{', '.join(f'{a:.0f}' for a in _EXACT_ANGLES)}}} is {float(off.max()):.3e}, at or "
+            f"above {_EPSILON_TOL:.0e} -- too large to be floating-point epsilon. The table's "
+            "closing header line claims the opposite; fix the claim (and check rotation.py's "
+            "ANOVA-remainder property) rather than the tolerance."
+        )
     n_zero = int(np.sum(values == 0.0))
     nonzero = values[values != 0.0]
     if nonzero.size == 0:

@@ -17,12 +17,12 @@ Scans every ``.tex`` file in this directory and in ``tables/`` and checks:
   5. No ``\\documentclass``, ``\\begin{document}``, ``\\usepackage`` or
      ``\\cite`` in a fragment or a table.
   6. No raw ``\\mathrm{Var}``, ``\\mathrm{E}``, ``\\mathbb{E}``, ``\\sigma``
-     or ``\\lambda`` in a fragment -- the notation-drift guard; these must
-     go through the macros in synthobj-notation.sty instead. This also
-     catches the subscripted/decorated forms (``\\sigma_i^2``,
+     or ``\\lambda`` in a fragment or a table -- the notation-drift guard;
+     these must go through the macros in synthobj-notation.sty instead. This
+     also catches the subscripted/decorated forms (``\\sigma_i^2``,
      ``\\lambda_{\\max}``): matching stops only at a following letter, not
      at ``_`` or a digit.
-  7. Every ``\\SO...`` macro a fragment uses is defined in
+  7. Every ``\\SO...`` macro a fragment or a table uses is defined in
      synthobj-notation.sty (``\\newcommand``/``\\renewcommand``/
      ``\\DeclareMathOperator``) or as ``\\SOnum...`` in tables/numbers.tex.
      Deliberately scoped to the SO namespace only (fix-round 2, ruling
@@ -40,6 +40,12 @@ Scans every ``.tex`` file in this directory and in ``tables/`` and checks:
 A4-design-decisions.tex. "Table" means a file under tables/. "The wrapper"
 means standalone_main.tex, which is exempt from checks 4-7 since it is
 allowed (and needs) \\documentclass, \\usepackage, etc.
+
+Checks 6 and 7 cover tables as well as fragments (task-6 item 0a): every
+generated table is \\input into a fragment, so raw notation or an undefined
+\\SO macro emitted by regen_tables.py lands in the appendix exactly as if it
+had been typed into the fragment by hand, and scoping the two checks to
+fragments alone left that path unguarded.
 
 Exits 1 and prints one "path:line: message" line per failure; exits 0 and
 prints a one-line summary if everything passes.
@@ -60,7 +66,13 @@ WRAPPER_NAME = "standalone_main.tex"
 # Everything else -- standard LaTeX/amsmath commands and this file's own
 # non-SO notation macros alike -- is left to the compile (make pdf,
 # latexmk -halt-on-error), which fails on any genuinely undefined command.
-SO_MACRO_RE = re.compile(r"\\(SO[A-Za-z]*)\b")
+# No trailing \b (task-6 item 0c): Python's \b treats a digit and "_" as word
+# characters, so "\SOnumTypo2" and "\SOnumTypo_i" -- where [A-Za-z]* has
+# already stopped at TeX's own control-word boundary, leaving the digit or
+# underscore as ordinary following text -- were not word boundaries and the
+# undefined name went unreported. [A-Za-z]* is the boundary TeX itself uses,
+# so no further anchor is needed or correct.
+SO_MACRO_RE = re.compile(r"\\(SO[A-Za-z]*)")
 DEFINE_RE = re.compile(
     r"\\(?:newcommand|renewcommand|DeclareMathOperator)\*?\{?\\([A-Za-z]+)\}?"
 )
@@ -185,8 +197,8 @@ def check_raw_notation(path: Path, lines: list[str]) -> None:
             fail(
                 path,
                 lineno,
-                f"raw notation {m.group(0)!r} in a fragment; use a macro from "
-                f"synthobj-notation.sty instead",
+                f"raw notation {m.group(0)!r} in a fragment/table; use a macro "
+                f"from synthobj-notation.sty instead",
             )
 
 
@@ -256,14 +268,14 @@ def main() -> int:
             check_banned_host_commands(path, lines)
 
     for path, lines in file_lines.items():
-        if category(path) == "fragment":
+        if category(path) in ("fragment", "table"):
             check_raw_notation(path, lines)
 
     defined_macros = collect_macro_defs(
         HERE / "synthobj-notation.sty", HERE / "tables" / "numbers.tex"
     )
     for path, lines in file_lines.items():
-        if category(path) == "fragment":
+        if category(path) in ("fragment", "table"):
             check_macros_defined(path, lines, defined_macros)
 
     if failures:
