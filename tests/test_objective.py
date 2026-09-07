@@ -531,6 +531,10 @@ def test_rotation_is_accepted(
     # otherwise inactive (see INACTIVE), so a small extended-domain pair there is disjoint from
     # both PAIR and UNPAIRED; the deep rotation math lives in test_rotation.py -- this only pins
     # that SyntheticObjective's guard now lets a real PairRotation through.
+    #
+    # `inters` (a real Interaction on PAIR) is deliberately left out here (fix-round finding,
+    # ruling R39): combining it with this rotation is a separate, rejected configuration -- see
+    # test_rotation_combined_with_an_interaction_is_rejected below.
     mains, inters = pieces
     grid = make_grid(EXT_LO, EXT_HI, 256)
     factor = eigen_factor(EXT_LO, EXT_HI, 256, 0.5)
@@ -538,11 +542,30 @@ def test_rotation_is_accepted(
     f5 = Component.from_raw(5, 0.5, 0.25, grid, gp_draw(factor, np.random.default_rng(51)))
     rotation = PairRotation(30.0, ((0, 5),))
 
-    built = SyntheticObjective(D, mains + (f0, f5), inters, rotation, None, 0)
+    built = SyntheticObjective(D, mains + (f0, f5), (), rotation, None, 0)
     assert built.rotation is rotation
     assert built.labels.rotation_deg == 30.0
     assert built.labels.rotation_pairs == ((0, 5),)
     assert np.isfinite(built.f_star)
+
+
+def test_rotation_combined_with_an_interaction_is_rejected(
+    pieces: tuple[tuple[Component, ...], tuple[Interaction, ...]]
+) -> None:
+    """Ruling R39: this module's own `inters` fixture (a real Interaction on `PAIR`) combined with
+    a rotation on a disjoint pair is rejected at construction, not silently assembled with an
+    undefined `s_axis` for the interaction-paired coordinates -- see test_rotation.py's
+    `test_rotation_and_interaction_together_is_rejected_at_construction` for the full
+    label-corruption demonstration this guards against."""
+    mains, inters = pieces
+    grid = make_grid(EXT_LO, EXT_HI, 256)
+    factor = eigen_factor(EXT_LO, EXT_HI, 256, 0.5)
+    f0 = Component.from_raw(0, 0.5, 0.25, grid, gp_draw(factor, np.random.default_rng(50)))
+    f5 = Component.from_raw(5, 0.5, 0.25, grid, gp_draw(factor, np.random.default_rng(51)))
+    rotation = PairRotation(30.0, ((0, 5),))
+
+    with pytest.raises(ValueError, match="rotation"):
+        SyntheticObjective(D, mains + (f0, f5), inters, rotation, None, 0)
 
 
 def test_a_non_pairrotation_object_is_rejected(

@@ -37,6 +37,8 @@ from scipy.stats import qmc
 
 from synthobj.component import Component
 from synthobj.draws import gp_draw
+from synthobj.families import ROTATED_GRID_N
+from synthobj.interaction import Interaction
 from synthobj.kernel import GL_NODES, GL_WEIGHTS, eigen_factor, make_grid
 from synthobj.objective import SyntheticObjective
 from synthobj.rotation import (
@@ -50,11 +52,15 @@ from synthobj.rotation import (
 )
 
 # The brief's dispatch configuration: two pairs of ell=0.5 components, shares 0.25 each, drawn on
-# the extended grid (ruling R7: n_ext = 1469, joint length 1533).
+# the extended grid (ruling R7: n_ext = families.ROTATED_GRID_N = 1469, joint length 1533). Bound
+# to the production constant, not a second independent literal (fix-round finding: this module
+# used to hardcode 1469 here and recompute the same formula again, unbound to `ROTATED_GRID_N`,
+# in `test_ext_bounds_and_n_ext_match_ruling_r7` below -- neither copy could see a mutation to the
+# production constant itself).
 D = 20
 ELL = 0.5
 MAIN_SHARE = 0.25
-N_EXT = 1469
+N_EXT = ROTATED_GRID_N
 COORDS: tuple[int, ...] = (3, 8, 12, 17)
 PAIRS: tuple[tuple[int, int], ...] = ((3, 8), (12, 17))
 INACTIVE: tuple[int, ...] = (0, 1, 19)
@@ -123,6 +129,11 @@ def test_ext_bounds_and_n_ext_match_ruling_r7() -> None:
     n_ext = math.ceil((EXT_HI - EXT_LO) * (1024 - 1)) + 1
     assert n_ext == 1469
     assert n_ext + 64 == 1533  # joint length: draw grid + the 64 GL nodes
+
+    # Bound to the production constant itself (fix-round finding), not just re-asserted as a
+    # second, independent literal: this line is what actually fails if `families.ROTATED_GRID_N`
+    # drifts from the formula above.
+    assert ROTATED_GRID_N == n_ext
 
 
 # --- R() and forward ---------------------------------------------------------------------------
@@ -355,6 +366,43 @@ def test_overlapping_rotation_pairs_are_rejected() -> None:
     comps = tuple(_component(c, MAIN_SHARE, 951 + c) for c in (0, 1, 2))
     with pytest.raises(ValueError, match="disjoint"):
         SyntheticObjective(3, comps, (), PairRotation(30.0, ((0, 1), (1, 2))), None, 0)
+
+
+def test_rotation_and_interaction_together_is_rejected_at_construction() -> None:
+    """Ruling R39: rotating one pair while another pair carries a real `Interaction` is rejected at
+    construction rather than assembled with an invented `s_axis`.
+
+    `_compute_labels` skips every coordinate in `paired` (interaction pairs and rotation pairs
+    alike) when assigning an unpaired component's `s_axis`, but only ever assigns `s_axis` back to
+    a *rotation* pair's own two coordinates -- an interaction-paired coordinate under a rotation
+    would be left at `s_axis = 0` forever, and its true first-order share would silently vanish
+    into `gamma_axis` instead (fix-round finding, demonstrated at 4 coordinates of share 0.2 with
+    rotation on (0, 1) and interaction on (2, 3): `s_axis` comes out `[0.2293, 0.0852, 0.0, 0.0]`,
+    `gamma_axis = 0.6854` against a true interaction share of about 0.18). No family in the study
+    reaches this (`theta_deg` always routes every pair to rotation), but `SyntheticObjective` is
+    public and this whole test module constructs it directly.
+    """
+    f0, f1 = _component(0, MAIN_SHARE, 960), _component(1, MAIN_SHARE, 961)
+    f2 = Component.from_raw(
+        2, ELL, MAIN_SHARE, make_grid(0.0, 1.0, 1024),
+        gp_draw(eigen_factor(0.0, 1.0, 1024, ELL), np.random.default_rng(962)),
+    )
+    f3 = Component.from_raw(
+        3, ELL, MAIN_SHARE, make_grid(0.0, 1.0, 1024),
+        gp_draw(eigen_factor(0.0, 1.0, 1024, ELL), np.random.default_rng(963)),
+    )
+    u2 = Component.from_raw(
+        2, ELL, 1.0, make_grid(0.0, 1.0, 1024),
+        gp_draw(eigen_factor(0.0, 1.0, 1024, ELL), np.random.default_rng(964)),
+    )
+    u3 = Component.from_raw(
+        3, ELL, 1.0, make_grid(0.0, 1.0, 1024),
+        gp_draw(eigen_factor(0.0, 1.0, 1024, ELL), np.random.default_rng(965)),
+    )
+    inter = Interaction(2, 3, 0.1, u2, u3)
+
+    with pytest.raises(ValueError, match="rotation"):
+        SyntheticObjective(4, (f0, f1, f2, f3), (inter,), PairRotation(30.0, ((0, 1),)), None, 0)
 
 
 def test_an_unpaired_component_under_rotation_keeps_its_own_argmax_and_share() -> None:
