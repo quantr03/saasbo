@@ -29,13 +29,16 @@ No test here builds `dense_weak` in a way that conflates `Labels.active` (member
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from scipy.stats import qmc, spearmanr
 
-from synthobj.families import FAMILIES, STUDY_GRID, FamilySpec, build, make_family
-from synthobj.kernel import v
+from synthobj.families import FAMILIES, ROTATED_GRID_N, STUDY_GRID, FamilySpec, build, make_family
+from synthobj.kernel import GL_NODES, v
 from synthobj.objective import ACTIVE_EPS
+from synthobj.rotation import EXT_HI, EXT_LO
 
 
 # --- the family table (task-7 brief, "final" values) -----------------------------------------
@@ -101,6 +104,59 @@ def test_variant_matches_family_table_at_D20(name: str) -> None:
     if "n_rot_pairs" in expected:
         assert len(labels.rotation_pairs) == expected["n_rot_pairs"]
         assert labels.pairs == ()  # rotated pairs are a change of basis, not an Interaction
+
+
+def test_rotation_angle_is_bound_per_variant() -> None:
+    """`FAMILIES["rotated_t15"]`'s `theta_deg` is bound to 15.0, not just "some rotation".
+
+    Fix-round finding: mutating `rotated_t15`'s registered `theta_deg` from 15.0 to 45.0 made it
+    bit-identical to `rotated_t45` (max|delta f| measured exactly 0.0, since the two variants then
+    share every draw) and left the full suite at 290 passed -- the rotation sweep silently had 2
+    angles, not 3, and 20 of the study's 140 files duplicated another 20. `Labels.rotation_deg` is
+    the realized angle, read back from the assembled `PairRotation`, not `spec.theta_deg` echoed.
+    """
+    assert make_family("rotated_t0", seed=0, D=20).labels.rotation_deg == pytest.approx(0.0)
+    assert make_family("rotated_t15", seed=0, D=20).labels.rotation_deg == pytest.approx(15.0)
+    assert make_family("rotated_t45", seed=0, D=20).labels.rotation_deg == pytest.approx(45.0)
+
+
+def test_family_spec_noise_sd_default_is_the_studys_0_1() -> None:
+    """`FamilySpec.noise_sd`'s default (0.1, the study's noise level) is unbound by any other test:
+    no `FAMILIES` entry overrides it, so mutating the dataclass default to 0.2 left the full suite
+    green while doubling the recorded noise on every one of the study's 140 regret curves
+    (fix-round finding). Checked both on the bare default and through a real build, since a build
+    could in principle read the field through a path this test's first assertion does not exercise.
+    """
+    assert FamilySpec("t").noise_sd == 0.1
+    obj = make_family("aligned3", seed=0, D=20)
+    assert obj.noise_sd == pytest.approx(0.1)
+    assert obj.labels.noise_sd == pytest.approx(0.1)
+
+
+def test_family_spec_grid_n_default_matches_the_built_components() -> None:
+    """`FamilySpec.grid_n`'s default (1024) sets every non-rotated component's draw-grid
+    resolution; unbound by any other test (fix-round finding: mutating it to 512 left the full
+    suite green while drawing all 110 non-rotated study files at half the knot density R7's
+    spline-error bound assumes). A component's stored knot count is `grid_n` uniform points merged
+    with the 64 GL quadrature nodes (`Component.from_raw`'s docstring: 1088 for a 1024-point draw
+    grid), so this checks the constant is actually used, not merely declared."""
+    assert FamilySpec("t").grid_n == 1024
+    obj = make_family("aligned3", seed=0, D=20)  # aligned3 has no rotated pair
+    assert obj.components[0].grid.size == 1024 + GL_NODES.size
+
+
+def test_rotated_grid_n_matches_ruling_r7s_formula() -> None:
+    """`ROTATED_GRID_N` is bound to R7's formula -- `ceil((EXT_HI - EXT_LO) * (base_n - 1)) + 1`,
+    where `base_n` is the same `FamilySpec.grid_n` default the non-rotated grid uses -- rather than
+    to a second, independent literal. `tests/test_rotation.py` recomputed this formula against a
+    hardcoded `1024`/`1469` without ever reading `families.ROTATED_GRID_N` (fix-round finding: that
+    guard cannot see the production constant at all), so mutating `ROTATED_GRID_N` from 1469 to
+    1024 there left the full suite green while drawing all 30 rotated study files at 1.43e-3 knot
+    spacing instead of 9.77e-4."""
+    base_n = FamilySpec("t").grid_n
+    expected = math.ceil((EXT_HI - EXT_LO) * (base_n - 1)) + 1
+    assert ROTATED_GRID_N == expected
+    assert ROTATED_GRID_N + GL_NODES.size == 1533  # joint length: draw grid + 64 GL nodes
 
 
 def test_family_flags_match_the_table_for_variants_that_deviate_from_defaults() -> None:
