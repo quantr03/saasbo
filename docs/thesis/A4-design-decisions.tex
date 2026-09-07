@@ -380,9 +380,9 @@ in~\ref{app:so:a2:anti-aligned}.
 \textbf{Check.}
 \SOtest{test\_anti\_aligned\_theoretical\_slope\_shares\_reverse\_the\_variance\_ranking}
 (the deterministic half) and
-\SOtest{test\_anti\_aligned\_realized\_slope\_share\_pooled\_over\_seeds\_is\_reversed},
-whose name predates the distinction above but whose assertion is on the
-seed-mean vector: it rank-aligns each seed by sorting that seed's own $s$
+\SOtest{test\_anti\_aligned\_realized\_slope\_share\_seed\_averaged\_is\_reversed},
+whose assertion is on the seed-mean vector: it rank-aligns each seed by
+sorting that seed's own $s$
 descending --- \SOcode{Labels.g} is indexed by coordinate and every seed draws
 a different $S$, so averaging by position would average incomparable quantities
 --- and correlates the mean against the specification's shares.

@@ -314,7 +314,7 @@ def test_anti_aligned_theoretical_slope_shares_reverse_the_variance_ranking() ->
 
 
 @pytest.mark.slow
-def test_anti_aligned_realized_slope_share_pooled_over_seeds_is_reversed() -> None:
+def test_anti_aligned_realized_slope_share_seed_averaged_is_reversed() -> None:
     """Realized assertion (R13), pooled over the study's own seeds 0-9. A single draw's slope
     energy is high-variance (R13 struck the per-seed rule for exactly this reason), so this pools
     `g` across seeds instead -- but *by rank*, never by coordinate: `Labels.g[S]` is ordered by

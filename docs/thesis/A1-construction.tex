@@ -70,7 +70,7 @@ of degree $\le2$ and so exact) and
 \SOtest{test\_slope\_energy\_of\_an\_exact\_cubic\_matches\_its\_closed\_form}.
 \end{sloppypar}
 
-\SOlevelC{Centered kernel and $\vell{\ell}$}\label{app:so:a1:kernel}
+\SOlevelC{Centered kernel and its normalizer}\label{app:so:a1:kernel}
 
 Components are drawn from a Mat\'ern-$5/2$ kernel of unit amplitude,
 \begin{equation}\label{app:so:a1:eq:matern}
@@ -510,7 +510,7 @@ $\refnu$ they inherit the gap of~\ref{app:so:a1:draw} and nothing worse.
   \caption[Product-interaction orthogonality residuals]{
   The three identities \emph{(i)}--\emph{(iii)} as residuals, over
   every interaction block with a non-zero coefficient on the archived grid
-  (seeds $0$--$9$, $D=100$). $\Varhat h$ is formed from the block's own
+  (seeds $0$--$9$, $D=\SOnumStudyD$). $\Varhat h$ is formed from the block's own
   $64\times64$ node values rather than from \SOcode{Interaction.nu\_var},
   which is the algebraic factorization \emph{(iii)} itself and so could not
   test it.}\label{app:so:a1:tab:tab_orthogonality}
@@ -704,7 +704,7 @@ recorded $\gaxis$ label, never on $\theta$.
   of~\eqref{app:so:a1:eq:gammaaxis}, the renormalization $\kappa$ and the
   recentering offset $\mu$ of~\eqref{app:so:a1:eq:kappa}
   and~\eqref{app:so:a1:eq:mu}. Measured on the archived grid, seeds $0$--$9$,
-  $D=100$: the study's own angles, plus three further angles built from the
+  $D=\SOnumStudyD$: the study's own angles, plus three further angles built from the
   same specification with $\theta$ overridden. At $\theta\in\{0^\circ,
   90^\circ\}$, $\kappa$ is exactly $1$ at every seed and $\gaxis$ is zero up
   to floating-point epsilon --- never a genuinely negative quantity,
@@ -741,7 +741,7 @@ independently of the stored labels. (Its first half is vacuous by
 construction, as its own docstring states, and is not the citation here.)
 \end{sloppypar}
 
-\SOlevelC{The maximum $\fstar$}\label{app:so:a1:fstar}
+\SOlevelC{The maximum}\label{app:so:a1:fstar}
 
 \textbf{Separability.} Interaction pairs and rotation pairs are disjoint, and
 are checked to be so at construction, so the coordinates partition into paired
@@ -788,7 +788,7 @@ error.
   \centering
   \caption[Convergence of the paired-block maximizations]{
   Convergence of the paired-block maximizations, measured on the
-  archived grid, seeds $0$--$9$, $D=100$. The gain is a fresh evaluation of
+  archived grid, seeds $0$--$9$, $D=\SOnumStudyD$. The gain is a fresh evaluation of
   the block at the point the tighter re-optimization returns, minus the value
   at the point already stored; the projected gradient is L-BFGS-B's own
   first-order criterion at that stored point, with a component pushing out of
