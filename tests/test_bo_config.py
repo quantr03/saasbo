@@ -116,10 +116,11 @@ def test_every_flag_reaches_the_resolved_config(tmp_path):
 
 def test_every_run_starts_from_the_shared_initial_design(tmp_path):
     design = initial_design(5, _N_INIT, _SEED)
-    # One method that fits and one that does not. The remaining five would each buy a real fit and
-    # no new information: `initial_design` takes (D, n_init, seed) and no method, and `run_bo`
-    # calls it once, before `cfg.method` has been used for anything at all.
-    for method in ("sobol", "dsp_map"):
+    # One method that fits nothing and the two MAP references, whose fits are milliseconds. The
+    # remaining four would each buy a NUTS run and no new information: `initial_design` takes
+    # (D, n_init, seed) and no method, and `run_bo` calls it once, before `cfg.method` has been
+    # used for anything at all.
+    for method in ("sobol", "dsp_map", "oracle_S"):
         run_dir = run_bo(
             _objective(), method, seed=_SEED, T=_T, n_init=_N_INIT,
             out_dir=tmp_path / method, **_LOOP_KW,

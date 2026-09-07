@@ -5,7 +5,10 @@ sampler being the vendored reference's. `_run_nuts` is `SAASGP.run_inference` co
 nothing but a test can keep honest -- so the first test runs the reference class and `fit` on the
 same data with the key `SAASGP.fit` derives and demands *bit-for-bit* equal draws: a difference of
 one ulp would mean the copy is no longer the same sampler on the same model. It runs twice, at a
-toy budget and (marked slow) at the production 512/256/16.
+toy budget and at the production 512/256/16 -- both on every invocation of the suite (ruling R20):
+the production pair of fits measures about 4.4 s against the slow marker's ten-second threshold,
+and reference equivalence at the budget the study is actually run at is not a claim worth
+deferring to a marker the default invocation deselects.
 
 The refit policy is behaviour the reference does not have, so it is tested against stubbed
 diagnostics rather than a chain that happens to converge: the verdict decides the path, and the
@@ -82,7 +85,6 @@ def test_nuts_reproduces_reference_bit_for_bit():
     _assert_matches_reference(ours, ref, thinning=4)
 
 
-@pytest.mark.slow
 def test_nuts_reproduces_reference_bit_for_bit_production_budget():
     X, y = _data(n=30, D=5, seed=0)
     ref = saasgp.SAASGP(
@@ -161,22 +163,27 @@ def _spy_on_run_nuts(monkeypatch) -> list[jax.Array]:
 
 def test_refit_and_excluded_paths(monkeypatch):
     X, y = _data(n=12, D=3, seed=1)
+    key = jax.random.PRNGKey(0)
     nuts = NUTSConfig(64, 32, 4)
     mcmc_calls = _spy_on_mcmc(monkeypatch)
     keys = _spy_on_run_nuts(monkeypatch)
 
     monkeypatch.setattr(sagp.gp, "_diagnose", _stub_diagnose([False, True]))
-    refit = fit(X, y, key=jax.random.PRNGKey(0), cell=("product", "lengthscale"), nuts=nuts)
+    refit = fit(X, y, key=key, cell=("product", "lengthscale"), nuts=nuts)
 
     assert refit.status == "refit"
     assert len(refit.attempts) == 2
     # The refit is a fresh chain with twice the warm-up, driven by a key disjoint from attempt 0's.
+    # Both keys are pinned to the values `fit` documents, not merely to being different: attempt 0
+    # must use the caller's key *unchanged* (that is what lets a run reproduce the reference), and
+    # the refit must use `fold_in(key, 1)` (disjoint from `bo.py`'s exception retry, `fold_in(2)`).
     assert [call["num_warmup"] for call in mcmc_calls] == [64, 128]
-    assert not np.array_equal(np.asarray(keys[0]), np.asarray(keys[1]))
+    assert np.array_equal(np.asarray(keys[0]), np.asarray(key))
+    assert np.array_equal(np.asarray(keys[1]), np.asarray(jax.random.fold_in(key, 1)))
     assert refit.samples["kernel_inv_length_sq"].shape == (8, 3)
 
     monkeypatch.setattr(sagp.gp, "_diagnose", _stub_diagnose([False, False]))
-    excluded = fit(X, y, key=jax.random.PRNGKey(0), cell=("product", "lengthscale"), nuts=nuts)
+    excluded = fit(X, y, key=key, cell=("product", "lengthscale"), nuts=nuts)
 
     assert excluded.status == "excluded"
     assert excluded.status_reason != ""
@@ -255,6 +262,33 @@ def test_cells_wiring(cell_key):
     assert cell.model.__name__ == f"model_{cell.structure}_{cell.prior}"
     assert cell.kernel is KERNELS[cell.key][0]
     assert cell.kernel_diag is KERNELS[cell.key][1]
+
+
+def test_fit_with_fixed_noise():
+    """A fixed observation variance removes `kernel_noise` from the model, not just from the draws.
+
+    The reproduction test runs the whole loop at `fixed_noise=1e-6`, which is the reference
+    driver's `observation_variance`; what makes that the same model is that the site is never
+    sampled, so a fit that merely fixed the *value* would still have an extra latent dimension and
+    a different chain. `fixed_noise` is kept on the fitted object because prediction needs it:
+    `FittedGP._noises` has no `kernel_noise` to read.
+    """
+    X, y = _data(n=12, D=3, seed=5)
+    fitted = fit(
+        X,
+        y,
+        key=jax.random.PRNGKey(0),
+        cell=("product", "lengthscale"),
+        fixed_noise=1.0e-6,
+        nuts=NUTSConfig(32, 32, 4),
+    )
+
+    assert "kernel_noise" not in fitted.samples
+    assert set(fitted.samples) == {
+        "kernel_var", "kernel_tausq", "_kernel_inv_length_sq", "kernel_inv_length_sq"
+    }
+    assert fitted.fixed_noise == 1.0e-6
+    assert fitted.samples["kernel_inv_length_sq"].shape == (8, 3)
 
 
 def test_fit_rejects_fixed_noise_zero():

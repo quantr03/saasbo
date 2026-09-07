@@ -353,6 +353,28 @@ def test_resume_redoes_an_iteration_whose_row_was_torn_by_the_kill(tmp_path):
                 assert redone[column] == first[column]
 
 
+def test_resume_rewrites_a_header_the_kill_tore(tmp_path):
+    # Ruling R37. The kill can land inside the *header* too, before any row is on disk. What it
+    # leaves holds no complete row at all, so there is nothing to keep -- and leaving the fragment
+    # alone would be worse than removing it: `append_row` writes a header only into a file that is
+    # missing or empty, so every row of the resumed run would land underneath a torn first line.
+    run_dir = run_bo(
+        _objective(), "dsp_map", seed=1, T=8, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
+    )
+    iterations = run_dir / "iterations.csv"
+    header = iterations.read_text().splitlines()[0]
+    with iterations.open("w", newline="") as handle:
+        handle.write(header[:10])  # cut mid-field, with no line terminator
+
+    run_bo(
+        _objective(), "dsp_map", seed=1, T=8, n_init=_N_INIT, out_dir=tmp_path, resume=True,
+        **_LOOP_KW,
+    )
+    rows = _read_rows(iterations)
+    assert list(rows[0]) == header.split(",")
+    assert [int(row["t"]) for row in rows] == list(range(_N_INIT, 8))
+
+
 def test_initial_design_is_the_first_rows_of_the_runs_sobol_sequence():
     # What makes the Sobol reference a *continuation* of the shared design rather than a new one.
     assert np.array_equal(initial_design(5, 5, 1), initial_design(5, 15, 1)[:5])
@@ -488,3 +510,34 @@ def test_the_oracle_reference_fits_the_objectives_own_S_end_to_end(tmp_path):
     assert len(coords) == 5 * (12 - _N_INIT)
     assert all(float(r["p_active"]) == 0.0 for r in coords if int(r["i"]) in off_S)
     assert all(float(r["native_median"]) == 0.0 for r in coords if int(r["i"]) in off_S)
+
+
+@pytest.mark.slow
+def test_oracle_beats_sobol_on_aligned3(tmp_path):
+    """The oracle reference beats a Sobol search: the loop optimizes, it does not merely run.
+
+    Every other loop test here pins a *mechanism* -- the same seed gives the same trajectory, a
+    resume reproduces the uninterrupted run, the row schema is the plan's -- and all of them would
+    still pass if the acquisition were maximized with the wrong sign or evaluated at the wrong
+    point. This is the end-to-end check that it is not. `oracle_S` is handed the objective's own
+    S and so fits a 3-dimensional GP inside a 20-dimensional box, which is the most favourable
+    surrogate the study has; over 40 fitted iterations it has to end below a quasi-random search
+    of the same budget. Three seeds and a median rather than one run, because a single Sobol
+    design can be lucky, and the reduced acquisition budget of the other loop tests because what
+    is compared is the two methods against each other, at settings they share.
+    """
+    objective = make_family("aligned3", 0, D=20)
+    kwargs = dict(T=50, n_init=10, num_init_candidates=1000, num_restarts_ei=2)
+    final = {
+        method: [
+            float(
+                _read_rows(
+                    run_bo(objective, method, seed=seed, out_dir=tmp_path, **kwargs)
+                    / "iterations.csv"
+                )[-1]["regret"]
+            )
+            for seed in range(3)
+        ]
+        for method in ("oracle_S", "sobol")
+    }
+    assert np.median(final["oracle_S"]) < np.median(final["sobol"])

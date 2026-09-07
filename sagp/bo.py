@@ -534,7 +534,10 @@ class RunLogger:
         away the run -- so what the study gets instead is a dated entry naming what changed, in
         `log.txt` for the person watching and in the manifest for the analysis. The manifest is
         re-read rather than rebuilt, so `created`, the original versions and every earlier resume
-        survive; only this run's own `resumed` entry is new.
+        survive; only this run's own `resumed` entry is new. That read-modify-write is the one
+        place the manifest can be destroyed by a kill, so it lands by tmp-file and `os.replace`
+        like the checkpoint (ruling R36): a truncated manifest would take the run's whole
+        provenance with it, and resume reads `config_hash` back out of it.
         """
         recorded = json.loads(self.manifest.read_text())
         was = recorded.get("versions", {})
@@ -544,7 +547,9 @@ class RunLogger:
         recorded.setdefault("resumed", []).append(
             {"time": _now(), "commit": git["commit"], "versions_changed": changed}
         )
-        self.manifest.write_text(json.dumps(recorded, indent=2, sort_keys=True, default=str) + "\n")
+        tmp = self.manifest.with_name(self.manifest.name + ".tmp")
+        tmp.write_text(json.dumps(recorded, indent=2, sort_keys=True, default=str) + "\n")
+        os.replace(tmp, self.manifest)
         for name in changed:
             self.log(f"warning: {name} is {now[name]}, this run started under {was.get(name)}")
         started_at = recorded.get("git", {}).get("commit")
@@ -675,9 +680,17 @@ def _complete_rows(path: Path) -> list[list[str]]:
 
 
 def _truncate_csv(path: Path, t_done: int) -> None:
-    """Rewrite `path` keeping its header and the rows whose first column (`t`) is <= `t_done`."""
+    """Rewrite `path` keeping its header and the rows whose first column (`t`) is <= `t_done`.
+
+    A file holding no complete row at all is *removed* rather than left alone (ruling R37): the
+    kill landed inside the header itself, and `append_row` treats any non-empty file as one that
+    already has a header, so leaving the fragment there would append every later row underneath a
+    torn first line. Unlinking makes the next append rewrite the header. A missing file -- a Sobol
+    run's `coords.csv`, which never existed -- takes the same branch and is a no-op.
+    """
     rows = _complete_rows(path)
     if not rows:
+        path.unlink(missing_ok=True)
         return
     width = len(rows[0])
     kept = [row for row in rows[1:] if len(row) == width and int(row[0]) <= t_done]
@@ -1122,6 +1135,11 @@ def resolve_config(args: argparse.Namespace) -> RunConfig:
     )
 
 
+def _objective_stem(args: argparse.Namespace) -> Path:
+    """`<dir>/<family>/seed{seed:02d}_D{D}`: this run's stem under `--objective-dir`."""
+    return args.objective_dir / args.family / f"seed{args.seed:02d}_D{args.D}"
+
+
 def _load_objective(args: argparse.Namespace) -> SyntheticObjective:
     """The problem to run: the study grid's stored objective, or one rebuilt from its family.
 
@@ -1133,8 +1151,7 @@ def _load_objective(args: argparse.Namespace) -> SyntheticObjective:
     """
     if args.objective_dir is None:
         return make_family(args.family, args.seed, args.D)
-    stem = args.objective_dir / args.family / f"seed{args.seed:02d}_D{args.D}"
-    return SyntheticObjective.load(stem)
+    return SyntheticObjective.load(_objective_stem(args))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1160,7 +1177,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         objective = _load_objective(args)
     except (KeyError, FileNotFoundError) as error:
-        print(f"error: no objective for --family {args.family!r}: {error}", file=sys.stderr)
+        # Two different mistakes reach the same exit code, and naming `--family` for both would
+        # send the operator of a cluster job looking in the wrong place: under `--objective-dir`
+        # the family is usually fine and it is the *file* that the grid never wrote, so the
+        # message names the stem that was looked for.
+        if args.objective_dir is None:
+            print(f"error: no objective for --family {args.family!r}: {error}", file=sys.stderr)
+        else:
+            print(
+                f"error: no objective file at {_objective_stem(args)}.npz for "
+                f"--objective-dir {args.objective_dir}: {error}",
+                file=sys.stderr,
+            )
         return 2
 
     if args.dry_run:
