@@ -1,0 +1,113 @@
+%% synthobj-notation.sty
+%% Notation macros for the synthobj thesis appendix (docs/thesis/).
+%%
+%% Authority: "Research Context/research direction/Design-brief.md" fixes the
+%% symbols below. This package REUSES that notation; it does not invent any
+%% parallel notation of its own. Fragments (appendix-synthobj.tex, A1-A4)
+%% use these macros rather than re-typing the underlying LaTeX for any
+%% symbol that has one below.
+%%
+%% ---------------------------------------------------------------------
+%% Host hooks. A thesis \input-ing appendix-synthobj.tex overrides these
+%% BEFORE the \input, never after:
+%%
+%%   \SOlevelA / \SOlevelB / \SOlevelC
+%%       Sectioning macros used by every heading in every fragment; never a
+%%       bare \section. Default \section/\subsection/\subsubsection, for a
+%%       standalone article-class compile. A chapter-based thesis (e.g. the
+%%       Aalto template) does, before \input{appendix-synthobj}:
+%%           \renewcommand{\SOlevelA}{\chapter}
+%%           \renewcommand{\SOlevelB}{\section}
+%%           \renewcommand{\SOlevelC}{\subsection}
+%%
+%%   \SOroot
+%%       Directory holding this appendix's fragments and its tables/,
+%%       relative to the host's \input search path. Defaults to "." (the
+%%       fragments' own directory). Every table \input in a fragment is
+%%       written \input{\SOroot/tables/<name>}, so a host that relocates
+%%       docs/thesis/ elsewhere only needs to renew \SOroot.
+%%
+%%   \SOciteOAK / \SOciteSAASBO / \SOcitePapenmeier
+%%       Plain-text citation stand-ins (no bibliography is assumed here).
+%%       Default to readable prose citations. A host thesis with a
+%%       bibliography renews each to \cite{key}. Fragments use ONLY these
+%%       three; a fragment never contains a bare \cite.
+%%
+%% \SOnum{<name>} is deliberately NOT defined in this file: Task 2's
+%% generated tables/numbers.tex defines one \newcommand{\SOnum<Name>}{...}
+%% per measured number. This file must never define anything with the
+%% \SOnum prefix.
+%%
+%% ---------------------------------------------------------------------
+%% Symbol resolutions documented here, not encoded as macros, because each
+%% is a bare letter or an already-standard LaTeX/amsmath symbol (a macro is
+%% provided only for an operator or a decorated symbol):
+%%
+%%   a_i          amplitude of component i
+%%   s_i          variance share of component i (its first-order Sobol index)
+%%   g_i          the RECORDED slope-share label:
+%%                E_\nu[(f_i')^2] / sum_j E_\nu[(f_j')^2]
+%%   r_i          the raw, uncentered GP draw for component i, before
+%%                centering/rescaling. The Design-brief overloads g_i for
+%%                both the raw draw and the slope share; this appendix
+%%                resolves that overload by keeping g_i for the recorded
+%%                slope-share label only and using r_i for the draw.
+%%   \gamma       interaction share, sum_{(i,j) in I} s_{ij}
+%%   c_{ij}       pair coefficient, sqrt(s_{ij})
+%%   \rho_i       inverse squared lengthscale, \ell_i^{-2}
+%%   S, I         active coordinate set, active pair set
+%%   w_q, t_q     Gauss-Legendre quadrature weights and nodes
+%%   \kappa       the objective's `scale` (plain \kappa; no macro needed)
+%%   \mu          the objective's `mu` recentering offset (plain \mu); the
+%%                Design-brief already writes "\mu + \sum_i \max f_i"
+%%   \theta       rotation angle (plain \theta; \Rtheta below is R_\theta)
+%%
+%% ---------------------------------------------------------------------
+%% Every macro below is \newcommand, never \providecommand: a name clash
+%% with a host macro must error at \usepackage time, not silently adopt the
+%% host's meaning.
+
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{synthobj-notation}[2026/09/07 notation macros for the synthobj thesis appendix]
+
+\RequirePackage{amsmath}
+\RequirePackage{amssymb}
+\RequirePackage{booktabs}
+
+%% --- Structural hooks ---------------------------------------------------
+\newcommand{\SOlevelA}{\section}
+\newcommand{\SOlevelB}{\subsection}
+\newcommand{\SOlevelC}{\subsubsection}
+
+\newcommand{\SOroot}{.}
+
+\newcommand{\SOciteOAK}{Lu et al.\ (2022, eq.~8)}
+\newcommand{\SOciteSAASBO}{Eriksson and Jankowiak (2021)}
+\newcommand{\SOcitePapenmeier}{Papenmeier et al.\ (2025)}
+
+%% --- Typographic helpers -------------------------------------------------
+\newcommand{\SOcode}[1]{\texttt{#1}}  % identifiers, e.g. \SOcode{make_family}
+\newcommand{\SOtest}[1]{\texttt{#1}}  % test names
+\newcommand{\SOfile}[1]{\texttt{#1}}  % paths
+
+%% --- Design-brief notation ------------------------------------------------
+\newcommand{\refnu}{\nu}                          % reference measure
+\newcommand{\Enu}{\mathbb{E}_\nu}                 % expectation under \nu
+\newcommand{\Varnu}{\mathrm{Var}_\nu}             % variance under \nu
+\newcommand{\kl}{k_\ell}                          % Matern-5/2 kernel at lengthscale \ell
+\newcommand{\ktil}{\tilde k_\ell}                 % centered kernel
+\newcommand{\vell}[1]{v(#1)}                      % avg. marginal variance of the centered kernel
+\newcommand{\kbar}{\bar k_i}                      % normalized kernel
+\newcommand{\fstar}{f^\star}                      % the maximum
+\newcommand{\Ehat}{\widehat{\mathbb{E}}_\nu}      % quadrature expectation
+\newcommand{\Varhat}{\widehat{\mathrm{Var}}_\nu}  % quadrature variance
+
+%% --- Symbols the appendix adds beyond the Design-brief --------------------
+\newcommand{\nuhat}{\hat\nu}                      % the 64-node discrete measure sum_q w_q delta_{t_q}
+\newcommand{\Rtheta}{R_\theta}                    % rotation matrix
+\newcommand{\phip}{\phi_p}                        % one paired block
+\newcommand{\saxis}[1]{s_{#1}^{\mathrm{axis}}}    % axis-aligned first-order share of coordinate #1
+\newcommand{\gaxis}{\gamma^{\mathrm{axis}}}       % axis-misspecification share
+\newcommand{\knots}{G}                            % knot count
+\newcommand{\nExt}{n_{\mathrm{ext}}}              % extended-grid size
+\newcommand{\activeeps}{\varepsilon}              % ACTIVE_EPS

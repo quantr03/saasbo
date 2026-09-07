@@ -1,0 +1,20 @@
+% appendix-synthobj.tex
+% Top-level, \input-able fragment documenting the synthobj package. Imposes
+% nothing on its host: no \documentclass, no \begin{document}, no \cite, no
+% hyperref (the host loads that last, if at all).
+%
+% Three host hooks, all defined in synthobj-notation.sty and overridable by
+% \renewcommand BEFORE this file is \input:
+%   \SOlevelA / \SOlevelB / \SOlevelC  -- sectioning; default to
+%       \section/\subsection/\subsubsection. A chapter-based thesis (e.g.
+%       the Aalto template) renews them to \chapter/\section/\subsection.
+%   \SOroot  -- directory holding this fragment's tables/; default ".". A
+%       host that relocates docs/thesis/ elsewhere renews \SOroot instead
+%       of editing every \input below.
+%   \SOciteOAK / \SOciteSAASBO / \SOcitePapenmeier  -- plain-text citation
+%       stand-ins; a host with a bibliography renews each to \cite{key}.
+\SOlevelA{Synthetic objectives (\SOcode{synthobj})}\label{app:so:top}
+\input{\SOroot/A1-construction}
+\input{\SOroot/A2-families}
+\input{\SOroot/A3-api-fileformat}
+\input{\SOroot/A4-design-decisions}

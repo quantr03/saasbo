@@ -1,0 +1,15 @@
+% standalone_main.tex
+% Standalone compile-test wrapper for appendix-synthobj.tex. Not part of the
+% thesis: it exists only to prove the fragment compiles on its own. A real
+% thesis \input{appendix-synthobj} into its own chapter-based document
+% instead, after renewing \SOlevelA/B/C, \SOroot and \SOcite* as needed.
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{synthobj-notation}
+\usepackage{hyperref}
+\begin{document}
+\appendix
+\input{appendix-synthobj}
+\end{document}
