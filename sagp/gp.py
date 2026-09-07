@@ -22,15 +22,20 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 
 import jax.numpy as jnp
+import numpyro
+import numpyro.distributions as dist
 from jax import Array, jit
 from jax.typing import ArrayLike
+from scipy.optimize import brentq
 
 import saasgp
 from synthobj.kernel import GL_NODES as _GL_NODES_NUMPY
 from synthobj.kernel import GL_WEIGHTS as _GL_WEIGHTS_NUMPY
+from synthobj.objective import ACTIVE_EPS
 
 # (structure in {"additive", "product"}, sparsity prior in {"amplitude", "lengthscale"}).
 CellKey = tuple[str, str]
@@ -221,3 +226,253 @@ def cell_kernel_diag(key: CellKey, X: Array, params: dict[str, Array]) -> Array:
     thousands of test points at a time, and only that one cell has a diagonal constant in x.
     """
     return KERNELS[key][1](X, params)
+
+
+# --- cells ---
+
+# Prior calibration, plan decisions D2 and D3. `ACTIVE_EPS` -- a coordinate is active when it
+# carries more than 2 % of the variance -- is imported from `synthobj.objective` rather than
+# restated, so the objectives' labels and the surrogate's prior are calibrated against one cutoff
+# and cannot drift apart.
+
+# The reference SAASGP's own sparsity hyperparameter, on its rho scale.
+ALPHA_LENGTHSCALE: float = 0.1
+
+# v(ELL_EPS) = ACTIVE_EPS: the lengthscale at which a unit-amplitude centered component's variance
+# under U[0,1] falls to the active cutoff, so "share > eps" <=> "ell < ELL_EPS" <=> "rho > RHO_EPS".
+# That equivalence is what makes the two priors' *active counts* comparable below, and it is also
+# the lengthscale cells' native active rule. Solved at import rather than hardcoded so it tracks
+# `v_of_ell` instead of silently disagreeing with it: v is strictly decreasing (v(0.5) = 0.282,
+# v(50) = 5.6e-5), so the bracket contains exactly one root, and brentq costs a few dozen 64x64
+# quadrature sums.
+ELL_EPS: float = float(brentq(lambda ell: float(v_of_ell(ell)) - ACTIVE_EPS, 0.5, 50.0))
+RHO_EPS: float = ELL_EPS**-2.0
+
+# Both priors are the same half-Cauchy scale mixture, theta_i = tausq * lam_i with tausq ~
+# HC(alpha) and lam_i ~ HC(1), whose prior-predictive active count #{i : theta_i > c} depends on
+# (alpha, c) only through c / alpha. Matching the a^2-count at c = ACTIVE_EPS to the reference's
+# rho-count at c = RHO_EPS therefore fixes alpha in closed form -- and matches the whole count
+# distribution, not merely its median (plan D2, checked by `test_alpha_matches_reference_count`).
+ALPHA_AMPLITUDE: float = ALPHA_LENGTHSCALE * ACTIVE_EPS / RHO_EPS
+
+# LogNormal(mu, sigma) on each coordinate's lengthscale in the amplitude cells, where the
+# amplitude carries the sparsity and ell is left a free shape parameter: median 1 (one wiggle
+# across [0,1]), 95 % interval [0.053, 18.9]. That covers the study families' 0.06-3 without being
+# tuned to them, and puts only 1 % below 0.03, discouraging the ell -> 0 corner where a normalized
+# component degenerates into white noise and competes with `kernel_noise` (plan D3). The
+# lengthscale cells have no ell prior at all: there the half-Cauchy on rho *is* the lengthscale
+# prior, and adding a second one would change the model being compared.
+ELL_PRIOR: tuple[float, float] = (0.0, 1.5)
+
+
+def model_product_lengthscale(
+    X: Array, Y: Array, *, alpha: float, fixed_noise: float | None
+) -> None:
+    """SAASBO itself: ARD Matern-5/2 under the SAAS prior rho_i = tausq * lam_i, tausq ~ HC(alpha).
+
+    The vendored `SAASGP.model` body verbatim, with `self.alpha` -> `alpha`, `self.learn_noise` ->
+    `fixed_noise is None`, `self.observation_variance` -> `fixed_noise`, and `self.kernel` -> this
+    cell's kernel, which delegates to the very `saasgp.matern_kernel` the reference calls. Copied
+    rather than imported only because the plan needs a module-level model carrying these site
+    names in this order; `test_product_lengthscale_log_joint_matches_reference` pins the copy to
+    the reference class's log joint so the copy cannot drift.
+
+    Sites in order: `kernel_var` ~ LogNormal(0, 10); `kernel_noise` ~ LogNormal(0, 10), present
+    only when the noise is learned (`fixed_noise is None`); `kernel_tausq` ~ HalfCauchy(alpha), the
+    global shrinkage; `_kernel_inv_length_sq` ~ HalfCauchy(1) per coordinate, the local shrinkage;
+    and the deterministic `kernel_inv_length_sq` = tausq * `_kernel_inv_length_sq`.
+    """
+    N, P = X.shape
+
+    var = numpyro.sample("kernel_var", dist.LogNormal(0.0, 10.0))
+    noise = (
+        numpyro.sample("kernel_noise", dist.LogNormal(0.0, 10.0))
+        if fixed_noise is None
+        else fixed_noise
+    )
+    tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(alpha))
+
+    # note we use deterministic to reparameterize the geometry
+    inv_length_sq = numpyro.sample("_kernel_inv_length_sq", dist.HalfCauchy(jnp.ones(P)))
+    inv_length_sq = numpyro.deterministic("kernel_inv_length_sq", tausq * inv_length_sq)
+
+    k = kernel_product_lengthscale(
+        X, X, {"kernel_var": var, "kernel_inv_length_sq": inv_length_sq}, noise, True
+    )
+    numpyro.sample("Y", dist.MultivariateNormal(loc=jnp.zeros(N), covariance_matrix=k), obs=Y)
+
+
+def model_additive_lengthscale(
+    X: Array, Y: Array, *, alpha: float, fixed_noise: float | None
+) -> None:
+    """Additive structure under the SAAS prior: `model_product_lengthscale` with the other kernel.
+
+    Identical to `model_product_lengthscale` site for site and prior for prior -- same names, same
+    order, same distributions -- so that a difference between this cell and SAASBO is attributable
+    to the kernel's structure alone. Sites: see `model_product_lengthscale`.
+    """
+    N, P = X.shape
+
+    var = numpyro.sample("kernel_var", dist.LogNormal(0.0, 10.0))
+    noise = (
+        numpyro.sample("kernel_noise", dist.LogNormal(0.0, 10.0))
+        if fixed_noise is None
+        else fixed_noise
+    )
+    tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(alpha))
+
+    inv_length_sq = numpyro.sample("_kernel_inv_length_sq", dist.HalfCauchy(jnp.ones(P)))
+    inv_length_sq = numpyro.deterministic("kernel_inv_length_sq", tausq * inv_length_sq)
+
+    k = kernel_additive_lengthscale(
+        X, X, {"kernel_var": var, "kernel_inv_length_sq": inv_length_sq}, noise, True
+    )
+    numpyro.sample("Y", dist.MultivariateNormal(loc=jnp.zeros(N), covariance_matrix=k), obs=Y)
+
+
+def model_additive_amplitude(
+    X: Array, Y: Array, *, alpha: float, fixed_noise: float | None, ell_prior: tuple[float, float]
+) -> None:
+    """Additive structure with the sparsity moved onto the amplitudes: a_sq_i = tausq * lam_i.
+
+    The same half-Cauchy scale mixture as the lengthscale cells, applied to the components'
+    variances instead of their inverse squared lengthscales -- with `alpha = ALPHA_AMPLITUDE` the
+    two induce the same prior-predictive active count (plan D2). Because every component is
+    normalized, a_sq_i is coordinate i's variance under the reference measure whatever its
+    lengthscale, so shrinking a_sq_i to zero removes the coordinate outright rather than merely
+    flattening it; the lengthscale is then a free shape parameter and gets its own prior (D3).
+
+    Sites in order: `kernel_noise` ~ LogNormal(0, 10) when learned; `kernel_tausq` ~
+    HalfCauchy(alpha); `_a_sq` ~ HalfCauchy(1) per coordinate; the deterministic `a_sq` = tausq *
+    `_a_sq`; and `kernel_ell` ~ LogNormal(*ell_prior) per coordinate. There is no `kernel_var`
+    site: `a_sq` already carries every component's scale, and a global factor on top of it would
+    be unidentifiable against tausq.
+    """
+    N, P = X.shape
+
+    noise = (
+        numpyro.sample("kernel_noise", dist.LogNormal(0.0, 10.0))
+        if fixed_noise is None
+        else fixed_noise
+    )
+    tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(alpha))
+
+    # As in the reference: the deterministic reparameterization is what gives NUTS a geometry it
+    # can move in, since sampling a_sq directly would have tausq's scale baked into every step.
+    a_sq = numpyro.sample("_a_sq", dist.HalfCauchy(jnp.ones(P)))
+    a_sq = numpyro.deterministic("a_sq", tausq * a_sq)
+    ell = numpyro.sample("kernel_ell", dist.LogNormal(jnp.full(P, ell_prior[0]), ell_prior[1]))
+
+    k = kernel_additive_amplitude(X, X, {"a_sq": a_sq, "kernel_ell": ell}, noise, True)
+    numpyro.sample("Y", dist.MultivariateNormal(loc=jnp.zeros(N), covariance_matrix=k), obs=Y)
+
+
+def model_product_amplitude(
+    X: Array, Y: Array, *, alpha: float, fixed_noise: float | None, ell_prior: tuple[float, float]
+) -> None:
+    """Product structure with amplitude sparsity: `model_additive_amplitude` with the other kernel.
+
+    Identical to `model_additive_amplitude` site for site and prior for prior, so that a
+    difference between the two amplitude cells is attributable to the kernel's structure alone.
+    Sites: see `model_additive_amplitude`.
+    """
+    N, P = X.shape
+
+    noise = (
+        numpyro.sample("kernel_noise", dist.LogNormal(0.0, 10.0))
+        if fixed_noise is None
+        else fixed_noise
+    )
+    tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(alpha))
+
+    a_sq = numpyro.sample("_a_sq", dist.HalfCauchy(jnp.ones(P)))
+    a_sq = numpyro.deterministic("a_sq", tausq * a_sq)
+    ell = numpyro.sample("kernel_ell", dist.LogNormal(jnp.full(P, ell_prior[0]), ell_prior[1]))
+
+    k = kernel_product_amplitude(X, X, {"a_sq": a_sq, "kernel_ell": ell}, noise, True)
+    numpyro.sample("Y", dist.MultivariateNormal(loc=jnp.zeros(N), covariance_matrix=k), obs=Y)
+
+
+@dataclass(frozen=True)
+class Cell:
+    """One of the four surrogates: everything inference, prediction and the readouts need of it.
+
+    Bundling the model with its kernel, its sites and its alpha is what lets `fit`, `posterior`
+    and `identify` be written once against `Cell` and be literally the same code for all four --
+    the design's central requirement, since any per-cell branch downstream would be a confound.
+    """
+
+    structure: str  # "additive" or "product"
+    prior: str  # "amplitude" or "lengthscale"
+    model: Callable[..., None]  # bind alpha/fixed_noise (and ell_prior) before handing to NUTS
+    kernel: Callable[..., Array]  # (X, Z, params, noise, include_noise) -> (n, m)
+    kernel_diag: Callable[..., Array]  # (X, params) -> (n,), without noise or jitter
+    native_site: str  # the site the cell's own sparsity lives on: what its active rule thresholds
+    sites: tuple[str, ...]  # every site to retain, sampled and deterministic, in declared order
+    alpha_default: float  # calibrated so all four cells' priors have the same active count
+
+    @property
+    def key(self) -> CellKey:
+        """(structure, prior): this cell's key in `CELLS` and in `KERNELS`."""
+        return (self.structure, self.prior)
+
+
+# The four cells of the 2x2. `sites` includes `kernel_noise` unconditionally; a fit with
+# `fixed_noise` set drops it, because then it is not a site at all.
+CELLS: dict[CellKey, Cell] = {
+    cell.key: cell
+    for cell in (
+        Cell(
+            structure="additive",
+            prior="amplitude",
+            model=model_additive_amplitude,
+            kernel=kernel_additive_amplitude,
+            kernel_diag=_diag_additive_amplitude,
+            native_site="a_sq",
+            sites=("kernel_noise", "kernel_tausq", "_a_sq", "a_sq", "kernel_ell"),
+            alpha_default=ALPHA_AMPLITUDE,
+        ),
+        Cell(
+            structure="additive",
+            prior="lengthscale",
+            model=model_additive_lengthscale,
+            kernel=kernel_additive_lengthscale,
+            kernel_diag=_diag_additive_lengthscale,
+            native_site="kernel_inv_length_sq",
+            sites=(
+                "kernel_var",
+                "kernel_noise",
+                "kernel_tausq",
+                "_kernel_inv_length_sq",
+                "kernel_inv_length_sq",
+            ),
+            alpha_default=ALPHA_LENGTHSCALE,
+        ),
+        Cell(
+            structure="product",
+            prior="amplitude",
+            model=model_product_amplitude,
+            kernel=kernel_product_amplitude,
+            kernel_diag=_diag_product_amplitude,
+            native_site="a_sq",
+            sites=("kernel_noise", "kernel_tausq", "_a_sq", "a_sq", "kernel_ell"),
+            alpha_default=ALPHA_AMPLITUDE,
+        ),
+        Cell(
+            structure="product",
+            prior="lengthscale",
+            model=model_product_lengthscale,
+            kernel=kernel_product_lengthscale,
+            kernel_diag=_diag_product_lengthscale,
+            native_site="kernel_inv_length_sq",
+            sites=(
+                "kernel_var",
+                "kernel_noise",
+                "kernel_tausq",
+                "_kernel_inv_length_sq",
+                "kernel_inv_length_sq",
+            ),
+            alpha_default=ALPHA_LENGTHSCALE,
+        ),
+    )
+}

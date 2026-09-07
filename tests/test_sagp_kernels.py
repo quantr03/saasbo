@@ -13,9 +13,14 @@ measured against.
 enable_x64 is in force for every array below.
 """
 from sagp.gp import (
+    ACTIVE_EPS,
+    ALPHA_AMPLITUDE,
+    ALPHA_LENGTHSCALE,
+    ELL_EPS,
     GL_NODES,
     GL_WEIGHTS,
     KERNELS,
+    RHO_EPS,
     cell_kernel_diag,
     centered_matern52_1d,
     kernel_product_lengthscale,
@@ -56,6 +61,11 @@ V_TABLE = [0.88574, 0.78149, 0.60296, 0.28218, 0.10680, 0.03183, 0.01478, 0.0054
 # var * ones and the tolerance absorbs the floor instead (1.3 * 2.5e-12 = 3.3e-12, measured).
 DIAG_ATOL = dict.fromkeys(CELL_KEYS, 1.0e-12)
 DIAG_ATOL[("product", "lengthscale")] = 1.0e-11
+
+# Plan decision D2's simulation, at the size it was run during planning: 10^4 prior draws of the
+# half-Cauchy scale mixture over D_ALPHA coordinates.
+N_DRAWS = 10**4
+D_ALPHA = 100
 
 
 def _params() -> dict[str, jax.Array | float]:
@@ -218,3 +228,39 @@ def test_cell_kernel_gradients_are_finite(key):
     grads = jax.grad(lambda p: kernel(X, X, p, 0.0, False).sum())(_params())
 
     assert all(bool(jnp.isfinite(g).all()) for g in jax.tree.leaves(grads))
+
+
+def _active_counts(rng: np.random.Generator, alpha: float, cutoff: float) -> np.ndarray:
+    """#{i : tausq * lam_i > cutoff} per draw, for tausq ~ HalfCauchy(alpha), lam_i ~ HalfCauchy(1).
+
+    The prior-predictive active count of either cell: `alpha` and `cutoff` are (0.1, RHO_EPS) on
+    the reference's rho scale and (ALPHA_AMPLITUDE, ACTIVE_EPS) on the amplitude scale. Drawn as
+    |standard Cauchy| times the scale, which is exactly `dist.HalfCauchy(scale)`, in numpy so the
+    check is independent of the JAX code it calibrates.
+    """
+    tausq = alpha * np.abs(rng.standard_cauchy(N_DRAWS))[:, None]
+    lam = np.abs(rng.standard_cauchy((N_DRAWS, D_ALPHA)))
+    return np.count_nonzero(tausq * lam > cutoff, axis=1)
+
+
+def test_alpha_matches_reference_count():
+    # ALPHA_AMPLITUDE is derived in closed form (plan D2) from the fact that the count
+    # distribution depends on (alpha, cutoff) only through cutoff / alpha; this is the
+    # independent numerical check that it really transports the reference prior's sparsity onto
+    # the a^2 scale, so a difference between an amplitude cell and SAASBO is the parameterization
+    # and not a differently sparse prior. Two independent sets of draws from one seeded generator,
+    # so agreement is a property of the priors and not of shared random numbers.
+    rng = np.random.default_rng(0)
+
+    reference = _active_counts(rng, ALPHA_LENGTHSCALE, RHO_EPS)
+    amplitude = _active_counts(rng, ALPHA_AMPLITUDE, ACTIVE_EPS)
+
+    # Medians to within a coordinate, quartiles to within three: the whole count distribution
+    # matches, not just its center. Monte-Carlo scatter at 10^4 draws is about +-1 coordinate.
+    assert abs(np.median(reference) - np.median(amplitude)) <= 1
+    for q in (0.25, 0.75):
+        assert abs(np.quantile(reference, q) - np.quantile(amplitude, q)) <= 3
+
+    # The constants the plan quotes, pinned to the precision it quotes them at.
+    assert abs(ALPHA_AMPLITUDE - 0.01312) < 2.0e-4
+    assert abs(ELL_EPS - 2.5613) < 2.0e-3
