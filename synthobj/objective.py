@@ -18,8 +18,14 @@ Which quantities are exact and which are quadrature:
   1 over S. It is a quadrature of the spline's derivative, accurate to about 0.1 % (plan decision
   D3). Interaction factors do not contribute: `g` is a main-effect statistic.
 - `f_star` is exact per unpaired component (`Component.argmax` finds every critical point of a
-  piecewise-quadratic spline derivative in closed form) and accurate to about 1e-10 per paired
-  block (`block_argmax` scans the knot grid and refines with L-BFGS-B). Pairs are disjoint, so
+  piecewise-quadratic spline derivative in closed form). Per paired block (`block_argmax` for an
+  interaction, `rotated_block_argmax` for a rotated pair) it is not closed form: both scan a grid
+  and refine with L-BFGS-B, and a fix-round re-measurement against an independent 4097x4097 grid
+  (finer than either method's own search) found the returned maximum within 5.2e-8 (interaction
+  block, ell=0.5, share=0.1875, s_ij=0.25) / 6.5e-8 (rotated block, ell=0.5, share=0.25,
+  theta=45deg) of that grid's own maximum -- see `interaction.block_argmax`'s and
+  `rotation.rotated_block_argmax`'s docstrings for the full configuration. The previously stated
+  "accurate to about 1e-10" here was never measured (fix-round finding). Pairs are disjoint, so
   each block is an independent function of its own two coordinates and the maximum separates
   exactly into a sum of per-block maxima (plan decision D1).
 
@@ -134,7 +140,14 @@ class SyntheticObjective:
     default noise sd of 0.1; a spec that is present must carry `name`, `noise_sd`, `generator` and
     `monotone`, and a missing one raises `AttributeError` (ruling R27). `labels` is for the
     save/load path: when it is given it is stored verbatim and `f_star` is taken from it, so
-    loading never re-runs the block maximizations.
+    loading never re-runs the block maximizations; `scale` and `mu` are likewise never computed in
+    that case (set to inert `1.0`/`0.0` placeholders instead) rather than computed and immediately
+    discarded, since `load` overwrites both right after construction regardless -- measured 67% of
+    `load`'s own cost at D=100 on `rotated_t45` (fix-round finding).
+
+    An Interaction and a rotation cannot both be present (ruling R39): `raise`s `ValueError` at
+    construction, since `s_axis` (see `_compute_labels`) has no defined meaning for an
+    interaction-paired coordinate under rotation and no family in the study needs the combination.
     """
 
     def __init__(
@@ -187,9 +200,35 @@ class SyntheticObjective:
         if missing:
             raise ValueError(f"every paired coordinate needs a main effect; {missing} have none")
 
-        self.scale = self._compute_scale()
-        self.mu = self._compute_mu()
-        self.labels = self._compute_labels() if labels is None else labels
+        # Ruling R39: an Interaction and a rotation cannot be combined. `_compute_labels` skips
+        # every coordinate in `paired` (interaction pairs and rotation pairs alike) when assigning
+        # an unpaired component's `s_axis`, but only rotation pairs ever get an `s_axis` of their
+        # own assigned back -- an interaction-paired coordinate under a rotation would be left at
+        # `s_axis = 0` forever, silently moving its true first-order share into `gamma_axis`
+        # instead. No family needs this combination (`theta_deg` always routes every pair to
+        # rotation, so `labels.pairs == ()` on every rotated variant), so it is rejected here
+        # rather than given invented semantics this late.
+        if self.interactions and rotation_pairs:
+            raise ValueError(
+                "an Interaction cannot be combined with a rotation on the same objective "
+                "(ruling R39): s_axis is undefined for an interaction-paired coordinate under "
+                "rotation"
+            )
+
+        # Ruling R34 (load path): when `labels` is supplied, `_compute_labels` never runs and
+        # `load` overwrites both `scale` and `mu` right after construction anyway (see `load`'s
+        # own docstring) -- computing them here would be pure waste, and measured expensive:
+        # `_compute_scale`/`_compute_mu` are 67% of `load`'s own cost at D=100 on rotated_t45
+        # (fix-round finding). The placeholder values are never read: nothing else in `__init__`
+        # touches `self.scale`/`self.mu` when `labels is not None`.
+        if labels is None:
+            self.scale = self._compute_scale()
+            self.mu = self._compute_mu()
+            self.labels = self._compute_labels()
+        else:
+            self.scale = 1.0
+            self.mu = 0.0
+            self.labels = labels
         self.f_star = self.labels.f_star
 
     def __call__(self, X: np.ndarray) -> np.ndarray:
@@ -261,6 +300,20 @@ class SyntheticObjective:
         `Labels.ell` is NaN off `S` by design (ruling R6): Python's `json` module writes a bare
         `NaN` token there (not standard JSON, but round-tripped exactly by Python's own
         `json.loads`), so a reader needs a NaN-tolerant parser.
+
+        The npz's `active`/`s`/`ell` arrays are `(n_active,)`, one entry per component **in rank
+        order** (`self.components`' own order, i.e. `build`'s `S`) -- not `(D,)` by coordinate the
+        way `Labels.active`/`.s`/`.ell` are (0 / NaN off `S`, fix-round documentation gap). The
+        names collide but the arrays do not: `npz["active"]` is the *coordinate* each rank maps to
+        (an int array; this file's only record of the rank -> coordinate mapping), whereas
+        `Labels.active` is a `(D,)` bool mask of set membership, and `npz["s"][k]`/`npz["ell"][k]`
+        are rank `k`'s share/lengthscale, whereas `Labels.s[c]`/`Labels.ell[c]` are coordinate `c`'s
+        (0/NaN if `c` is not in `S`). A script that opens the npz directly and indexes `s[i]` by
+        coordinate silently reads a different coordinate's share whenever `S` (a random permutation
+        subset of `range(D)`) does not happen to equal `range(n_active)`. `pairs`/`c_pairs` and
+        `inter_values` are similarly rank-ordered (row `p` is `self.interactions[p]`); `x_star`, by
+        contrast, is stored straight from `Labels.x_star` and so *is* `(D,)` by coordinate, like
+        every other JSON-side `Labels` field this method does not re-derive.
 
         `SyntheticObjective.mu` (ruling R30 follow-on) is stored in the JSON next to the labels'
         `scale`, since `load` must read the rotation offset back rather than re-derive it even
@@ -350,17 +403,19 @@ class SyntheticObjective:
         point. `Labels` is passed through to `__init__` verbatim (`labels=labels`), so `_compute_labels`
         never runs at all.
 
-        `__init__` recomputes `scale`, `mu` and `noise_sd` as a side effect of construction (it has
-        no parameter for any of them), but each is immediately overwritten here from the file
-        rather than left to that recompute: `mu` (ruling R30 follow-on) because re-deriving it,
-        while numerically cheap, is exactly the kind of ground-truth recomputation `load` exists to
-        avoid; `scale` and `noise_sd` (ruling R34) because the stored `labels.f_star` was computed
-        with the *original* `scale`, and `observe` reads `noise_sd` directly -- a future change to
-        `_compute_scale`'s formula or to the `noise_sd` default must not silently move `__call__`,
-        `observe` or a reloaded regret curve onto different numbers than the ones `f_star` and the
-        file's own `noise_sd` were computed against. All three come from `labels` (the object
-        parsed from this file), not from `obj.labels` after construction, so the restore is correct
-        even if a future regression stopped passing `labels=labels` into `__init__`.
+        `__init__` sets `scale`/`mu` to inert placeholders (`1.0`/`0.0`) whenever `labels` is given,
+        rather than computing them just to discard them (fix-round finding: `_compute_scale`/
+        `_compute_mu` measured 67% of this method's own cost at D=100 on `rotated_t45`) -- so the
+        two assignments below are not "immediately overwriting a recompute" any more. `noise_sd` is
+        the one field `__init__` still genuinely computes (cheap: a `spec` field lookup, no block
+        maximization) and this method still overwrites it anyway: the stored `labels.f_star` was
+        computed with the *original* `scale`, and `observe` reads `noise_sd` directly -- a future
+        change to `_compute_scale`'s formula or to the `noise_sd` default must not silently move
+        `__call__`, `observe` or a reloaded regret curve onto different numbers than the ones
+        `f_star` and the file's own `noise_sd` were computed against. All three come from `labels`
+        (the object parsed from this file), not from `obj.labels` after construction, so the
+        restore is correct even if a future regression stopped passing `labels=labels` into
+        `__init__`.
         """
         stem = Path(stem)
         npz_path, json_path = Path(f"{stem}.npz"), Path(f"{stem}.json")
@@ -480,10 +535,12 @@ class SyntheticObjective:
         Pairs are disjoint, so each paired block is an independent function of its own two
         coordinates and the maximum separates: `f_star` is `(sum - self.mu) * self.scale`, where
         `sum` is the raw total of the per-block maxima (`block_argmax` for an interaction,
-        `rotated_block_argmax` for a rotated pair, both accurate to about 1e-10) and the
-        per-component maxima from `Component.argmax` (exact to floating point) -- matching
-        `__call__`, which recenters and scales the whole sum once rather than each block (ruling
-        R30: `rotated_block_argmax`'s own `phi` is never recentered, since L-BFGS-B's relative
+        `rotated_block_argmax` for a rotated pair -- both measured within about 6e-8 of an
+        independent fine grid, not the previously stated "1e-10", which was never measured; see
+        the module docstring) and the per-component maxima from `Component.argmax` (exact to
+        floating point) -- matching `__call__`, which recenters and scales the whole sum once
+        rather than each block (ruling R30: `rotated_block_argmax`'s own `phi` is never
+        recentered, since L-BFGS-B's relative
         `ftol` would otherwise see a shifted stopping denominator and the maximizer's last bits
         could move). `x_star` records the achieving coordinates, with every coordinate carrying no
         main effect left at 0.5 -- `f` ignores those entirely. A rotated pair's `x_star` comes
