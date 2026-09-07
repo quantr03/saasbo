@@ -969,8 +969,16 @@ def shares_from_amplitudes(a_sq: ArrayLike, noise: ArrayLike) -> Array:
     `labels.s` states (plan D7); at synthobj's Var f = 1, sigma = 0.1 the correction is 1 %.
     `noise` is the per-sample observation variance in those same standardized units, (S,),
     broadcast across the coordinates.
+
+    The correction presupposes sigma^2 < 1, i.e. that some of the standardized variance is
+    signal. `kernel_noise ~ LogNormal(0, 10)` is unbounded, so a draw from a fit that failed its
+    diagnostics can violate that, and there the formula would divide by a non-positive number and
+    hand back a *negative* share -- an inactive coordinate reading as active with the sign lost in
+    a median. Such a draw's shares are NaN instead, and `readouts` drops it from the active count
+    rather than counting it as inactive.
     """
-    return jnp.asarray(a_sq) / (1.0 - jnp.reshape(jnp.asarray(noise), (-1, 1)))
+    signal = 1.0 - jnp.reshape(jnp.asarray(noise), (-1, 1))
+    return jnp.where(signal > 0.0, jnp.asarray(a_sq) / signal, jnp.nan)
 
 
 def _centered_parts(fitted: FittedGP, s: int) -> tuple[Array, Array, bool]:
@@ -1187,8 +1195,9 @@ def readouts(
     Keys: `native` (S, D), `native_median` (D,), `share_hat` (S, D) or None, `p_active` (D,),
     `sobol_hat` (D,), `total_var_hat` float, `active_neutral` (D,) bool = sobol_hat > eps,
     `active_native` (D,) bool = p_active > 0.5. Numpy throughout: these go to npz and to the run
-    log, and the oracle's arrays are widened back to D by zero-padding outside `active` so that a
-    log row has one width whatever produced it.
+    log, and every per-coordinate array is widened back to D by zero-padding outside `active` so
+    that a log row has one width whatever produced it. A draw whose noise leaves no signal reads
+    NaN in `share_hat` and is left out of `p_active` entirely (`shares_from_amplitudes`).
     """
     D = fitted.X_train.shape[1]
     is_amplitude = isinstance(fitted.cell, tuple) and fitted.cell[1] == "amplitude"
@@ -1198,15 +1207,25 @@ def readouts(
         else "kernel_inv_length_sq"
     )
 
-    native = np.asarray(fitted.samples[site])
-    if fitted.active is not None:
-        widened = np.zeros((native.shape[0], D))
-        widened[:, np.asarray(fitted.active)] = native
-        native = widened
+    def widen(draws: np.ndarray) -> np.ndarray:
+        """(S, D_used) -> (S, D), zero outside `active`; the identity when `active` is None."""
+        if fitted.active is None:
+            return draws
+        widened = np.zeros((draws.shape[0], D))
+        widened[:, np.asarray(fitted.active)] = draws
+        return widened
+
+    native = widen(np.asarray(fitted.samples[site]))
 
     if is_amplitude:
-        share_hat = np.asarray(shares_from_amplitudes(fitted.samples["a_sq"], fitted._noises()))
-        p_active = np.mean(share_hat > eps, axis=0)
+        share_hat = widen(
+            np.asarray(shares_from_amplitudes(fitted.samples["a_sq"], fitted._noises()))
+        )
+        # A degenerate draw's shares are NaN (see `shares_from_amplitudes`), and NaN > eps is
+        # False, which would count it as *inactive* rather than omit it; lifting the comparison to
+        # float and putting the NaNs back makes `nanmean` average over the usable draws alone.
+        counted = np.where(np.isnan(share_hat), np.nan, np.asarray(share_hat > eps, dtype=float))
+        p_active = np.nanmean(counted, axis=0)
     else:
         share_hat = None
         p_active = np.mean(native > RHO_EPS, axis=0)
@@ -1244,12 +1263,13 @@ def manipulation_checks(readout: dict[str, object], labels: object) -> dict[str,
     parameterization already tells you. `amplitude_vs_realized` pairs, on the active coordinates
     only, the sample median of the readout that states a *variance* -- `share_hat` where the cell
     has one, `native_median` otherwise -- with `labels.s`, so a calibration plot of stated against
-    realized share needs no further arithmetic.
+    realized share needs no further arithmetic. That median is over the usable draws only: a draw
+    whose noise left no signal reads NaN (`shares_from_amplitudes`) and must not drag the median.
     """
     native_median = np.asarray(readout["native_median"])
     sobol_hat = np.asarray(readout["sobol_hat"])
     share_hat = readout["share_hat"]
-    stated = native_median if share_hat is None else np.median(np.asarray(share_hat), axis=0)
+    stated = native_median if share_hat is None else np.nanmedian(np.asarray(share_hat), axis=0)
     active = list(labels.S)
 
     return {

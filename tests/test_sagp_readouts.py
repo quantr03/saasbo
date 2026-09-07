@@ -223,6 +223,30 @@ def test_shares_and_active_rules():
     assert not full["active_neutral"][3:].any() and not full["active_native"][3:].any()
 
 
+def test_degenerate_noise_gives_nan_shares():
+    # `kernel_noise ~ LogNormal(0, 10)` is unbounded, so a draw from a fit that failed its
+    # diagnostics can carry sigma^2 >= 1: no signal is left for a_sq_i to be a share of, and the
+    # 1 - sigma^2 correction would hand back a *negative* share. Such a draw reads NaN and is
+    # dropped from the active count -- p_active[0] is 3/3, not the 3/4 counting it as inactive.
+    S, D, n = 4, 3, 8
+    rng = np.random.default_rng(15)
+    a_sq = np.full((S, D), 1.0e-4)
+    a_sq[:, 0] = 0.5
+    samples = {
+        "a_sq": a_sq,
+        "kernel_ell": np.full((S, D), 0.5),
+        "kernel_noise": np.array([0.01, 0.01, 0.01, 1.5]),
+    }
+    fitted = _fitted(
+        ("additive", "amplitude"), rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples
+    )
+
+    out = gp.readouts(fitted, compute_sobol=False)
+
+    assert np.all(np.isnan(out["share_hat"][3])) and not np.any(np.isnan(out["share_hat"][:3]))
+    assert np.array_equal(out["p_active"], [1.0, 0.0, 0.0])
+
+
 def test_readouts_lengthscale_cells_have_no_share():
     # rho_i is not a variance share, so `share_hat` is None rather than a plausible-looking
     # number, and `p_active` falls back to the rho cutoff RHO_EPS -- the same cutoff as
@@ -380,10 +404,17 @@ def test_additive_sobol_recovers_labels():
 
 
 @pytest.mark.slow
-def test_additive_sobol_recovers_labels_at_full_scale():
-    # The same claim at the study's own size and budget: 3 active coordinates among 100, from 200
-    # observations. Slow because it is one production NUTS fit.
-    _assert_recovers_shares(D=100, n=200, nuts=NUTSConfig())
+def test_additive_sobol_recovers_labels_production_budget():
+    """The same claim under the production sampler budget, at D = 30 with n = 120 (ruling R24).
+
+    What the fast test above leaves open is whether the recovery survives `NUTSConfig()`'s own
+    warm-up and thinning rather than the short one -- a sampler question, not a readout question,
+    so it needs the production budget but not the production width. The study's own design point,
+    D = 100 with n = 200, is a single NUTS fit of well over an hour and is measured by the Task 11
+    pilot script rather than by pytest; D = 30 keeps three active coordinates among thirty at a
+    length a test suite can carry.
+    """
+    _assert_recovers_shares(D=30, n=120, nuts=NUTSConfig())
 
 
 # --- Gate 1 ---
