@@ -64,6 +64,7 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -72,7 +73,6 @@ from synthobj import generate
 from synthobj.families import make_family
 from synthobj.objective import SyntheticObjective
 
-PYTHON = "/opt/anaconda3/envs/saasbo/bin/python"
 D = 20
 
 
@@ -82,19 +82,24 @@ D = 20
 def test_writes_stems_matching_disk_hashes_and_independent_rebuild(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """The brief's own literal command: 2 variants x 2 seeds -> 4 stems + a manifest, and every
-    manifest claim checked against something other than the CLI's own in-memory state.
+    """The brief's own literal command (2 variants x 2 seeds) plus a rotated variant, so every
+    manifest field that differs between a rotated and a non-rotated objective is exercised too
+    (fix-round finding: no CLI test previously built a rotated variant at all, so mutating
+    `_manifest_entry`'s `obj.labels.gamma` to `obj.labels.gamma_axis` left every test green even
+    though the 30 rotated files in the real study grid would then claim gamma =~ 0.13-0.35 for a
+    family whose actual `gamma` is exactly 0). Every manifest claim is checked against something
+    other than the CLI's own in-memory state.
     """
     code = generate.main(
         [
             "--out", str(tmp_path),
             "--D", str(D),
             "--seeds", "0-1",
-            "--families", "aligned3,interaction_g0.25",
+            "--families", "aligned3,interaction_g0.25,rotated_t45",
         ]
     )
     assert code == 0
-    assert "wrote 4 stem(s), skipped 0 stem(s)" in capsys.readouterr().out
+    assert "wrote 6 stem(s), skipped 0 stem(s)" in capsys.readouterr().out
 
     expected_files = [
         tmp_path / "aligned3" / "seed00_D20.npz",
@@ -105,24 +110,33 @@ def test_writes_stems_matching_disk_hashes_and_independent_rebuild(
         tmp_path / "interaction_g0.25" / "seed00_D20.json",
         tmp_path / "interaction_g0.25" / "seed01_D20.npz",
         tmp_path / "interaction_g0.25" / "seed01_D20.json",
+        tmp_path / "rotated_t45" / "seed00_D20.npz",
+        tmp_path / "rotated_t45" / "seed00_D20.json",
+        tmp_path / "rotated_t45" / "seed01_D20.npz",
+        tmp_path / "rotated_t45" / "seed01_D20.json",
     ]
     for path in expected_files:
         assert path.is_file(), f"missing {path}"
 
-    # Every file that actually exists on disk is exactly the 4 stems' worth plus the manifest --
+    # Every file that actually exists on disk is exactly the 6 stems' worth plus the manifest --
     # not more (a stray write), not fewer (a silent collision).
     all_files = [p for p in tmp_path.rglob("*") if p.is_file()]
-    assert len(all_files) == 9
+    assert len(all_files) == 13
 
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["version"] == 1
     assert manifest["Ds"] == [D]
     assert manifest["seeds"] == [0, 1]
-    assert len(manifest["entries"]) == 4
+    assert len(manifest["entries"]) == 6
 
     # Independently written, not derived from generate._FAMILY_OF: a hardcoded wrong constant for
-    # every entry would pass `entry["family"] in ("aligned", "interaction")` but not this.
-    expected_family = {"aligned3": "aligned", "interaction_g0.25": "interaction"}
+    # every entry would pass `entry["family"] in ("aligned", "interaction", "rotated")` but not
+    # this.
+    expected_family = {
+        "aligned3": "aligned",
+        "interaction_g0.25": "interaction",
+        "rotated_t45": "rotated",
+    }
 
     for entry in manifest["entries"]:
         npz_path = tmp_path / entry["npz"]
@@ -197,7 +211,7 @@ def test_dry_run_prints_full_grid_via_subprocess_and_writes_nothing(tmp_path: Pa
     """
     repo_root = Path(__file__).resolve().parent.parent
     result = subprocess.run(
-        [PYTHON, "-m", "synthobj.generate", "--out", str(tmp_path), "--dry-run"],
+        [sys.executable, "-m", "synthobj.generate", "--out", str(tmp_path), "--dry-run"],
         cwd=repo_root,
         capture_output=True,
         text=True,
