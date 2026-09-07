@@ -21,42 +21,35 @@ bit-identical objective (`S`, `f_star`, and `f` at a shared batch of points).
 """
 from __future__ import annotations
 
-import sys
-
 import numpy as np
 import pytest
 
 from synthobj.families import FamilySpec, build, make_family, noise_rng, select_active, streams
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _restore_families_import_state():
-    """See test_families.py's fixture of the same name (ruling R15).
-
-    This module sorts after test_objective.py, so its own import cannot break that test's
-    `"synthobj.families" not in sys.modules` check under the default alphabetical run order --
-    test_families.py's identical fixture already restores that state before test_objective.py
-    runs. This is included anyway so the property holds regardless of run order (e.g. a partial
-    invocation that runs this file without test_families.py).
-    """
-    yield
-    sys.modules.pop("synthobj.families", None)
-
-
 def test_gamma_sweep_keeps_S_pairs_and_component_shapes_identical() -> None:
     """Same seed, gamma in {0, 0.5}: identical S and pairs; every component's values divided by
-    sqrt(its own share) agree to 1e-12 -- the only thing gamma is allowed to move is that scale."""
+    sqrt(its own share) agree to 1e-12 -- the only thing gamma is allowed to move is that scale.
+
+    The `labels.gamma` check makes this two-sided: without it, a `_resolve_shares` that ignored
+    `gamma` entirely would make `obj0` and `obj5` identical outright and pass every assertion here
+    vacuously (fix-round finding). Asserting the two gammas actually differ, on top of everything
+    else staying identical, is what makes "only the scale moved" a real claim.
+    """
     seed = 42
     base = dict(name="t", D=20, n_active=5, ells=0.5, n_pairs=2)
     spec0 = FamilySpec(gamma=0.0, **base)
     spec5 = FamilySpec(gamma=0.5, **base)
     obj0, obj5 = build(spec0, seed), build(spec5, seed)
 
+    assert obj0.labels.gamma == pytest.approx(0.0)
+    assert obj5.labels.gamma == pytest.approx(0.5)
     assert obj0.labels.S == obj5.labels.S
     assert obj0.labels.pairs == obj5.labels.pairs
 
     for c0, c5 in zip(obj0.components, obj5.components):
         assert c0.coord == c5.coord
+        assert c0.share != pytest.approx(c5.share)
         v0 = c0.values / np.sqrt(c0.share)
         v5 = c5.values / np.sqrt(c5.share)
         assert np.allclose(v0, v5, atol=1e-12, rtol=0.0)

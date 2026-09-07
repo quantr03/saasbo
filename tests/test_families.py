@@ -29,35 +29,13 @@ No test here builds `dense_weak` in a way that conflates `Labels.active` (member
 """
 from __future__ import annotations
 
-import sys
-
 import numpy as np
 import pytest
 from scipy.stats import qmc, spearmanr
 
-from synthobj.families import FAMILIES, STUDY_GRID, build, make_family
+from synthobj.families import FAMILIES, STUDY_GRID, FamilySpec, build, make_family
 from synthobj.kernel import v
 from synthobj.objective import ACTIVE_EPS
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _restore_families_import_state():
-    """Pop `synthobj.families` from `sys.modules` once this module's tests finish.
-
-    `test_objective.py::test_family_spec_annotation_is_deferred` (ruling R15) asserts
-    `"synthobj.families" not in sys.modules` right after importing `synthobj.objective` alone.
-    Pytest collects every test file (importing each one) before running any test, so this file's
-    top-level `from synthobj.families import ...` -- unavoidable, since this is the module under
-    test -- puts `synthobj.families` in `sys.modules` before that assertion ever runs, and nothing
-    about that is actually cyclic (families.py -> objective.py, never the reverse). This file
-    sorts alphabetically before `test_objective.py` and therefore *runs* before it too, so
-    removing the cache entry in this module's teardown restores the state that test relies on.
-    Nothing here holds a lingering reference to the old module object, so a later re-import (e.g.
-    by test_seeding.py, which sorts after `test_objective.py` and needs no such cleanup itself) is
-    unaffected.
-    """
-    yield
-    sys.modules.pop("synthobj.families", None)
 
 
 # --- the family table (task-7 brief, "final" values) -----------------------------------------
@@ -133,6 +111,18 @@ def test_family_flags_match_the_table_for_variants_that_deviate_from_defaults() 
     assert make_family("aligned10", seed=0, D=20).labels.monotone is False
 
 
+def test_aligned10_sin_actually_draws_from_the_sinusoid_generator() -> None:
+    """`labels.generator == "sinusoid"` alone doesn't prove the draw came from it: `aligned10` and
+    `aligned10_sin` share S, shares, ells and the entire `main` stream at a given seed, so if
+    `_draw_fn` silently fell back to `gp_draw` for "sinusoid" too, the two families would be
+    bit-identical while every one of `aligned10_sin`'s 10 files still claimed the sinusoid label
+    (fix-round finding: exactly the R27 silent-mislabel failure mode, one layer down). Comparing
+    the actual drawn values is independent of, and stronger than, the label check above."""
+    matern = make_family("aligned10", 0, D=20).components[0].values
+    sinusoid = make_family("aligned10_sin", 0, D=20).components[0].values
+    assert not np.array_equal(matern, sinusoid)
+
+
 @pytest.mark.parametrize("name", sorted(FAMILY_TABLE))
 def test_sparse_variant_clears_active_eps(name: str) -> None:
     """Every sparse variant's smallest active share clears ACTIVE_EPS (dense_weak is excluded:
@@ -173,6 +163,26 @@ def test_dense_weak_all_components_monotone() -> None:
         assert np.all(d >= 0.0) or np.all(d <= 0.0)
 
 
+def test_dense_weak_sign_is_not_collapsed_to_one_direction() -> None:
+    """Both signs occur among the 20 components at D=20 (measured 10 up / 10 down at seed 0).
+
+    The monotonicity test above accepts either direction by design, so it alone cannot catch a
+    collapsed `sign = 1.0` (fix-round finding): that would make every coordinate increasing, put
+    `x_star` on the all-ones corner, and turn a 10-file study family into a systematically easier
+    problem than intended. This checks the actual realized direction of each component, not an
+    internal "sign" attribute -- independent of how `_draw_component` happens to implement it."""
+    obj = make_family("dense_weak", seed=0, D=20)
+    xs = np.linspace(0.0, 1.0, 10_000)
+    increasing = decreasing = False
+    for comp in obj.components:
+        d = comp.derivative(xs)
+        if np.all(d >= 0.0):
+            increasing = True
+        if np.all(d <= 0.0):
+            decreasing = True
+    assert increasing and decreasing
+
+
 def test_rotated_variants_share_S_and_pairs_across_theta() -> None:
     r0 = make_family("rotated_t0", seed=3, D=20)
     r45 = make_family("rotated_t45", seed=3, D=20)
@@ -188,6 +198,21 @@ def test_make_family_unknown_name_raises_key_error() -> None:
 def test_make_family_unknown_override_raises_type_error() -> None:
     with pytest.raises(TypeError):
         make_family("aligned3", 0, bogus=1)
+
+
+def test_mismatched_n_active_override_raises_instead_of_silently_truncating() -> None:
+    """`decoupled`'s registered `shares`/`ells` have 8 entries; overriding `n_active` alone
+    (leaving the 8-entry tuples in place) used to zip the first 4 shares against the first 4 ells
+    and build a real objective with `sum(labels.s[S]) == 0.84`, no error and no label recording
+    the mistake (fix-round finding: `make_family("decoupled", 0, D=20, n_active=4)`)."""
+    with pytest.raises(ValueError, match="shares has 8 entries"):
+        make_family("decoupled", 0, D=20, n_active=4)
+
+
+def test_shares_not_summing_to_one_minus_gamma_raises() -> None:
+    bad = FamilySpec(name="bad", D=20, n_active=3, shares=(0.5, 0.3, 0.1), ells=0.5, gamma=0.0)
+    with pytest.raises(ValueError, match="must equal 1"):
+        build(bad, 0)
 
 
 # --- decoupled's cell ordering (statistical design, 10/10 seeds) -------------------------------
@@ -276,6 +301,19 @@ def test_var_and_mean_under_nu_hold_for_representative_variants(name: str) -> No
     f = obj(X)
     assert np.var(f) == pytest.approx(1.0, rel=0.01)
     assert abs(np.mean(f)) < 1e-3
+
+
+@pytest.mark.parametrize("name", ["aligned3", "decoupled", "anti_aligned", "interaction_g0.50", "dense_weak"])
+def test_component_means_sum_to_exactly_zero_for_non_rotated_variants(name: str) -> None:
+    """Each `Component.from_raw` centers to E_nu[f_i] == 0 to quadrature roundoff, so the sum
+    across all of a non-rotated variant's components is exact to ~1e-12, not merely close (measured
+    1e-17 to 1e-18). `rotated_t45` is deliberately excluded: rotation moves the mean entirely into
+    `mu` (ruling R30), and a component's own `nu_mean()` stays ~0 regardless (measured 5.0e-17 for
+    rotated_t45 too) -- summing components can never see a dropped `mu` for a rotated family, which
+    is exactly why the Sobol test above is kept at its 1e-3 tolerance rather than tightened here."""
+    obj = make_family(name, seed=0, D=100)
+    total = sum(c.nu_mean() for c in obj.components)
+    assert total == pytest.approx(0.0, abs=1e-12)
 
 
 def test_gamma_and_gamma_axis_are_distinct() -> None:

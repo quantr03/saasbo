@@ -28,8 +28,10 @@ below `ACTIVE_EPS` = 0.02, so an implementation that defined `active` by the cut
 dense-weak family's exact trap) fails it while every other test still passes.
 """
 import re
+import subprocess
 import sys
 from dataclasses import FrozenInstanceError, replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -492,12 +494,32 @@ def test_a_present_spec_missing_a_field_raises(
         SyntheticObjective(D, (pieces[0][0],), (), None, partial, 0)
 
 
-def test_family_spec_annotation_is_deferred(obj: SyntheticObjective) -> None:
+def test_family_spec_annotation_is_deferred(obj: SyntheticObjective, repo_root: Path) -> None:
     # Ruling R15: families.py imports objective.py, so objective.py must not import families.py
     # at runtime. `from __future__ import annotations` keeps the annotation as a string, and the
     # import sits behind TYPE_CHECKING.
     assert SyntheticObjective.__init__.__annotations__["spec"] == "FamilySpec | None"
-    assert "synthobj.families" not in sys.modules
+
+    # A hermetic subprocess, not this process's `sys.modules`: pytest collects every test file
+    # (importing each one) before running any test, and `tests/test_families.py` necessarily
+    # imports `synthobj.families` -- it is the module under test -- so by the time this assertion
+    # would run in-process, `sys.modules` already carries that entry regardless of whether
+    # `objective.py` itself ever imports it (fix-round finding: a mutant that appends a real
+    # `import synthobj.families` to `objective.py` left the in-process check unaffected). A fresh
+    # interpreter that imports only `synthobj.objective` is the only way to ask the question this
+    # test is actually about.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            'import sys, synthobj.objective; print("synthobj.families" in sys.modules)',
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "False"
 
 
 def test_rotation_is_accepted(

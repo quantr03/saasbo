@@ -30,7 +30,8 @@ ruling R7 fixes it.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 
@@ -139,17 +140,41 @@ def select_pairs(n_active: int, n_pairs: int, ss: SeedSequence) -> tuple[tuple[i
 
 
 def _resolve_shares(spec: FamilySpec, n_active: int) -> tuple[float, ...]:
-    """`spec.shares` verbatim, or an equal `(1 - gamma) / n_active` split."""
-    if spec.shares is not None:
-        return spec.shares
-    return tuple([(1.0 - spec.gamma) / n_active] * n_active)
+    """`spec.shares` verbatim, or an equal `(1 - gamma) / n_active` split.
+
+    A given tuple must have exactly `n_active` entries summing to `1 - gamma`: `decoupled` and
+    `anti_aligned` both need a specific share paired with a specific lengthscale, not just a
+    multiset that happens to be long enough. Without this check, a mismatched `n_active` override
+    (e.g. `make_family("decoupled", 0, n_active=4)`, which leaves the 8-entry `shares` from the
+    registry untouched) would silently zip the first `n_active` shares against the first `n_active`
+    ells and build a real objective whose `Var_nu f` is not 1, with no label recording the mistake
+    (fix-round finding). The too-long case was previously silent; a too-short one already raised
+    `IndexError` inside `build`'s per-rank loop, just without an informative message.
+    """
+    if spec.shares is None:
+        return tuple([(1.0 - spec.gamma) / n_active] * n_active)
+    if len(spec.shares) != n_active:
+        raise ValueError(f"shares has {len(spec.shares)} entries; expected n_active={n_active}")
+    total = sum(spec.shares) + spec.gamma
+    if not math.isclose(total, 1.0, abs_tol=1e-9):
+        raise ValueError(
+            f"shares (sum={sum(spec.shares)}) plus gamma ({spec.gamma}) must equal 1; got {total}"
+        )
+    return spec.shares
 
 
 def _resolve_ells(spec: FamilySpec, n_active: int) -> tuple[float, ...]:
-    """`spec.ells` broadcast to `n_active` ranks if it is a scalar, else taken verbatim."""
+    """`spec.ells` broadcast to `n_active` ranks if it is a scalar, else taken verbatim.
+
+    A given tuple must have exactly `n_active` entries, one per active rank -- the same
+    mismatched-override hazard `_resolve_shares` guards against.
+    """
     if isinstance(spec.ells, (int, float)):
         return tuple([float(spec.ells)] * n_active)
-    return tuple(spec.ells)
+    ells = tuple(spec.ells)
+    if len(ells) != n_active:
+        raise ValueError(f"ells has {len(ells)} entries; expected n_active={n_active}")
+    return ells
 
 
 def _draw_fn(generator: str, ell: float, lo: float, hi: float, grid_n: int) -> Callable[[Generator], np.ndarray]:
