@@ -91,16 +91,31 @@
 \newcommand{\SOfile}[1]{\texttt{#1}}  % paths
 
 %% --- Design-brief notation ------------------------------------------------
+%% \Enu, \Varnu, \Ehat, \Varhat and \Ex/\Varx below are all wrapped in
+%% \operatorname so the following argument gets proper operator-class
+%% spacing (\Enu f_i typesets with a thin space before f_i, not glued to
+%% the \nu subscript the way plain \mathbb{E}_\nu f_i would).
 \newcommand{\refnu}{\nu}                          % reference measure
-\newcommand{\Enu}{\mathbb{E}_\nu}                 % expectation under \nu
-\newcommand{\Varnu}{\mathrm{Var}_\nu}             % variance under \nu
+\newcommand{\Enu}{\operatorname{\mathbb{E}}_\nu}                % expectation under \nu
+\newcommand{\Varnu}{\operatorname{\mathrm{Var}}_\nu}             % variance under \nu
 \newcommand{\kl}{k_\ell}                          % Matern-5/2 kernel at lengthscale \ell
 \newcommand{\ktil}{\tilde k_\ell}                 % centered kernel
 \newcommand{\vell}[1]{v(#1)}                      % avg. marginal variance of the centered kernel
 \newcommand{\kbar}{\bar k_i}                      % normalized kernel
 \newcommand{\fstar}{f^\star}                      % the maximum
-\newcommand{\Ehat}{\widehat{\mathbb{E}}_\nu}      % quadrature expectation
-\newcommand{\Varhat}{\widehat{\mathrm{Var}}_\nu}  % quadrature variance
+\newcommand{\Ehat}{\operatorname{\widehat{\mathbb{E}}}_\nu}      % quadrature expectation
+\newcommand{\Varhat}{\operatorname{\widehat{\mathrm{Var}}}_\nu}  % quadrature variance
+
+%% \Ex{<sub>} and \Varx{<sub>} are the general forms behind \Enu/\Varnu/
+%% \Ehat/\Varhat above: the Design-brief itself needs expectation/variance
+%% under a subscript other than \nu (its own defining line for v(\ell) is
+%% "1 - \mathbb E_{x,x'} k_\ell(x,x')", and it writes the bare operator in
+%% "\mathbb E\,Var_\nu f_i = a_i^2"), and A1's ANOVA-style derivations need
+%% arbitrary subscripts, e.g. Var_{x_a} E_{x_b} of one paired block. An
+%% empty argument gives the bare operator: \Ex{} typesets \mathbb E with no
+%% subscript at all (not an empty, invisible one), and likewise \Varx{}.
+\newcommand{\Ex}[1]{\def\SO@tmp{#1}\ifx\SO@tmp\@empty\operatorname{\mathbb{E}}\else\operatorname{\mathbb{E}}_{#1}\fi}
+\newcommand{\Varx}[1]{\def\SO@tmp{#1}\ifx\SO@tmp\@empty\operatorname{\mathrm{Var}}\else\operatorname{\mathrm{Var}}_{#1}\fi}
 
 %% --- Symbols the appendix adds beyond the Design-brief --------------------
 \newcommand{\nuhat}{\hat\nu}                      % the 64-node discrete measure sum_q w_q delta_{t_q}
@@ -110,4 +125,4 @@
 \newcommand{\gaxis}{\gamma^{\mathrm{axis}}}       % axis-misspecification share
 \newcommand{\knots}{G}                            % knot count
 \newcommand{\nExt}{n_{\mathrm{ext}}}              % extended-grid size
-\newcommand{\activeeps}{\varepsilon}              % ACTIVE_EPS
+\newcommand{\activeeps}{\epsilon}                 % ACTIVE_EPS (Design-brief writes $\epsilon = 0.02$, not \varepsilon)
