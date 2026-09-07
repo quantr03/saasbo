@@ -31,13 +31,22 @@ JSON round trip. The load-bearing checks here instead cross a real boundary:
   `test_npz_and_json_paths_use_fstring_concatenation_not_with_suffix` compare the path helpers'
   output against hand-written literal `Path(...)` strings, not against a second call to the same
   helpers.
-- `test_manifest_scans_directory_across_differently_scoped_runs` and
-  `test_scan_warns_counts_and_exits_nonzero_on_debris_without_crashing` /
-  `test_scan_reports_exact_issue_count_and_exits_nonzero` cover ruling R35/R36: the manifest
-  describes `--out` itself (built by scanning it after generation), not just the (variant, seed)
-  pairs the most recent invocation asked for, and the scan tolerates and counts debris (a stray
-  file, an unknown variant directory, a half-written pair, an unrecognized file) rather than
-  crashing or silently dropping it.
+- `test_manifest_scans_directory_across_differently_scoped_runs` covers ruling R35/R36: the
+  manifest describes `--out` itself (built by scanning it after generation), not just the
+  (variant, seed) pairs the most recent invocation asked for.
+- Ruling R37 (fix round 2, correcting fix round 1's own over-broad rule): the exit code answers
+  "is the manifest incomplete", not "was anything ignored". Five tests each pin one class rather
+  than one test asserting a bundled non-zero, because round 1's version of this scan would have
+  exited non-zero on `.DS_Store` alone -- close to guaranteed on this OneDrive-synced,
+  Finder-browsed checkout -- which the reviewer measured and ruled a real defect, not a hypothetical
+  one: `test_scan_ignores_dotfile_silently_and_exits_zero` (exit 0, *no* warning at all),
+  `test_scan_warns_but_exits_zero_on_ordinary_non_dotfile_stray` (exit 0, but warned -- the pair
+  that matters most, since `notes.txt` and `.DS_Store` must land on opposite sides of "warned" but
+  the same side of "exit code"), `test_scan_exits_nonzero_on_half_written_pair`,
+  `test_scan_exits_nonzero_on_corrupt_pair`, and
+  `test_scan_exits_nonzero_on_objective_shaped_pair_under_unknown_variant_dir` (all three: exit 1,
+  warned, and excluded from `entries`, since each represents an objective that exists, or partly
+  exists, on disk but that the manifest cannot describe).
 - `test_dry_run_prints_full_grid_via_subprocess_and_writes_nothing` checks row *content*
   (140 distinct lines, one specific literal row present), not just a row *count* -- a `print("x")`
   substituted for the real row would still print 140 lines.
@@ -326,59 +335,116 @@ def test_manifest_scans_directory_across_differently_scoped_runs(tmp_path: Path)
     assert manifest["seeds"] == [0, 1, 5]
 
 
-def test_scan_warns_counts_and_exits_nonzero_on_debris_without_crashing(
+def test_scan_ignores_dotfile_silently_and_exits_zero(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """The fix round's blocking check: a half-written pair, a stray file, an unknown variant
-    directory, and an unrecognized file inside a valid variant directory must all be tolerated --
-    warned about, counted, excluded from the manifest -- without crashing the run, and the run
-    must still exit non-zero to say the output directory has something in it the manifest could
-    not account for.
+    """Ruling R37, corrected from round 1: a directory holding only a valid grid plus a
+    `.DS_Store` must exit 0 -- a dotfile is not objective-shaped, so it cannot make the manifest
+    incomplete -- and must print *no* warning at all mentioning it. A warning printed on every run
+    (`.DS_Store` is close to guaranteed on this OneDrive-synced, Finder-browsed checkout) would be
+    its own kind of noise; round 1 got this specific case wrong (measured: exit 1) before this fix.
     """
+    argv = ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
+    assert generate.main(argv) == 0
+    capsys.readouterr()
+
+    (tmp_path / ".DS_Store").write_bytes(b"")
+
+    code = generate.main(argv)  # same request; aligned3/seed00 already exists -> skip-eligible
+    assert code == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+
+def test_scan_warns_but_exits_zero_on_ordinary_non_dotfile_stray(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """The distinction the review's correction turns on: `notes.txt` and `.DS_Store` both exit 0
+    (neither is objective-shaped, so neither makes the manifest incomplete), but only `notes.txt`
+    is warned about -- it isn't invisible, it just isn't fatal.
+    """
+    argv = ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
+    assert generate.main(argv) == 0
+    capsys.readouterr()
+
+    (tmp_path / "notes.txt").write_text("junk")
+
+    code = generate.main(argv)
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "notes.txt" in captured.err
+
+
+def test_scan_exits_nonzero_on_half_written_pair(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    assert generate.main(
+        ["--out", str(tmp_path), "--D", str(D), "--seeds", "0-1", "--families", "aligned3"]
+    ) == 0
+    capsys.readouterr()
+
+    # Half-written pair: a Ctrl-C between save's sequential .npz-then-.json writes leaves exactly
+    # this. Seed 0 is not part of the second run's request below, so the scan finds it undisturbed.
+    (tmp_path / "aligned3" / "seed00_D20.json").unlink()
+
+    code = generate.main(
+        ["--out", str(tmp_path), "--D", str(D), "--seeds", "1", "--families", "aligned3"]
+    )
+    assert code == 1
+    captured = capsys.readouterr()
+    assert "seed00_D20" in captured.err
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    seeds_in_manifest = {e["seed"] for e in manifest["entries"] if e["variant"] == "aligned3"}
+    assert seeds_in_manifest == {1}  # seed 0's half-pair excluded, seed 1 present
+
+
+def test_scan_exits_nonzero_on_corrupt_pair(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     assert generate.main(
         ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
     ) == 0
+    capsys.readouterr()
 
-    # Half-written pair: a Ctrl-C between save's sequential .npz-then-.json writes leaves exactly
-    # this. Not part of the second run's request below, so the scan finds it undisturbed.
-    (tmp_path / "aligned3" / "seed00_D20.json").unlink()
-    # An unrecognized file inside that same, otherwise-valid, variant directory.
-    (tmp_path / "aligned3" / "notes.txt").write_text("junk")
-    # A stray file directly under --out (".DS_Store" is close to guaranteed on this checkout).
-    (tmp_path / ".DS_Store").write_bytes(b"\x00")
-    # A directory that is not a known STUDY_GRID variant, holding an otherwise well-formed pair --
-    # must not even be descended into.
+    # Corrupt, not part of the second run's request below, so the scan finds it undisturbed.
+    (tmp_path / "aligned3" / "seed00_D20.npz").write_bytes(b"not a zip file")
+
+    code = generate.main(
+        ["--out", str(tmp_path), "--D", str(D), "--seeds", "1", "--families", "decoupled"]
+    )
+    assert code == 1
+    captured = capsys.readouterr()
+    assert "seed00_D20" in captured.err
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    variants_in_manifest = {e["variant"] for e in manifest["entries"]}
+    assert variants_in_manifest == {"decoupled"}  # the corrupt aligned3 pair is excluded
+
+
+def test_scan_exits_nonzero_on_objective_shaped_pair_under_unknown_variant_dir(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A `seed<N>_D<N>` pair under a directory absent from `FAMILIES` is objective-shaped -- an
+    objective exists on disk -- but genuinely cannot be described (no `family`/`overrides` to
+    look up for an unrecognized name), so it is undescribed like a half-pair, not merely a stray
+    directory.
+    """
+    argv = ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
+    assert generate.main(argv) == 0
+    capsys.readouterr()
+
     unknown_dir = tmp_path / "not_a_real_variant"
     unknown_dir.mkdir()
     (unknown_dir / "seed00_D20.npz").write_bytes(b"")
     (unknown_dir / "seed00_D20.json").write_text("{}")
 
-    code = generate.main(
-        ["--out", str(tmp_path), "--D", str(D), "--seeds", "1", "--families", "decoupled"]
-    )
-
-    assert code == 1
-    captured = capsys.readouterr()
-    assert captured.err  # warnings were actually printed, not swallowed
-
-    manifest = json.loads((tmp_path / "manifest.json").read_text())
-    variants_in_manifest = {e["variant"] for e in manifest["entries"]}
-    assert variants_in_manifest == {"decoupled"}  # the only complete, recognized pair present
-
-
-def test_scan_reports_exact_issue_count_and_exits_nonzero(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:
-    argv = ["--out", str(tmp_path), "--D", str(D), "--seeds", "0", "--families", "aligned3"]
-    assert generate.main(argv) == 0
-    capsys.readouterr()  # discard the first run's output
-
-    (tmp_path / ".DS_Store").write_bytes(b"")
-
     code = generate.main(argv)  # same request; aligned3/seed00 already exists -> skip-eligible
     assert code == 1
     captured = capsys.readouterr()
-    assert "warning: 1 item(s) under --out were ignored" in captured.err
+    assert "not_a_real_variant" in captured.err
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    variants_in_manifest = {e["variant"] for e in manifest["entries"]}
+    assert "not_a_real_variant" not in variants_in_manifest
 
 
 # --- bad arguments -----------------------------------------------------------------------------

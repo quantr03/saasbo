@@ -24,18 +24,10 @@ same `--out` with different `--D`/`--seeds`/`--families` leave files from both; 
 only from "what this run touched" would describe a run, not a directory, and silently drop
 everything from an earlier invocation. Measured cost: `SyntheticObjective.load` is ~5 ms cold and
 ~0.6 ms warm at D=100, so scanning a full 140-file grid costs about the same as building a single
-objective -- negligible next to actually building 140. The scan tolerates, warns about, and counts
-(without crashing) four kinds of debris a script-driven directory can accumulate: a stray file
-directly under `<out>` (`.DS_Store` is close to guaranteed on this checkout), a subdirectory whose
-name is not a `STUDY_GRID` variant, a file inside a variant directory that isn't a well-formed
-`seed<N>_D<N>.{npz,json}` member, and a "half-pair" stem with only one of the two extensions
-present -- exactly the state a `Ctrl-C` between `save`'s sequential `.npz`-then-`.json` writes
-leaves. A *complete* pair that exists but fails to `SyntheticObjective.load` (corrupt zip, foreign
-JSON, unsupported version) is caught the same way. None of this is wrapped around the generation
-loop's own `load` call on a stem this run explicitly asked to skip-and-reuse: that failure must
-reach the user, with `--overwrite` as the stated repair, not vanish into a manifest that still
-claims success. `main` returns 1 (not 2, which is reserved for a bad argument) when the scan found
-anything it had to exclude.
+objective -- negligible next to actually building 140. None of this is wrapped around the
+generation loop's own `load` call on a stem this run explicitly asked to skip-and-reuse: that
+failure must reach the user, with `--overwrite` as the stated repair, not vanish into a manifest
+that still claims success.
 
 Ruling R36 -- the top-level fields describe the directory too: `Ds` (plural, deliberately not the
 brief's scalar `"D"`) and `seeds` are the sorted union of every entry actually on disk, since a
@@ -46,6 +38,23 @@ order is unspecified and, for the directory listing this scan does, alphabetical
 not table order) -- so the manifest orders itself only once, on write, and two manifests describing
 the same directory contents compare equal regardless of what order the scan happened to visit
 things in.
+
+Ruling R37 -- the exit code answers "is the manifest incomplete?", not "was anything ignored?":
+round 1 made `main` return 1 whenever the scan excluded *anything*, including an ordinary stray
+file. Measured consequence: `.DS_Store` is close to guaranteed on this OneDrive-synced,
+Finder-browsed checkout, so `python -m synthobj.generate --out data/objectives` would exit
+non-zero on essentially every run once the directory is opened in Finder once -- exactly the kind
+of useless-signal, script-breaking noise R35 exists to remove, just moved from "invisible" to
+"omnipresent." `_scan_directory` now distinguishes *objective-shaped* debris -- a half-written
+pair (only one of `.npz`/`.json` present, the state a `Ctrl-C` between `save`'s two sequential
+writes leaves), a complete pair that fails `SyntheticObjective.load` (corrupt zip, foreign JSON,
+unsupported version), or a `seed<N>_D<N>`-looking file sitting under a directory absent from
+`FAMILIES` -- from everything else. Only the former makes the manifest *incomplete* (an objective
+exists, or partly exists, and isn't described) and drives `main`'s exit code to 1. An ordinary
+stray file, a directory with no objective-shaped content, or a non-file entry inside a variant
+directory is warned about (so it isn't invisible) but does not affect the exit code -- and a
+dotfile anywhere in the scan is ignored *silently*, with no warning at all, since a warning printed
+on every single run is its own kind of noise this checkout would trigger constantly.
 
 Hash portability caveat (Task 8's other ruling, ruling R35's review sharpened it further):
 `sha256_npz`/`sha256_json` in the manifest are reproducible only on the platform that generated
@@ -182,42 +191,70 @@ def _entry_sort_key(entry: dict[str, Any]) -> tuple[int, int, int]:
     return (_VARIANT_INDEX[entry["variant"]], entry["D"], entry["seed"])
 
 
-def _scan_directory(out: Path) -> tuple[list[dict[str, Any]], int, int]:
+def _is_dotfile(path: Path) -> bool:
+    """A dotfile (or dot-directory) anywhere in the scan is ignored *silently* (ruling R37): it is
+    not objective-shaped, so it cannot make the manifest incomplete, and `.DS_Store` in particular
+    is close to guaranteed on this OneDrive-synced, Finder-browsed checkout -- warning about it on
+    every single run would be noise this checkout triggers constantly.
+    """
+    return path.name.startswith(".")
+
+
+def _scan_directory(out: Path) -> tuple[list[dict[str, Any]], int, int, int]:
     """Build manifest entries by scanning `<out>` itself (ruling R35), not from the `(variant,
     seed)` pairs this invocation was asked to produce -- so a stem left over from an earlier,
     differently-scoped run is described too, and every stem (freshly written or merely left in
     place) is read back from disk rather than assumed unchanged.
 
-    Returns `(entries, issues, load_failures)`.
+    Returns `(entries, issues, undescribed, load_failures)`.
 
-    `issues` counts, and warns to stderr about, every item under `<out>` this scan could not make
-    sense of -- none of these raise; the item is simply excluded from `entries` and counted:
+    `issues` counts, and warns to stderr about, every non-dotfile item under `<out>` this scan
+    excluded from `entries` -- regardless of whether it also counts toward `undescribed` below.
+    None of these raise.
 
-    - a stray file directly under `<out>` (other than `manifest.json` itself);
-    - a directory whose name is not a known `STUDY_GRID` variant (this is also what would
-      otherwise `KeyError` inside `_manifest_entry`'s `_FAMILY_OF[variant]` lookup);
-    - a non-file entry, or a file not matching `seed<N>_D<N>.{npz,json}`, inside an otherwise
-      valid variant directory;
+    `undescribed` (ruling R37) is the subset of `issues` that is *objective-shaped*: an objective
+    exists, or partly exists, on disk but the manifest cannot describe it. This is what drives
+    `main`'s exit code, since it is the only category that makes the manifest genuinely
+    incomplete:
+
     - a "half-pair" stem with only one of `.npz`/`.json` present -- the exact state a `Ctrl-C`
-      between `SyntheticObjective.save`'s sequential `.npz`-then-`.json` writes leaves, so this is
-      not a hypothetical to guard against.
+      between `SyntheticObjective.save`'s sequential `.npz`-then-`.json` writes leaves;
+    - a complete pair that exists but fails to `SyntheticObjective.load` (see `load_failures`);
+    - a `seed<N>_D<N>`-looking stem (in either extension) sitting under a directory whose name is
+      not a known `STUDY_GRID` variant -- it cannot be added to `entries` even if it loads fine
+      (there is no `family`/`overrides` to look up for an unrecognized variant name), so it is
+      just as undescribed as a half-pair.
+
+    Everything else in `issues` is warned about (so it is not invisible) but is *not*
+    objective-shaped and does not affect the exit code:
+
+    - an ordinary (non-dotfile) stray file directly under `<out>` (other than `manifest.json`);
+    - a directory whose name is not a known variant, provided nothing inside it looks
+      objective-shaped -- it is just a stray directory, not evidence of an undescribed objective;
+    - a non-file entry, or a file not matching `seed<N>_D<N>.{npz,json}`, inside an otherwise
+      valid variant directory.
+
+    A dotfile anywhere (`_is_dotfile`) is skipped with no warning and does not count toward
+    `issues` at all.
 
     `load_failures` counts, and warns about, a stem whose `.npz`/`.json` pair is complete but that
-    `SyntheticObjective.load` could not parse. Caught with a bare `except Exception`: measured
-    failure modes span `FileNotFoundError`, `zipfile.BadZipFile`, two distinct `ValueError`s
-    (numpy's pickle refusal; an unsupported `version`), and `KeyError` (foreign JSON missing
-    `version`) -- a narrower `except` tuple would not cover all of them, and none of them should
-    abort the whole scan. This is deliberately different from the generation loop's own `load`
-    call in `main`, on a stem this run explicitly asked to skip-and-reuse: that failure is left
-    unwrapped, since a corrupt file the user asked to reuse must be seen by the user, with
-    `--overwrite` as the repair, not silently dropped from a manifest that still claims success.
+    `SyntheticObjective.load` could not parse (a subset of `undescribed`). Caught with a bare
+    `except Exception`: measured failure modes span `FileNotFoundError`, `zipfile.BadZipFile`, two
+    distinct `ValueError`s (numpy's pickle refusal; an unsupported `version`), and `KeyError`
+    (foreign JSON missing `version`) -- a narrower `except` tuple would not cover all of them, and
+    none of them should abort the whole scan. This is deliberately different from the generation
+    loop's own `load` call in `main`, on a stem this run explicitly asked to skip-and-reuse: that
+    failure is left unwrapped, since a corrupt file the user asked to reuse must be seen by the
+    user, with `--overwrite` as the repair, not silently dropped from a manifest that still claims
+    success.
     """
     entries: list[dict[str, Any]] = []
     issues = 0
+    undescribed = 0
     load_failures = 0
 
     for child in sorted(out.iterdir(), key=lambda p: p.name):
-        if child.name == "manifest.json":
+        if child.name == "manifest.json" or _is_dotfile(child):
             continue
         if not child.is_dir():
             print(f"warning: ignoring stray file directly under --out: {child}", file=sys.stderr)
@@ -226,12 +263,34 @@ def _scan_directory(out: Path) -> tuple[list[dict[str, Any]], int, int]:
 
         variant = child.name
         if variant not in _FAMILY_OF:
-            print(f"warning: ignoring directory that is not a known variant: {child}", file=sys.stderr)
-            issues += 1
+            # Not a known variant -- but if it holds anything objective-shaped, that objective (or
+            # partial objective) genuinely cannot be described (no family/overrides to look up for
+            # an unrecognized name), so it is undescribed rather than merely a stray directory.
+            shaped_bases: set[str] = set()
+            for f in sorted(child.iterdir(), key=lambda p: p.name):
+                if not f.is_file() or _is_dotfile(f):
+                    continue
+                for suffix in (".npz", ".json"):
+                    if f.name.endswith(suffix) and _STEM_RE.fullmatch(f.name[: -len(suffix)]):
+                        shaped_bases.add(f.name[: -len(suffix)])
+            if shaped_bases:
+                for base in sorted(shaped_bases):
+                    print(
+                        f"warning: objective-shaped stem under a directory not in FAMILIES, "
+                        f"cannot be described: {child / base}",
+                        file=sys.stderr,
+                    )
+                    issues += 1
+                    undescribed += 1
+            else:
+                print(f"warning: ignoring directory that is not a known variant: {child}", file=sys.stderr)
+                issues += 1
             continue
 
         seen: dict[str, set[str]] = {}
         for f in sorted(child.iterdir(), key=lambda p: p.name):
+            if _is_dotfile(f):
+                continue
             if not f.is_file():
                 print(f"warning: ignoring unexpected non-file entry: {f}", file=sys.stderr)
                 issues += 1
@@ -259,6 +318,7 @@ def _scan_directory(out: Path) -> tuple[list[dict[str, Any]], int, int]:
                     file=sys.stderr,
                 )
                 issues += 1
+                undescribed += 1
                 continue
             match = _STEM_RE.fullmatch(base)
             assert match is not None  # guaranteed: `base` only reaches here via the check above
@@ -267,11 +327,13 @@ def _scan_directory(out: Path) -> tuple[list[dict[str, Any]], int, int]:
                 obj = SyntheticObjective.load(stem)
             except Exception as exc:
                 print(f"warning: failed to load {stem}: {exc!r}", file=sys.stderr)
+                issues += 1
+                undescribed += 1
                 load_failures += 1
                 continue
             entries.append(_manifest_entry(variant, seed, D, out, stem, obj))
 
-    return entries, issues, load_failures
+    return entries, issues, undescribed, load_failures
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -313,12 +375,16 @@ def main(argv: list[str] | None = None) -> int:
     """Parse `argv` (or `sys.argv` when `None`) and run the generator.
 
     Returns 0 on success, 2 on a bad argument, 1 if generation succeeded but the post-generation
-    scan of `<out>` (ruling R35) found anything it had to exclude from the manifest (debris or a
-    stem that failed to load) -- distinct from 2, which is reserved for an argument `main` never
-    got far enough to act on. An argparse-level error (e.g. a malformed `--seeds`) reaches exit
-    code 2 via `SystemExit`, caught here and turned into a plain return so `main` never raises out
-    from under a caller that just wants an int; an unknown `--families` entry is checked
-    afterward and reported the same way, since which variants are valid depends on
+    scan of `<out>` found the manifest cannot fully describe it (ruling R37: a half-written pair,
+    a stem that failed to load, or an objective-shaped file under an unrecognized variant
+    directory) -- distinct from 2, which is reserved for an argument `main` never got far enough
+    to act on. An ordinary stray file or a directory with no objective-shaped content is warned
+    about but does *not* set exit code 1: it doesn't make the manifest incomplete, and treating it
+    as fatal would make the exit code fire on essentially every real run of this checkout, where
+    `.DS_Store` is close to guaranteed. An argparse-level error (e.g. a malformed `--seeds`)
+    reaches exit code 2 via `SystemExit`, caught here and turned into a plain return so `main`
+    never raises out from under a caller that just wants an int; an unknown `--families` entry is
+    checked afterward and reported the same way, since which variants are valid depends on
     `synthobj.families`, not on anything argparse's own `type=`/`choices` machinery can express
     with a useful message.
     """
@@ -367,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     # generation, so a regenerated (--overwrite) file is hashed post-write and a stem left by an
     # earlier, differently-scoped invocation is included too.
     out.mkdir(parents=True, exist_ok=True)
-    entries, issues, load_failures = _scan_directory(out)
+    entries, issues, undescribed, load_failures = _scan_directory(out)
     entries.sort(key=_entry_sort_key)
 
     manifest: dict[str, Any] = {
@@ -384,13 +450,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"wrote {written} stem(s), skipped {skipped} stem(s)")
     if issues:
         print(f"warning: {issues} item(s) under --out were ignored (see warnings above)", file=sys.stderr)
+    if undescribed:
+        print(
+            f"error: {undescribed} item(s) under --out are objective-shaped but missing from the "
+            "manifest (see warnings above)",
+            file=sys.stderr,
+        )
     if load_failures:
         print(
             f"error: {load_failures} stem(s) under --out failed to load (see warnings above); "
             "rerun with --overwrite to repair",
             file=sys.stderr,
         )
-    return 1 if (issues or load_failures) else 0
+    return 1 if undescribed else 0
 
 
 if __name__ == "__main__":
