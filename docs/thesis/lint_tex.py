@@ -22,16 +22,19 @@ Scans every ``.tex`` file in this directory and in ``tables/`` and checks:
      catches the subscripted/decorated forms (``\\sigma_i^2``,
      ``\\lambda_{\\max}``): matching stops only at a following letter, not
      at ``_`` or a digit.
-  7. Every backslash-command a fragment uses is one of: defined in
+  7. Every ``\\SO...`` macro a fragment uses is defined in
      synthobj-notation.sty (``\\newcommand``/``\\renewcommand``/
-     ``\\DeclareMathOperator``), defined as ``\\SOnum...`` in
-     tables/numbers.tex, or in this script's KNOWN_STANDARD_MACROS --
-     document-structure commands already validated by checks 1-3 above, and
-     bare Design-brief symbols the .sty's header documents as intentionally
-     macro-free. Anything else (a typo, a macro someone forgot to add to the
-     .sty) fails. This check is a closed allowlist, not a curated pattern of
-     "known notation names": it catches any undefined command, not just the
-     ones this file's author anticipated.
+     ``\\DeclareMathOperator``) or as ``\\SOnum...`` in tables/numbers.tex.
+     Deliberately scoped to the SO namespace only (fix-round 2, ruling
+     R14): standard LaTeX/amsmath commands (``\\frac``, ``\\toprule``,
+     ``\\le``, ...) and this file's own non-SO notation macros (``\\Enu``,
+     ``\\fstar``, ...) are NOT checked here, because no finite allowlist of
+     "legitimate standard LaTeX" can avoid false positives once fragments
+     have real content -- fix-round 1 tried exactly that (KNOWN_STANDARD_
+     MACROS) and it would have broken on the first booktabs table or the
+     first derivation. Any undefined command, SO-prefixed or not, is still
+     caught: by the compile. ``make pdf`` runs latexmk with
+     ``-halt-on-error``, which fails on "Undefined control sequence".
 
 "Fragment" means appendix-synthobj.tex and A1-construction.tex through
 A4-design-decisions.tex. "Table" means a file under tables/. "The wrapper"
@@ -51,24 +54,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 WRAPPER_NAME = "standalone_main.tex"
 
-# Any backslash-command a fragment uses must resolve here. Kept short and
-# explicit (reviewer requirement, fix-round 1): the first line is document
-# structure already validated by checks 1-3 above (\begin/\end by brace
-# matching, \input by target-existence, \label/\ref/\eqref by cross-check),
-# so flagging them again here would be a duplicate, unhelpful error. The
-# second line is exactly the "bare symbol" set synthobj-notation.sty's
-# header comment documents as intentionally macro-free (standard
-# LaTeX/amsmath Greek letters/symbols, not synthobj notation). Everything
-# else a fragment uses must come from synthobj-notation.sty or
-# tables/numbers.tex; a later task adding a new bare symbol or a new
-# environment extends this set and says so in its report, the same
-# convention already used for adding a macro to the .sty.
-KNOWN_STANDARD_MACROS = {
-    "begin", "end", "input", "label", "ref", "eqref",
-    "ell", "gamma", "rho", "kappa", "mu", "theta",
-}
-
-GENERIC_MACRO_RE = re.compile(r"\\([A-Za-z]+)")
+# check_macros_defined only tests names starting with SO (fix-round 2,
+# ruling R14): that is the one namespace this project fully controls, so it
+# is the only one a closed allowlist can check without false positives.
+# Everything else -- standard LaTeX/amsmath commands and this file's own
+# non-SO notation macros alike -- is left to the compile (make pdf,
+# latexmk -halt-on-error), which fails on any genuinely undefined command.
+SO_MACRO_RE = re.compile(r"\\(SO[A-Za-z]*)\b")
 DEFINE_RE = re.compile(
     r"\\(?:newcommand|renewcommand|DeclareMathOperator)\*?\{?\\([A-Za-z]+)\}?"
 )
@@ -220,17 +212,16 @@ def collect_macro_defs(*paths: Path) -> set[str]:
 
 
 def check_macros_defined(path: Path, lines: list[str], defined: set[str]) -> None:
-    known = defined | KNOWN_STANDARD_MACROS
     for lineno, raw in enumerate(lines, start=1):
         line = strip_comments(raw)
-        for m in GENERIC_MACRO_RE.finditer(line):
+        for m in SO_MACRO_RE.finditer(line):
             name = m.group(1)
-            if name not in known:
+            if name not in defined:
                 fail(
                     path,
                     lineno,
-                    f"\\{name} is used but not defined in synthobj-notation.sty, "
-                    f"tables/numbers.tex, or KNOWN_STANDARD_MACROS",
+                    f"\\{name} is used but not defined in synthobj-notation.sty "
+                    f"or tables/numbers.tex",
                 )
 
 
