@@ -268,6 +268,35 @@ def test_posterior_chunked_equals_unchunked(monkeypatch):
     assert np.max(np.abs(np.asarray(chunked[1]) - np.asarray(unchunked[1]))) < 1.0e-12
 
 
+def test_unknown_string_cell_is_rejected():
+    # "dsp_map" and "oracle_S" are the only non-CellKey cells; anything else would silently be
+    # served the product/lengthscale kernel and reported under its own name.
+    with pytest.raises(ValueError, match="unknown cell"):
+        _fitted("map", *_data(), _hand_made_samples("lengthscale", 1, P, seed=0)).posterior(
+            np.zeros((1, P))
+        )
+
+
+@pytest.mark.parametrize("prior", ["amplitude", "lengthscale"], ids=["amplitude", "lengthscale"])
+def test_additive_posterior_mean_is_sum_of_component_means(prior):
+    # The additive cells' posterior mean is the sum of its components, because the kernel is the
+    # sum of one-coordinate kernels: that identity is what makes `component_means` the components
+    # of the surrogate the loop optimizes, and what makes the exact Sobol index of decision 6
+    # available at all. Evaluated with every coordinate at the same grid value at once, so the
+    # sum on the left is a whole posterior mean rather than one coordinate's slice; there is no
+    # constant term to account for, every component being centered under the reference measure.
+    S, G = 3, 9
+    X, y = _data()
+    grid = np.linspace(0.05, 0.95, G)
+    fitted = _fitted((("additive", prior)), X, y, _hand_made_samples(prior, S, P, seed=14))
+
+    components = sagp.gp.component_means(fitted, grid)
+    mean, _ = fitted.posterior(np.tile(grid[:, None], (1, P)))
+
+    assert components.shape == (S, P, G)
+    assert np.max(np.abs(np.asarray(components.sum(axis=1)) - np.asarray(mean))) < 1.0e-12
+
+
 def test_alphas_are_the_weights_the_mean_contracts():
     # Task 5's readouts contract the kernel with `alphas()` instead of calling `posterior`, so it
     # has to be exactly the vector `_predict` uses -- otherwise a component mean or a Sobol index
