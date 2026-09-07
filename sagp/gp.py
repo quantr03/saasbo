@@ -1339,7 +1339,7 @@ def identify(
     start = time.perf_counter()
 
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+        warnings.filterwarnings("ignore", category=UserWarning)
         X = qmc.Sobol(objective.D, scramble=True, seed=seed).random(n)
     y = objective.observe(X, noise_rng(seed, run=0))
     z, y_mean, y_std = standardize(y)
@@ -1355,13 +1355,20 @@ def identify(
     samples = {site: np.asarray(draws) for site, draws in fitted.samples.items()}
     wall_s = time.perf_counter() - start
 
+    # Resolved the same way `fit` resolves it (`fit`'s own `if alpha is None: alpha =
+    # cell.alpha_default`): `fit_kwargs.get("alpha", ...)` would misreport `None` as the alpha
+    # actually used whenever a caller passes `alpha=None` explicitly, since the key is then
+    # present and `dict.get`'s default never fires.
+    alpha = fit_kwargs.get("alpha")
+    alpha = CELLS[cell].alpha_default if alpha is None else alpha
+
     return {
         "family": objective.labels.family,
         "seed": seed,
         "cell": "/".join(cell),
         "n": n,
         "D": objective.D,
-        "alpha": fit_kwargs.get("alpha", CELLS[cell].alpha_default),
+        "alpha": alpha,
         "status": fitted.status,
         "status_reason": fitted.status_reason,
         "nuts_attempts": len(fitted.attempts),

@@ -105,6 +105,23 @@ def test_identify_is_reproducible():
         assert np.array_equal(first["samples"][site], second["samples"][site])
 
 
+def test_identify_records_the_alpha_fit_actually_used():
+    # `alpha=None` must resolve to the cell's default, exactly as `fit` itself resolves it
+    # (`fit`'s own `if alpha is None: alpha = cell.alpha_default`) -- not report `None` verbatim,
+    # which `fit_kwargs.get("alpha", default)` would do since the key is present even when its
+    # value is `None` (fix-round finding).
+    key = ("additive", "amplitude")
+    default = identify(
+        make_family("aligned3", 0, D=6), key, n=25, seed=0, alpha=None, nuts=_FAST_NUTS
+    )
+    explicit = identify(
+        make_family("aligned3", 0, D=6), key, n=25, seed=0, alpha=0.05, nuts=_FAST_NUTS
+    )
+
+    assert default["alpha"] == gp.CELLS[key].alpha_default
+    assert explicit["alpha"] == 0.05
+
+
 def test_identify_does_not_import_sagp_bo(repo_root: Path):
     # `bo.py` (Task 8) will import `standardize` from this module; this is the guard that the
     # reverse never happens -- `gp.py` must stay usable without ever loading `bo.py`.
