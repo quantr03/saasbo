@@ -25,20 +25,29 @@ needs.
 `synthobj` maximizes and the vendored code minimizes: `gp.standardize` negates once, on the way
 into the GP, so every line copied from the reference runs unchanged while `y`, `best_f` and the
 regret in the logs stay in the objective's own units.
+
+`python -m sagp.bo --help` is the study's entry point: one (family, seed, cell) per invocation,
+resumable, with its whole provenance written into the run directory's `manifest.json`.
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import dataclasses
 import hashlib
+import importlib.metadata
 import json
 import math
 import os
+import platform
+import subprocess
+import sys
 import time
 import traceback
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
@@ -64,7 +73,8 @@ from sagp.gp import (
     readouts,
     standardize,
 )
-from synthobj.families import noise_rng
+from synthobj.families import make_family, noise_rng
+from synthobj.objective import SyntheticObjective
 
 # The seven methods a run can take, as they are spelled on the command line and in a run's path.
 METHODS: list[str] = [f"{structure}/{prior}" for (structure, prior) in CELLS] + [
@@ -149,6 +159,8 @@ def log1mexp(x: Array) -> Array:
     """
     upper = jnp.maximum(x, -_LOG2)  # the naive branch never sees the tail's inputs
     lower = jnp.minimum(x, -_LOG2)  # and the tail branch never sees log1p(-1) = -inf
+    # `maximum`/`minimum` split the derivative evenly at a tie, so the clamps halve d/dx exactly
+    # at the branch point (and likewise in `log_h`): one point, measure zero, harmless here.
     return jnp.where(x > -_LOG2, jnp.log(-jnp.expm1(upper)), jnp.log1p(-jnp.exp(lower)))
 
 
@@ -179,8 +191,10 @@ def log_ei(x: Array, y_target: float, gp: FittedGP, xi: float = 0.0) -> Array:
     `logsumexp(log EI_s) - log S`, which is what this returns -- so under exact arithmetic
     `log_ei` and `log(saasbo.ei)` have the same argmax and the same ranking of candidates, and the
     only difference is that this one still separates candidates after every per-sample EI has
-    underflowed to zero. NaN (a degenerate sample) maps to -inf, the neutral element of the
-    combination, where the reference maps it to 0, the neutral element of its own.
+    underflowed to zero. A degenerate sample's NaN reaches `nan_to_num`'s own neginf pass and so
+    comes out as `finfo.min` rather than as a literal -inf; inside `logsumexp` that is the neutral
+    element of the combination all the same, since it exponentiates to exactly zero against any
+    other sample -- where the reference maps such a sample to 0, the neutral element of its own.
     """
     mu, var = gp.posterior(x)
     std = jnp.maximum(jnp.sqrt(var), 1e-6)
@@ -315,6 +329,107 @@ def run_dir_for(out_dir: str | os.PathLike[str], cfg: RunConfig) -> Path:
     return Path(out_dir) / cfg.family / cfg.method.replace("/", "-") / f"seed{cfg.seed:02d}"
 
 
+# --- provenance ---
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+# The vendored reference this module is a generalization of. The plan requires all three stay
+# byte-identical, so their hashes are what lets a later reader check that claim against a run.
+_REFERENCE_FILES: tuple[str, ...] = ("saasgp.py", "saasbo.py", "util.py")
+# The packages whose version can move a run's numbers; recorded, and compared again on resume.
+_VERSIONED: tuple[str, ...] = ("jax", "jaxlib", "numpyro", "numpy", "scipy")
+# What the copied `optimize_ei` keeps hard-coded (plan section 2): not `RunConfig` fields, because
+# no run may vary them, but written into the manifest so it states them rather than implying them.
+_REFERENCE_CONSTANTS: dict[str, float] = {"maxfun": 100, "jitter_sd": 1e-3, "xi": 0.0}
+
+
+def _now() -> str:
+    """The current time, ISO 8601 in UTC: what `created` and every `resumed` entry are stamped."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _git_provenance() -> dict[str, object]:
+    """The commit this run was launched from and whether the tree was dirty, or an unknown pair.
+
+    Every failure -- no git, no checkout (the study can be run from an unpacked archive), a
+    detached or broken repository -- collapses to `commit="unknown"`, `dirty=None` rather than to
+    an exception: provenance is bookkeeping, and it must not be able to end a 16-hour job in its
+    first second. `dirty` is `git status --porcelain` being non-empty, which counts untracked
+    files too, since a run against an uncommitted script is exactly the case worth flagging.
+    """
+
+    def git(*args: str) -> str | None:
+        try:
+            done = subprocess.run(["git", *args], capture_output=True, text=True, cwd=_REPO_ROOT)
+        except OSError:
+            return None
+        return done.stdout if done.returncode == 0 else None
+
+    commit, status = git("rev-parse", "HEAD"), git("status", "--porcelain")
+    return {
+        "commit": "unknown" if commit is None else commit.strip(),
+        "dirty": None if status is None else bool(status.strip()),
+    }
+
+
+def _versions() -> dict[str, str]:
+    """The interpreter and the five packages a run's numbers depend on, by installed version.
+
+    `PackageNotFoundError` is caught for the same reason `_git_provenance` catches everything: a
+    conda environment can carry a working `jaxlib` whose distribution metadata is not where
+    `importlib.metadata` looks, and that is not a reason to refuse to start the run.
+    """
+    versions = {"python": platform.python_version()}
+    for name in _VERSIONED:
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = "unknown"
+    return versions
+
+
+def _environment() -> dict[str, object]:
+    """The thread settings and host, because bit-identity is only claimed *within* them.
+
+    XLA's CPU backend is deterministic at a fixed thread count and not guaranteed across two
+    (plan section 4, step 7), so a resume on a differently configured machine is reproducible in
+    the sense the study needs -- same seeds, same design -- but not necessarily bit for bit, and
+    these four numbers are what tells a later reader which of the two they are looking at.
+    """
+    return {
+        "XLA_FLAGS": os.environ.get("XLA_FLAGS"),
+        "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"),
+        "platform": platform.platform(),
+        "cpu_count": os.cpu_count(),
+    }
+
+
+def _reference_sha256() -> dict[str, str]:
+    """sha256 of each vendored reference file, hashed off disk at the moment the run starts."""
+    return {
+        name: hashlib.sha256((_REPO_ROOT / name).read_bytes()).hexdigest()
+        for name in _REFERENCE_FILES
+    }
+
+
+def _objective_labels(objective: object) -> dict[str, object]:
+    """The problem's identity, so a run directory names it without the objective file beside it.
+
+    `f_star` above all: the regret column is `f_star - best_f`, so a reader who wants to recompute
+    a regret from `iterations.csv` alone needs the constant it was taken against, not a promise
+    that regenerating the family would produce the same one.
+    """
+    labels = objective.labels
+    return {
+        "family": labels.family,
+        "seed": int(labels.seed),
+        "D": int(objective.D),
+        "S": [int(i) for i in labels.S],
+        "f_star": float(objective.f_star),
+        "gamma": float(labels.gamma),
+        "noise_sd": float(labels.noise_sd),
+    }
+
+
 # --- the run directory ---
 
 # The plan's row schema, less the trailing x_0 ... x_{D-1} which depend on D. `reason` is the
@@ -341,6 +456,8 @@ class RunLogger:
     checkpoint is written first, by tmp-file and `os.replace`, and the appends follow: a kill
     between the two then leaves the logs one iteration behind the checkpoint, which `truncate_to`
     rolls back, rather than leaving a duplicated or half-written row that no reader could detect.
+    Within the appends the `iterations.csv` row is last (ruling R34), which makes it the run's
+    completion marker: `last_logged_t` reads it as "this iteration's artifacts are all there".
     """
 
     def __init__(self, run_dir: Path, cfg: RunConfig) -> None:
@@ -360,15 +477,79 @@ class RunLogger:
         with self.log_path.open("a") as handle:
             handle.write(message.rstrip("\n") + "\n")
 
-    def write_manifest(self) -> None:
-        """The minimal manifest of plan ruling R6: the `RunConfig` fields plus `config_hash`.
+    def write_manifest(self, objective: object) -> None:
+        """The run's full provenance (plan section 4, step 7), written once when the run starts.
 
-        Task 9 extends it with the environment, the git commit, the objective's labels and the
-        reference constants; what has to be here already is the hash, because resume compares it.
+        Every block answers one question: could this directory have been produced by a different
+        experiment than the one it claims to be? The `RunConfig` fields and `config_hash` fix the
+        settings and resume compares the hash; `reference_constants` records what the copied
+        `optimize_ei` holds fixed *underneath* those settings, which no flag can reach; and the
+        rest -- the commit, the package versions, the thread environment, the vendored files'
+        hashes and the objective's own labels -- fixes the code and the problem the settings were
+        applied to. `resumed` starts empty and only `note_resume` ever adds to it: nothing here is
+        recomputed in place, since a manifest that quietly followed its environment would answer
+        that question with today's environment rather than with the run's.
         """
         fields = dataclasses.asdict(self.cfg)
         fields["config_hash"] = config_hash(self.cfg)
+        fields["created"] = _now()
+        fields["git"] = _git_provenance()
+        fields["versions"] = _versions()
+        fields["env"] = _environment()
+        fields["reference_sha256"] = _reference_sha256()
+        fields["objective"] = _objective_labels(objective)
+        # The two acquisition-optimizer sizes are `RunConfig` fields *and* belong here: this block
+        # is the optimizer's whole operating point, and splitting it across two places to avoid
+        # repeating two numbers would make it readable only next to the config it came from.
+        fields["reference_constants"] = {
+            **_REFERENCE_CONSTANTS,
+            "num_init_candidates": self.cfg.num_init_candidates,
+            "num_restarts_ei": self.cfg.num_restarts_ei,
+        }
+        fields["resumed"] = []
         self.manifest.write_text(json.dumps(fields, indent=2, sort_keys=True, default=str) + "\n")
+
+    def write_environment_lock(self) -> None:
+        """`environment.lock.txt`: every installed distribution as `name==version`, sorted.
+
+        The manifest's `versions` names the six packages we believe can move the numbers; this
+        file names all of them, because those six are a hypothesis and this is the record that
+        has to outlive it. Written when the run starts and never on resume: it describes the
+        environment the run's first iterations were computed in, and a resume's own environment
+        is what the manifest's `resumed` entry is for.
+        """
+        lines = sorted(
+            f"{dist.metadata['Name']}=={dist.version}"
+            for dist in importlib.metadata.distributions()
+        )
+        (self.dir / "environment.lock.txt").write_text("\n".join(lines) + "\n")
+
+    def note_resume(self) -> None:
+        """Append this resume to the manifest's `resumed` list, warning about anything that moved.
+
+        Plan section 4, step 7 draws the line here: the config hash is *asserted* (by `run_bo`,
+        which refuses a checkpoint written under different settings), while the commit and the
+        package versions are only warned about. They have to be -- resuming days later into a
+        rebuilt environment is the case this machinery exists for, and refusing it would throw
+        away the run -- so what the study gets instead is a dated entry naming what changed, in
+        `log.txt` for the person watching and in the manifest for the analysis. The manifest is
+        re-read rather than rebuilt, so `created`, the original versions and every earlier resume
+        survive; only this run's own `resumed` entry is new.
+        """
+        recorded = json.loads(self.manifest.read_text())
+        was = recorded.get("versions", {})
+        now = _versions()
+        changed = sorted(name for name, version in now.items() if was.get(name) != version)
+        git = _git_provenance()
+        recorded.setdefault("resumed", []).append(
+            {"time": _now(), "commit": git["commit"], "versions_changed": changed}
+        )
+        self.manifest.write_text(json.dumps(recorded, indent=2, sort_keys=True, default=str) + "\n")
+        for name in changed:
+            self.log(f"warning: {name} is {now[name]}, this run started under {was.get(name)}")
+        started_at = recorded.get("git", {}).get("commit")
+        if started_at != git["commit"]:
+            self.log(f"warning: git commit is {git['commit']}, this run started at {started_at}")
 
     def manifest_hash(self) -> str | None:
         """The `config_hash` recorded in `manifest.json`, or None if there is no manifest."""
@@ -456,12 +637,11 @@ class RunLogger:
         """The largest `t` with a *complete* row in `iterations.csv`, or None if there is none.
 
         A row shorter than the header is a row a kill interrupted mid-write; counting it as
-        logged would leave the file with a torn line no reader could parse.
+        logged would leave the file with a torn line no reader could parse. Under ruling R34 a
+        complete row is also the run's completion marker for the iteration -- the coordinates and
+        the samples are written before it -- so this is what resume rolls the checkpoint back to.
         """
-        if not self.iterations.exists():
-            return None
-        with self.iterations.open(newline="") as handle:
-            rows = list(csv.reader(handle))
+        rows = _complete_rows(self.iterations)
         if not rows:
             return None
         width = len(rows[0])
@@ -477,12 +657,26 @@ class RunLogger:
                 path.unlink()
 
 
+def _complete_rows(path: Path) -> list[list[str]]:
+    """`path`'s CSV rows, less a final line the kill left without its terminator (ruling R35).
+
+    `csv.writer` ends every row it finishes with a line terminator, so a last line without one is
+    a write that was interrupted -- and it can still *parse*, at the header's full width, when the
+    kill happened to land on a field boundary. Nothing in the parsed rows distinguishes the two,
+    so the raw text is what is inspected. Missing and empty files read as no rows at all.
+    """
+    if not path.exists():
+        return []
+    with path.open(newline="") as handle:  # newline="" so the terminators survive the read
+        lines = handle.read().splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines.pop()
+    return list(csv.reader(lines))
+
+
 def _truncate_csv(path: Path, t_done: int) -> None:
     """Rewrite `path` keeping its header and the rows whose first column (`t`) is <= `t_done`."""
-    if not path.exists():
-        return
-    with path.open(newline="") as handle:
-        rows = list(csv.reader(handle))
+    rows = _complete_rows(path)
     if not rows:
         return
     width = len(rows[0])
@@ -717,15 +911,17 @@ def run_bo(
     The first `n_init` points are the shared Sobol design and are not rows: they have no fit and
     nothing to log but their observation, which the checkpoint carries. From `t = n_init` on, each
     iteration standardizes what has been observed, fits, maximizes the acquisition, evaluates, and
-    writes -- checkpoint first, then the row, the coordinates and the samples.
+    writes -- checkpoint first, then the coordinates and the samples, and the row last.
 
     `resume=True` (the default) continues an existing run directory: the checkpoint's config hash
     must match this configuration or the run stops with a `ValueError` rather than splicing two
     different runs together, and the logs are rolled back to the last iteration that is complete
     in *both* the checkpoint and `iterations.csv`, so an interrupted write is redone rather than
     left as a hole. Redone iterations are bit-identical, since iteration `t` is a function of
-    `(seed, t)` and of the points before it alone. `**overrides` sets any other `RunConfig` field
-    (an unknown one is a `TypeError` from the dataclass, which is the check).
+    `(seed, t)` and of the points before it alone. A commit or a package version that has moved
+    since the run started is warned about in `log.txt` and recorded in the manifest's `resumed`
+    list rather than asserted (`RunLogger.note_resume`). `**overrides` sets any other `RunConfig`
+    field (an unknown one is a `TypeError` from the dataclass, which is the check).
     """
     if method not in METHODS:
         raise ValueError(f"unknown method {method!r}: expected one of {METHODS}")
@@ -748,7 +944,8 @@ def run_bo(
 
     if state is None:
         logger.reset()
-        logger.write_manifest()
+        logger.write_manifest(objective)
+        logger.write_environment_lock()
         X = initial_design(cfg.D, cfg.n_init, cfg.seed)
         f = np.asarray(objective(X), dtype=float)
         y = np.array(
@@ -780,6 +977,7 @@ def run_bo(
             f"resume at t={start} with T={cfg.T} "
             f"(checkpoint t_done={int(state['t_done'])}, last logged row {logged})"
         )
+        logger.note_resume()
 
     # The Sobol search continues the design's own sequence, so its first n_init rows are the
     # design: only the reference itself needs the remaining T - n_init rows.
@@ -789,13 +987,212 @@ def run_bo(
         X, y, f, row, fitted, readout = _iteration(t, objective, cfg, X, y, f, logger, sobol_seq)
         statuses.append(str(row["status"]))
         # Checkpoint first (plan section 4, step 6): the logs may then lag it by one iteration,
-        # which resume rolls back, but they can never gain a duplicate or a torn row.
+        # which resume rolls back, but they can never gain a duplicate or a torn row. The
+        # `iterations.csv` row goes *last* of all (ruling R34), so that a complete row is a
+        # promise that this iteration's coordinates and samples are on disk too -- a kill between
+        # the row and the samples would otherwise leave a hole resume has no way to see.
         logger.checkpoint(X, y, f, t, statuses)
-        logger.append_row(row)
         if readout is not None:
             logger.append_coords(t, readout)
         if fitted is not None:
             logger.save_samples(t, fitted)
+        logger.append_row(row)
         logger.log(_iteration_line(row, fitted))
 
     return run_dir
+
+
+# --- the command line ---
+
+
+def _nuts_config(text: str) -> NUTSConfig:
+    """`--nuts W,S,K` -> `NUTSConfig(W, S, K)`: warmup draws, samples, thinning.
+
+    The other two fields are deliberately not exposed: `max_tree_depth` is the reference driver's
+    6 and `num_chains` is 1, and both are held identical across every cell so that the sampler's
+    budget can never be the reason two cells differ. The plan's fallback is passed here as
+    `--nuts 512,256,16`, which is also the default.
+    """
+    try:
+        warmup, samples, thinning = (int(part) for part in text.split(","))
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected three comma-separated ints 'warmup,samples,thinning'; got {text!r}"
+        ) from None
+    return NUTSConfig(warmup, samples, thinning)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m sagp.bo",
+        description=(
+            "Run one (family, seed, cell) of the study into "
+            "<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/, resuming it if it exists."
+        ),
+    )
+    parser.add_argument("--family", required=True, help="synthobj family, e.g. aligned10")
+    parser.add_argument(
+        "--seed", required=True, type=int,
+        help="run seed: fixes the initial design, the observation noise and every later draw",
+    )
+    parser.add_argument(
+        "--cell", required=True, choices=METHODS,
+        help="the method to run: a structure/prior cell, or one of the three references",
+    )
+    parser.add_argument("--out", required=True, type=Path, help="root of the run directories")
+    parser.add_argument(
+        "--T", type=int, default=200,
+        help="total evaluations, initial design included (default 200)",
+    )
+    parser.add_argument(
+        "--n-init", type=int, default=20,
+        help="size of the shared Sobol initial design (default 20)",
+    )
+    parser.add_argument("--D", type=int, default=100, help="ambient dimension (default 100)")
+    parser.add_argument(
+        "--acq", choices=list(ACQUISITIONS), default="logei",
+        help="LogEI, or the vendored reference's own EI (default logei)",
+    )
+    parser.add_argument(
+        "--alpha", type=float, default=None,
+        help="global-shrinkage scale; the cell's own prior default when unset",
+    )
+    parser.add_argument(
+        "--fixed-noise", type=float, default=None,
+        help="fix the observation noise at this value instead of inferring it",
+    )
+    parser.add_argument(
+        "--noiseless", action="store_true",
+        help="observe f(x) itself rather than the family's noisy observation",
+    )
+    parser.add_argument(
+        "--sobol-every", type=int, default=25,
+        help="compute the Sobol readout every N iterations and at t = T-1 (default 25)",
+    )
+    parser.add_argument(
+        "--no-resume", action="store_true",
+        help="start over, discarding whatever the run directory already holds",
+    )
+    parser.add_argument(
+        "--nuts", type=_nuts_config, default=NUTSConfig(), metavar="W,S,K",
+        help="NUTS warmup, samples and thinning (default 512,256,16); tree depth stays 6",
+    )
+    parser.add_argument(
+        "--num-init-candidates", type=int, default=5000,
+        help="candidates the acquisition optimizer scores each iteration (default 5000)",
+    )
+    parser.add_argument(
+        "--num-restarts-ei", type=int, default=5,
+        help="L-BFGS-B restarts from the best of those candidates (default 5)",
+    )
+    parser.add_argument(
+        "--objective-dir", type=Path, default=None,
+        help="load <dir>/<family>/seed{seed:02d}_D{D}.npz instead of rebuilding the objective",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="print the resolved config and the objective, then exit without writing anything",
+    )
+    return parser
+
+
+def resolve_config(args: argparse.Namespace) -> RunConfig:
+    """The `RunConfig` a parsed command line asks for: the one place a flag becomes a setting.
+
+    Separate from `main` so that `--dry-run` prints the very object the run would be given, and
+    so that two command lines can be compared without either being run -- which is how the study
+    checks that its seven methods differ in `method` and in nothing else.
+    """
+    return RunConfig(
+        family=args.family,
+        seed=args.seed,
+        D=args.D,
+        method=args.cell,
+        T=args.T,
+        n_init=args.n_init,
+        acq=args.acq,
+        alpha=args.alpha,
+        fixed_noise=args.fixed_noise,
+        noiseless=args.noiseless,
+        nuts=args.nuts,
+        num_init_candidates=args.num_init_candidates,
+        num_restarts_ei=args.num_restarts_ei,
+        sobol_every=args.sobol_every,
+        out_dir=str(args.out),
+    )
+
+
+def _load_objective(args: argparse.Namespace) -> SyntheticObjective:
+    """The problem to run: the study grid's stored objective, or one rebuilt from its family.
+
+    `--objective-dir` points at what `python -m synthobj.generate` wrote, whose stems are
+    `<dir>/<family>/seed{seed:02d}_D{D}`. Loading rather than rebuilding is what lets a cluster
+    array of 160 tasks share one objective per (family, seed) -- `f_star` included, which is
+    searched for rather than derived and is the constant every regret in the study is taken
+    against.
+    """
+    if args.objective_dir is None:
+        return make_family(args.family, args.seed, args.D)
+    stem = args.objective_dir / args.family / f"seed{args.seed:02d}_D{args.D}"
+    return SyntheticObjective.load(stem)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse `argv` (or `sys.argv`) and run one cell; 0 on success, 2 on a bad argument.
+
+    The two ways a command line can be wrong reach exit 2 by different routes. Argparse handles
+    what it can express -- a missing `--out`, a `--cell` outside `METHODS`, a `--nuts` that is not
+    three ints -- and raises `SystemExit(2)`, which is caught here so that `main` returns an int
+    to its caller rather than raising through it. An unknown `--family`, or an `--objective-dir`
+    with no such stem under it, cannot be expressed as `choices` (which families exist is
+    `synthobj.families`' business, and gamma variants are parameterized names), so it is checked
+    here instead. Anything the *run* raises is left to propagate -- a checkpoint under a different
+    configuration above all: that is not an argument error, and a cluster log should carry its
+    traceback rather than a bare exit code.
+    """
+    parser = _build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return 0 if exc.code is None else int(exc.code)
+
+    cfg = resolve_config(args)
+    try:
+        objective = _load_objective(args)
+    except (KeyError, FileNotFoundError) as error:
+        print(f"error: no objective for --family {args.family!r}: {error}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        print(json.dumps(dataclasses.asdict(cfg), indent=2, default=str))
+        print(
+            f"objective family={objective.labels.family} D={objective.D} "
+            f"f_star={objective.f_star!r} S={list(objective.labels.S)}"
+        )
+        return 0
+
+    # Every `RunConfig` field except the seven `run_bo` takes as arguments of its own. Derived
+    # rather than listed, so that a field added to the config cannot silently stop reaching the
+    # run while `--dry-run` goes on printing it.
+    named = {"family", "seed", "D", "method", "T", "n_init", "out_dir"}
+    overrides = {
+        field.name: getattr(cfg, field.name)
+        for field in dataclasses.fields(cfg)
+        if field.name not in named
+    }
+    run_dir = run_bo(
+        objective,
+        cfg.method,
+        cfg.seed,
+        T=cfg.T,
+        n_init=cfg.n_init,
+        out_dir=cfg.out_dir,
+        resume=not args.no_resume,
+        **overrides,
+    )
+    print(run_dir)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

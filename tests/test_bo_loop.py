@@ -7,8 +7,12 @@ against the naive formulas where those are accurate and against finiteness where
 underflowed. Second `optimize_ei`, whose five-line departure from `saasbo.optimize_ei` must leave
 it a maximizer under both acquisitions. Third the loop itself, whose contracts are behavioural: two
 runs at the same seed are the same run bit for bit, a resumed run equals the uninterrupted one bit
-for bit (including after a truncated write), a changed configuration refuses to resume, and the
-row schema, the regret and the Sobol schedule are what the plan says.
+for bit (including after a truncated write and after a torn one), a changed configuration refuses
+to resume, and the row schema, the regret and the Sobol schedule are what the plan says. Last the
+two contracts a study depends on but a normal run never exercises: an exception out of the fit
+costs a retry and then a seeded random query rather than the run, and the two references that are
+not cells -- the Sobol search and the oracle -- run end to end and leave the artifacts they should
+(the Sobol search leaves no `coords.csv` at all, which is legal for a method that fits nothing).
 
 Every loop test runs a real objective through a real fit -- `dsp_map`, whose MAP fit is
 milliseconds, with one NUTS-based run for the sampler's own determinism. Two knobs are turned down
@@ -29,9 +33,11 @@ import pytest
 from scipy.stats import norm, qmc
 
 import saasbo
+from sagp import bo
 from sagp.bo import (
     ACQUISITIONS,
     initial_design,
+    iteration_rngs,
     log1mexp,
     log_ei,
     log_ei_sum,
@@ -315,6 +321,170 @@ def _read_rows_from_text(lines: list[str]) -> list[dict[str, str]]:
     return list(csv.DictReader(lines))
 
 
+def test_resume_redoes_an_iteration_whose_row_was_torn_by_the_kill(tmp_path):
+    # Ruling R35. Under ruling R34 the row is the last thing an iteration writes, so a kill lands
+    # inside it; and when it lands just after a field separator, what is left on disk parses at
+    # the header's full width with an empty final field -- a row the width check cannot tell from
+    # a complete one. Only the missing line terminator can, and resume has to redo that iteration.
+    run_dir = run_bo(
+        _objective(), "dsp_map", seed=1, T=9, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
+    )
+    iterations = run_dir / "iterations.csv"
+    before = _read_rows(iterations)
+    with iterations.open(newline="") as handle:
+        lines = handle.read().splitlines(keepends=True)
+    last = lines[-1].rstrip("\r\n")
+    with iterations.open("w", newline="") as handle:
+        handle.write("".join(lines[:-1]) + last[: last.rindex(",") + 1])
+
+    with iterations.open(newline="") as handle:
+        parsed = list(csv.reader(handle))
+    assert len(parsed[-1]) == len(parsed[0]) and parsed[-1][-1] == ""  # full width, last field lost
+
+    run_bo(
+        _objective(), "dsp_map", seed=1, T=9, n_init=_N_INIT, out_dir=tmp_path, resume=True,
+        **_LOOP_KW,
+    )
+    rows = _read_rows(iterations)
+    assert [int(row["t"]) for row in rows] == [5, 6, 7, 8]
+    for redone, first in zip(rows, before):
+        for column in redone:
+            if column not in ("fit_wall_s", "acq_wall_s"):
+                assert redone[column] == first[column]
+
+
 def test_initial_design_is_the_first_rows_of_the_runs_sobol_sequence():
     # What makes the Sobol reference a *continuation* of the shared design rather than a new one.
     assert np.array_equal(initial_design(5, 5, 1), initial_design(5, 15, 1)[:5])
+
+
+# --- the failure policy ---
+
+
+def test_a_fit_that_raises_twice_is_replaced_by_a_seeded_random_query(tmp_path, monkeypatch):
+    """Both attempts raise: the row is excluded, `fit_calls` is 2, the query is the fallback seed's.
+
+    The run must not end. What replaces the fit is one scrambled Sobol point drawn from the
+    iteration's own `fallback_seed`, so even an iteration nothing could be fitted to stays a pure
+    function of `(seed, t)` -- rebuilt here from `iteration_rngs` rather than read back.
+    """
+
+    def always_raises(*args, **kwargs):
+        raise RuntimeError("no surrogate today")
+
+    monkeypatch.setattr(bo, "fit", always_raises)
+    run_dir = run_bo(
+        _objective(), "product/lengthscale", seed=4, T=8, n_init=_N_INIT, out_dir=tmp_path,
+        nuts=NUTSConfig(32, 32, 4), **_LOOP_KW,
+    )
+
+    rows = _read_rows(run_dir / "iterations.csv")
+    assert [int(row["t"]) for row in rows] == [5, 6, 7]
+    for row in rows:
+        t = int(row["t"])
+        assert row["status"] == "excluded"
+        assert int(row["fit_calls"]) == 2 and int(row["nuts_attempts"]) == 0
+        assert row["reason"] == "exception: RuntimeError: no surrogate today"
+        assert np.isnan(float(row["acq_value"]))
+        seed = int(iteration_rngs(4, t).fallback_seed)
+        fallback = qmc.Sobol(5, scramble=True, seed=seed).random(1)[0]
+        assert np.array_equal([float(row[f"x_{i}"]) for i in range(5)], fallback)
+
+    # Nothing was fitted, so there are no readouts and no draws to retain: `coords.csv` is legally
+    # absent here, exactly as it is for a Sobol run, and a reader has to allow for that.
+    assert not (run_dir / "coords.csv").exists()
+    assert list((run_dir / "samples").glob("t*.npz")) == []
+    assert "the retry raised" in (run_dir / "log.txt").read_text()
+
+
+def test_a_fit_that_raises_once_is_retried_and_the_retry_is_what_the_row_reports(
+    tmp_path, monkeypatch
+):
+    """One exception costs a second `fit` call and nothing else: the row is the retry's own."""
+    real_fit = bo.fit
+    calls = []
+
+    def raises_first(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("transient")
+        return real_fit(*args, **kwargs)
+
+    monkeypatch.setattr(bo, "fit", raises_first)
+    run_dir = run_bo(
+        _objective(), "product/lengthscale", seed=4, T=6, n_init=_N_INIT, out_dir=tmp_path,
+        nuts=NUTSConfig(32, 32, 4), thresholds=DiagThresholds(float("inf"), 0.0, 10**9),
+        **_LOOP_KW,
+    )
+
+    (row,) = _read_rows(run_dir / "iterations.csv")
+    assert len(calls) == 2
+    assert int(row["fit_calls"]) == 2
+    # The status is the surviving fit's, not the exception's: this iteration is an ordinary one.
+    assert row["status"] == "ok" and row["reason"] == ""
+    assert int(row["nuts_attempts"]) == 1 and np.isfinite(float(row["acq_value"]))
+    assert len(_read_rows(run_dir / "coords.csv")) == 5
+    assert (run_dir / "samples" / "t005.npz").exists()
+
+
+# --- the two references that are not cells ---
+
+
+def test_the_sobol_reference_walks_the_seeds_own_sequence(tmp_path):
+    run_dir = run_bo(
+        _objective(), "sobol", seed=3, T=12, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
+    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning)
+        expected = qmc.Sobol(5, scramble=True, seed=3).random(12)
+    assert np.array_equal(_checkpoint(run_dir)["X"], expected)
+
+    rows = _read_rows(run_dir / "iterations.csv")
+    assert [int(row["t"]) for row in rows] == list(range(_N_INIT, 12))
+    for row in rows:
+        assert row["status"] == "ok" and int(row["fit_calls"]) == 0
+        assert np.isnan(float(row["acq_value"])) and np.isnan(float(row["fit_wall_s"]))
+        assert int(row["sobol_computed"]) == 0
+    # This reference fits nothing, so it has no readouts and no draws: `coords.csv` and the
+    # samples are absent for every Sobol run, which is legal rather than a missing artifact.
+    assert not (run_dir / "coords.csv").exists()
+    assert list((run_dir / "samples").glob("t*.npz")) == []
+
+    # Which every reader of a run directory has to allow for, `truncate_to` included: it reads
+    # `coords.csv` on each resume, and here there has never been one to read.
+    run_bo(
+        _objective(), "sobol", seed=3, T=14, n_init=_N_INIT, out_dir=tmp_path, resume=True,
+        **_LOOP_KW,
+    )
+    assert np.array_equal(_checkpoint(run_dir)["X"], initial_design(5, 14, 3))
+    rows = _read_rows(run_dir / "iterations.csv")
+    assert [int(row["t"]) for row in rows] == list(range(_N_INIT, 14))
+    assert not (run_dir / "coords.csv").exists()
+
+
+def test_the_oracle_reference_fits_the_objectives_own_S_end_to_end(tmp_path):
+    objective = _objective()
+    run_dir = run_bo(
+        objective, "oracle_S", seed=3, T=12, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
+    )
+
+    rows = _read_rows(run_dir / "iterations.csv")
+    assert [int(row["t"]) for row in rows] == list(range(_N_INIT, 12))
+    assert all(int(row["fit_calls"]) == 1 and int(row["nuts_attempts"]) == 0 for row in rows)
+    assert sorted(int(p.stem[1:]) for p in (run_dir / "samples").glob("t*.npz")) == list(
+        range(_N_INIT, 12)
+    )
+
+    # The one place a run's artifacts show the oracle was handed S: `fit_map(active=S)` fits
+    # X[:, S] alone, so its retained draw carries |S| lengthscales where `dsp_map`'s carries D.
+    with np.load(run_dir / "samples" / "t005.npz") as data:
+        assert data["kernel_inv_length_sq"].shape == (1, len(objective.labels.S))
+
+    # `readouts` widens back to D with zeros outside `active`, so the oracle reports -- correctly,
+    # by construction -- that no coordinate outside S is active.
+    off_S = [i for i in range(5) if i not in objective.labels.S]
+    assert off_S  # aligned3 at D = 5 leaves two coordinates inert
+    coords = _read_rows(run_dir / "coords.csv")
+    assert len(coords) == 5 * (12 - _N_INIT)
+    assert all(float(r["p_active"]) == 0.0 for r in coords if int(r["i"]) in off_S)
+    assert all(float(r["native_median"]) == 0.0 for r in coords if int(r["i"]) in off_S)
