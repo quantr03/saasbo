@@ -31,10 +31,15 @@ def test_gamma_sweep_keeps_S_pairs_and_component_shapes_identical() -> None:
     """Same seed, gamma in {0, 0.5}: identical S and pairs; every component's values divided by
     sqrt(its own share) agree to 1e-12 -- the only thing gamma is allowed to move is that scale.
 
-    The `labels.gamma` check makes this two-sided: without it, a `_resolve_shares` that ignored
-    `gamma` entirely would make `obj0` and `obj5` identical outright and pass every assertion here
-    vacuously (fix-round finding). Asserting the two gammas actually differ, on top of everything
-    else staying identical, is what makes "only the scale moved" a real claim.
+    Without the `labels.gamma` assertions, on top of everything else staying identical, "only the
+    scale moved" would be a vacuous claim if `_resolve_shares` ignored `gamma` entirely and made
+    `obj0`/`obj5` identical outright (fix-round finding). Mutation-tested: that specific mutant is
+    actually caught by `c0.share != pytest.approx(c5.share)` below, not by either `labels.gamma`
+    assertion -- `Labels.gamma` is computed independently, from `sum(inter.c**2)` where
+    `inter.c = sqrt(spec.gamma / spec.n_pairs)`, a path `_resolve_shares` never touches, so it
+    stays correct (and the two gammas differ) even when `_resolve_shares` is broken. The
+    `labels.gamma` checks are not tautological and are kept, but the two-sidedness this docstring
+    used to attribute to them belongs to the per-component share comparison instead.
     """
     seed = 42
     base = dict(name="t", D=20, n_active=5, ells=0.5, n_pairs=2)

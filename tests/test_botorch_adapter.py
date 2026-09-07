@@ -121,6 +121,20 @@ def test_optimizers_reproduces_x_star_and_attains_f_star(obj) -> None:
     assert obj(x_opt) == pytest.approx(obj.f_star, abs=1e-8)
 
 
+def test_evaluate_true_accepts_a_gradient_tracked_input(obj) -> None:
+    """`.detach()` guards a `requires_grad=True` input: `Tensor.numpy()` raises outright on one
+    that still requires grad, and the numpy round trip through `obj(...)` cannot participate in
+    autograd regardless. Without `.detach()` this call would raise instead of returning a value.
+    """
+    X = torch.tensor(np.random.default_rng(2).uniform(size=(5, D)), dtype=torch.double, requires_grad=True)
+    tf = SyntheticObjectiveTestFunction(obj)
+
+    out = tf.evaluate_true(X)
+
+    assert out.shape == (5,)
+    np.testing.assert_allclose(out.detach().numpy(), obj(X.detach().numpy()), atol=1e-12, rtol=0)
+
+
 def test_noise_std_perturbs_forward_with_the_given_scale(obj) -> None:
     """`noise_std=0.1` makes `forward` differ from `evaluate_true`, by roughly that much noise.
 

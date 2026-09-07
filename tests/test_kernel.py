@@ -14,6 +14,7 @@ from synthobj.kernel import (
     eigen_factor,
     joint_points,
     make_grid,
+    matern52,
     normalized,
     nu_mean,
     nu_var,
@@ -24,6 +25,12 @@ from synthobj.kernel import (
 def test_gl_quadrature_nodes_and_weights():
     assert GL_WEIGHTS.sum() == pytest.approx(1.0, abs=1e-12)
     assert np.all(GL_NODES > 0.0) and np.all(GL_NODES < 1.0)
+
+
+def test_matern52_is_unit_variance_at_zero_distance():
+    # The whole normalization argument (v, normalized) rests on the raw kernel having unit
+    # marginal variance before centering; matern52 itself is otherwise never asserted on directly.
+    assert matern52(0.0) == 1.0
 
 
 # v(ell) reference table from the check script, rel tol 1e-3 (task brief). v(30) is checked
@@ -82,6 +89,30 @@ def test_eigen_factor_is_cached_by_identity():
     first = eigen_factor(0.0, 1.0, 100, 0.5)
     second = eigen_factor(0.0, 1.0, 100, 0.5)
     assert first is second
+
+
+def test_eigen_factor_cache_key_discriminates_on_every_argument():
+    # test_eigen_factor_is_cached_by_identity above only proves the SAME key returns the SAME
+    # object; it has no power against a cache that dropped one of (lo, hi, n, ell) from its key,
+    # since two calls with that argument varied and everything else fixed would then collide.
+    base = eigen_factor(0.0, 1.0, 100, 0.5)
+    assert base is not eigen_factor(0.0, 1.0, 100, 3.0)
+    assert base is not eigen_factor(0.0, 1.0, 50, 0.5)
+    assert base is not eigen_factor(0.0, 2.0, 100, 0.5)
+    assert base is not eigen_factor(-1.0, 1.0, 100, 0.5)
+
+
+def test_eigen_factor_clips_eigenvalues_below_the_threshold():
+    # Pins the 1e-12 * lambda_max clip threshold directly, rather than only through the
+    # reconstruction-error test above (which would also pass with a looser or tighter clip, as
+    # long as it is small enough not to visibly perturb F @ F.T).
+    Z = joint_points(make_grid(0.0, 1.0, 100))
+    K = normalized(Z, Z, 0.5)
+    eigvals = np.linalg.eigvalsh(K)
+    F = eigen_factor(0.0, 1.0, 100, 0.5)
+    kept = (F**2).sum(axis=0)  # F's own column norms**2 are its (clipped) eigenvalues
+    threshold = 1e-12 * eigvals.max()
+    assert np.sum(eigvals < threshold) == np.sum(kept < 1e-300)
 
 
 def test_nu_mean_and_nu_var_on_linear_function():

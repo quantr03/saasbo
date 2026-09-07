@@ -105,8 +105,11 @@ def block_argmax(
     `gtol=1e-12`. The best of the knot maximum and the refinements is returned, so the result can
     never be worse than the scan; when the scan already sits on the maximum, refinement gains
     exactly nothing and the knot point is returned unchanged. The knot maximum is within about
-    1e-5 of the true maximum and refinement takes it below 1e-10 -- accurate but not closed form,
-    unlike the exact 1-D `Component.argmax`.
+    1e-5 of the true maximum (module docstring). What is actually measured past that point is
+    refinement's first-order optimality, not its distance to the unknown true maximum: the
+    projected gradient at the returned point (accounting for an active bound) measures <= 8.2e-9
+    on the module docstring's four-block configuration -- accurate but not closed form, unlike
+    the exact 1-D `Component.argmax`.
 
     `u_i` and `u_j` are assumed to cover [0,1], which holds for every component the plan builds.
     """

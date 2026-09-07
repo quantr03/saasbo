@@ -126,12 +126,16 @@ class Component:
         [lo, hi], together with the two endpoints, is the global maximum to floating point --
         there is no grid and no iterative search.
 
-        Raises `ValueError` if [lo, hi] is not contained in the knot range. The spline does
-        not extrapolate, so f is NaN there; without this guard the endpoint NaN would win
-        `argmax` and the method would return a silently wrong `(lo, nan)` pair rather than
-        failing. [0, 1] is inside the knot range of every component the plan builds, on the
-        unit grid and on the extended grid alike.
+        Raises `ValueError` if [lo, hi] is not contained in the knot range, or if `lo > hi`. The
+        spline does not extrapolate, so f is NaN outside the knot range; without the range guard
+        the endpoint NaN would win `argmax` and the method would return a silently wrong
+        `(lo, nan)` pair rather than failing. [0, 1] is inside the knot range of every component
+        the plan builds, on the unit grid and on the extended grid alike. Without the `lo > hi`
+        guard, an inverted range would still run -- `candidates = [lo, hi]` -- and return a
+        meaningless "maximum" over the two endpoints in the wrong order.
         """
+        if lo > hi:
+            raise ValueError(f"argmax bounds [{lo}, {hi}] are inverted: lo must not exceed hi")
         if lo < self.grid[0] or hi > self.grid[-1]:
             raise ValueError(
                 f"argmax bounds [{lo}, {hi}] lie outside the knot range "

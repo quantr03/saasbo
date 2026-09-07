@@ -28,6 +28,7 @@ z = 1.18, outside the cube, so that a search over unrestricted knots would repor
 *Gradient* tests check `block_value_and_grad`'s analytic gradient against central differences at
 a step of 1e-6, at interior points so the stencil stays inside [0,1].
 """
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError
 
 import numpy as np
@@ -77,12 +78,16 @@ def _block(
     return f_i, f_j, Interaction(0, 1, float(np.sqrt(s_ij)), u_i, u_j)
 
 
-def _analytic_component(grid: np.ndarray, coord: int, f) -> Component:
+def _analytic_component(
+    grid: np.ndarray, coord: int, f: Callable[[np.ndarray], np.ndarray]
+) -> Component:
     """A unit-variance component whose raw joint values are `f` at `joint_points(grid)`."""
     return Component.from_raw(coord, np.inf, 1.0, grid, f(joint_points(grid)))
 
 
-def _phi(f_i: Component, f_j: Component, inter: Interaction, x, y):
+def _phi(
+    f_i: Component, f_j: Component, inter: Interaction, x: float | np.ndarray, y: float | np.ndarray
+) -> np.ndarray:
     """phi = f_i(x) + f_j(y) + h(x, y), assembled from the public evaluators only."""
     return f_i(x) + f_j(y) + inter(x, y)
 
@@ -270,7 +275,9 @@ def test_block_argmax_searches_only_the_unit_square() -> None:
     # an unrestricted knot scan starts every refinement at the clipped corner (1, 1), which is a
     # local maximum of phi, and would report 1.9157 instead of 4.3787.
     grid = make_grid(EXT_LO, EXT_HI, 512)
-    shape = lambda z: 3.0 * np.exp(-50.0 * (z - 1.18) ** 2) + np.exp(-50.0 * (z - 0.5) ** 2)
+    shape: Callable[[np.ndarray], np.ndarray] = (
+        lambda z: 3.0 * np.exp(-50.0 * (z - 1.18) ** 2) + np.exp(-50.0 * (z - 0.5) ** 2)
+    )
     f_i, f_j = _analytic_component(grid, 0, shape), _analytic_component(grid, 1, shape)
     u_i = _analytic_component(grid, 0, lambda z: np.sin(2.0 * np.pi * z))
     u_j = _analytic_component(grid, 1, lambda z: np.cos(2.0 * np.pi * z))
@@ -291,7 +298,10 @@ def test_block_argmax_searches_only_the_unit_square() -> None:
 
 def test_block_argmax_honours_top_k() -> None:
     # top_k = 1 refines only the best knot cell, so it can only be worse than the default sweep;
-    # both must still be consistent pairs and inside the cube.
+    # both must still be consistent pairs and inside the cube. On this particular (real-draw)
+    # block top_k=1 already finds the same maximum as the default sweep -- see
+    # test_block_argmax_top_k_1_can_be_strictly_worse below for a block where it does not -- so
+    # this test alone exercises pair consistency, not top_k selection.
     f_i, f_j, inter = _block(0.25, n=N_PROD, seed=100)
     xy_one, phi_one = block_argmax(f_i, f_j, inter, top_k=1)
     _, phi_many = block_argmax(f_i, f_j, inter)
@@ -299,6 +309,41 @@ def test_block_argmax_honours_top_k() -> None:
     assert phi_one <= phi_many + 1e-12
     assert np.all((xy_one >= 0.0) & (xy_one <= 1.0))
     assert float(_phi(f_i, f_j, inter, xy_one[0], xy_one[1])) == pytest.approx(phi_one, abs=1e-6)
+
+
+def test_block_argmax_top_k_1_can_be_strictly_worse_than_the_default_sweep() -> None:
+    """A hand-built block where restricting to top_k=1 provably misses the true maximum.
+
+    `f_i` is built (via the plain `Component` constructor, not `from_raw`, for exact control
+    over every knot value) with an isolated single-knot spike at x=0.3 (raw value 8.0) and a
+    four-knot shelf against the domain's right edge (raw value 7.9). The spike ranks #1 in the
+    raw knot scan, so top_k=1 refines only it and cannot improve past 8.0 (refinement never
+    decreases the starting value). The shelf sits at a boundary where the not-a-knot cubic
+    spline overshoots well past its own sampled value -- the interior spline maximum near the
+    shelf is about 8.76, exceeding the spike -- but the shelf ranks #2 in the raw scan, so only
+    a search with top_k >= 2 ever refines it. `f_j` is a plain monotone ramp (unique maximum at
+    y=1, exactly on a knot) so the y-dimension does not confound the ranking, and c=0 keeps the
+    two dimensions independent so the effect is attributable to f_i's own landscape alone.
+    """
+    x = np.linspace(0.0, 1.0, 21)
+    y_i = np.zeros_like(x)
+    y_i[6] = 8.0  # isolated spike at x=0.3, ranks #1 in the raw knot scan
+    y_i[17:21] = 7.9  # shelf against the right edge, ranks #2, but overshoots past 8.0 off-knot
+
+    f_i = Component(0, 1.0, 1.0, x, y_i)
+    f_j = Component(1, 1.0, 1.0, x, np.sqrt(12.0) * (x - 0.5))
+    u_i = Component(0, 1.0, 1.0, x, np.sin(2.0 * np.pi * x))
+    u_j = Component(1, 1.0, 1.0, x, np.cos(2.0 * np.pi * x))
+    inter = Interaction(0, 1, 0.0, u_i, u_j)
+
+    xy_one, phi_one = block_argmax(f_i, f_j, inter, top_k=1)
+    xy_many, phi_many = block_argmax(f_i, f_j, inter, top_k=20)
+
+    assert phi_one == pytest.approx(8.0 + np.sqrt(3.0), abs=1e-6)  # spike + f_j(1), unimproved
+    assert phi_many > phi_one + 0.5  # the shelf's overshoot, found only because top_k >= 2
+    assert xy_one[0] == pytest.approx(0.3, abs=1e-4)
+    assert xy_many[0] > 0.8  # the shelf's neighborhood, not the spike's
+    assert float(_phi(f_i, f_j, inter, xy_many[0], xy_many[1])) == pytest.approx(phi_many, abs=1e-6)
 
 
 # --- dataclass conventions -----------------------------------------------------------------------
@@ -309,12 +354,21 @@ def test_interaction_is_frozen_and_compares_by_identity() -> None:
     _, _, b = _block(0.375, seed=700)
 
     # Ruling R4 and the branch convention: a frozen dataclass holding Components is eq=False.
-    # NOTE ON POWER: unlike Component, Interaction would behave identically with eq=True -- its
-    # scalar fields compare fine and Component already compares by identity -- so the two
-    # behavioural assertions below pass either way. The declaration is pinned directly instead.
+    # NOTE ON POWER: an earlier version of this comment claimed Interaction would behave
+    # identically with eq=True in general, which overgeneralises from `a` vs `b` here -- the one
+    # case that does not discriminate, since a and b hold distinct Component instances and
+    # Component itself compares by identity. Constructing two Interactions from the SAME field
+    # objects (below) does discriminate: eq=False keeps them unequal, an eq=True mutant would not.
+    # The direct `__eq__ is object.__eq__` pin already kills that mutant, so there is no power
+    # gap -- it just pins the declaration rather than only its consequence, which the assertions
+    # below add.
     assert Interaction.__eq__ is object.__eq__
     assert a == a
     assert a != b
+
+    same = Interaction(a.i, a.j, a.c, a.u_i, a.u_j)
+    same_again = Interaction(a.i, a.j, a.c, a.u_i, a.u_j)
+    assert same != same_again  # identity equality: same field values, still distinct instances
 
     with pytest.raises(FrozenInstanceError):
         a.c = 1.0

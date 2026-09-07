@@ -216,6 +216,12 @@ def test_argmax_rejects_bounds_outside_the_knot_range() -> None:
         unit.argmax(-0.25, 1.25)
     with pytest.raises(ValueError, match="outside the knot range"):
         unit.argmax(0.0, 1.5)
+    # Both cases above violate only the hi bound; deleting the `lo < self.grid[0]` half of the
+    # guard would still leave both raising, while argmax(-0.5, 0.5) would then silently return
+    # (-0.5, nan) -- exactly the bug the guard exists to prevent. A lo-only violation closes that
+    # gap.
+    with pytest.raises(ValueError, match="outside the knot range"):
+        unit.argmax(-0.5, 0.5)
 
     # An extended-domain component does accept the wider bounds its knots cover, and maximizes
     # over all of them -- this is the call Task 6's rotated blocks will make.
@@ -225,6 +231,14 @@ def test_argmax_rejects_bounds_outside_the_knot_range() -> None:
     assert -0.2 <= x_star <= 1.2
     assert f_star >= ext(np.linspace(-0.2, 1.2, 100_000)).max() - 1e-12
     assert f_star >= ext.argmax()[1] - 1e-12
+
+
+def test_argmax_rejects_an_inverted_range() -> None:
+    # Without this guard, lo > hi still runs: candidates = [lo, hi] and argmax reports a
+    # meaningless "maximum" over the two endpoints in the wrong order rather than failing.
+    comp = _gp_component(0.5, 1.0, N_SMALL, seed=17)
+    with pytest.raises(ValueError, match="inverted"):
+        comp.argmax(0.6, 0.2)
 
 
 # --- knot vector and reconstruction ----------------------------------------------------------

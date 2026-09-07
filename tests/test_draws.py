@@ -18,6 +18,7 @@ from synthobj.kernel import (
     eigen_factor,
     joint_points,
     make_grid,
+    nu_mean,
     nu_var,
     v,
 )
@@ -26,11 +27,24 @@ from synthobj.kernel import (
 def _quadrature_mean_var(node_vals):
     """Vectorized quadrature mean and variance across columns of `node_vals` (64, n_draws) --
     the trailing-64-node values of one or more raw draws. Matches kernel.nu_mean/nu_var, which
-    only take a single length-64 array, applied column-wise to many draws at once.
+    only take a single length-64 array, applied column-wise to many draws at once (see
+    `test_quadrature_mean_var_matches_the_kernel_functions_columnwise` below, which binds this
+    reimplementation to the kernel's own formulas rather than leaving the two merely similar by
+    inspection).
     """
     mean = (GL_WEIGHTS[:, None] * node_vals).sum(axis=0)
     var = (GL_WEIGHTS[:, None] * node_vals**2).sum(axis=0) - mean**2
     return mean, var
+
+
+def test_quadrature_mean_var_matches_the_kernel_functions_columnwise():
+    # Nothing else binds this file's vectorized _quadrature_mean_var to kernel.nu_mean/nu_var: a
+    # future change to either formula could silently diverge from the other without this.
+    node_vals = np.random.default_rng(0).standard_normal((64, 5))
+    mean, var = _quadrature_mean_var(node_vals)
+    for k in range(node_vals.shape[1]):
+        assert mean[k] == pytest.approx(nu_mean(node_vals[:, k]), abs=1e-12)
+        assert var[k] == pytest.approx(nu_var(node_vals[:, k]), abs=1e-12)
 
 
 # --- omega_for_ell -----------------------------------------------------------
@@ -151,8 +165,10 @@ def test_sinusoid_and_matern_slope_shares_agree_at_common_lengthscale():
     # R11 test 2, revised by ruling R16 (fix round 1). At one shared lengthscale, rescaling
     # every component to an exact variance share forces the *normalized* slope-share vector to
     # equal the prescribed share vector for any generator -- so this comparison alone has no
-    # power (R16 Finding 1: five deliberately-broken generators all pass it, one better than
-    # the correct one) and only documents batch noise; its bound is widened from 0.05 to 0.08
+    # power (R16 Finding 1: four deliberately-broken generators all pass it -- the original
+    # review's table had five rows, one of which was the correct generator -- one of the four
+    # even doing better than the correct one) and only documents batch noise; its bound is
+    # widened from 0.05 to 0.08
     # so a correct implementation cannot fail it. The assertion that actually carries signal is
     # the *unnormalized* per-share totals below, which normalization was destroying.
     ell = 0.5
@@ -187,15 +203,22 @@ def test_sinusoid_and_matern_slope_shares_agree_at_common_lengthscale():
 
     # R16 (fix round 2): ratio of raw (unnormalized) per-share totals: matern_total /
     # sinusoid_total. This direction is correct and settled. Reason: the Matern generator's
-    # realized slope energy runs ~1.8x its theoretical slope factor at ell=0.5 (measured mean
-    # 42.69 vs. theory 23.63), so the two generators must be compared realized-to-realized.
-    # Band from measurement: 1.18-1.45 at 200 draws/batch, 1.21-1.37 at 1000 draws/batch,
-    # committed config ~830 effective draws. An 8x-frequency sinusoid gives ~0.02 and fixed
-    # five-cycles-per-unit generator ~0.10, both far outside. n_terms=1 lands near 1.34 and
-    # is deliberately not caught (one-term draw from same frequency band has nearly same slope
-    # energy by construction, so n_terms is a parameter choice, not correctness). Normalized
-    # share-vector comparison has no power and serves only to document batch noise, which is
-    # why it alone cannot discriminate correct from deliberately-broken generators.
+    # realized slope energy runs well above its theoretical slope factor at ell=0.5, and the
+    # two generators must be compared realized-to-realized. That "~1.8x (42.69 vs. theory
+    # 23.63)" figure was measured on the 1024-point production grid, not on the 200-point grid
+    # this test actually runs on: re-measured on this test's own configuration (200-point grid,
+    # shares/n_draws as below, 10 seeds), the realized total is 39.35 +/- 1.26 against a theory
+    # of 23.63 -- a factor of ~1.67x, not 1.8x. The qualitative claim -- realized energy
+    # substantially exceeds the theoretical slope factor -- is unaffected; only the earlier
+    # magnitude was quoted against the wrong configuration. Band from measurement: 1.18-1.45 at
+    # 200 draws/batch, 1.21-1.37 at 1000 draws/batch, committed config ~830 effective draws. An
+    # 8x-frequency sinusoid gives ~0.02 and a fixed five-cycles-per-unit generator gives ~0.040
+    # (re-measured; an earlier draft estimated ~0.10 rather than measuring it), both far
+    # outside. n_terms=1 lands near 1.34 and is deliberately not caught (one-term draw from the
+    # same frequency band has nearly the same slope energy by construction, so n_terms is a
+    # parameter choice, not correctness). Normalized share-vector comparison has no power and
+    # serves only to document batch noise, which is why it alone cannot discriminate correct
+    # from deliberately-broken generators.
     total_ratio = matern_energy.sum() / sinusoid_energy.sum()
     assert 1.10 < total_ratio < 1.55
 

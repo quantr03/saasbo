@@ -20,10 +20,13 @@ mutant they appear to guard, the load-bearing ones are the ones that cross a rea
   (ruling R30 follow-on) or `main_values`/`inter_values` would shift this by orders of magnitude
   more than the tolerance; a manual check (see task-8-report.md) confirms a corrupted `mu` alone
   moves it to ~5e-3.
-- `test_load_does_not_call_eigen_factor` monkeypatches every name that function is bound under
-  (`synthobj.kernel.eigen_factor` and `synthobj.families.eigen_factor`, which imports it by name
-  at module scope) to raise, then loads anyway -- the strongest available evidence that `load`
-  never re-draws.
+- `test_load_does_not_redraw_for_any_generator` monkeypatches every generator name each of the
+  three study generators is bound under (`eigen_factor` on both `synthobj.kernel` and
+  `synthobj.families`, plus `sinusoid_draw`, `draw_until_monotone` and `gp_draw` on
+  `synthobj.families`, all imported by name at module scope) to raise, then loads anyway for the
+  matern (`rotated_t45`), sinusoid (`aligned10_sin`) and monotone-rejection (`dense_weak`)
+  variants -- the strongest available evidence that `load` never re-draws, for every generator
+  the study uses, not just the matern one the brief names literally.
 
 The remaining tests (`Labels` field-by-field, `spec ==`, `version`, different-seed `S`) are
 weaker, stored-state-round-trips-to-itself checks; they are kept because the brief asks for them
@@ -340,10 +343,14 @@ def test_different_seeds_give_different_S(tmp_path: Path) -> None:
     loaded_a = SyntheticObjective.load(tmp_path / "a")
     loaded_b = SyntheticObjective.load(tmp_path / "b")
     assert loaded_a.labels.S != loaded_b.labels.S
-    # M3: the check above alone would also pass for a load that re-derived S from the npz
-    # `active` array's coordinate set rather than reading the stored `Labels.S` -- both are
-    # correct on healthy data, so neither seed comparison distinguishes "read" from
-    # "re-derived". Comparing each loaded S to its own original closes that gap.
+    # M3: NOTE ON POWER. The added assertions below do not distinguish "load reads Labels.S"
+    # from "load re-derives S from the npz `active` array's coordinate set" -- a correct
+    # re-derivation produces the identical sorted tuple on healthy data, so both readings pass
+    # here regardless. What they do add over the seed comparison above is narrower but real:
+    # power against wholesale S corruption (e.g. a dropped or duplicated coordinate) or a type
+    # bug in the round trip (e.g. S surviving as a list or the wrong dtype), either of which
+    # would break `==` against the original even though it says nothing about "read" vs.
+    # "re-derived".
     assert loaded_a.labels.S == obj_a.labels.S
     assert loaded_b.labels.S == obj_b.labels.S
 
