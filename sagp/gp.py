@@ -31,7 +31,8 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
-from jax import Array, jit
+from jax import Array, jit, vmap
+from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 from jax.typing import ArrayLike
 from numpyro.diagnostics import summary
 from numpyro.infer import MCMC, NUTS
@@ -41,6 +42,7 @@ import saasgp
 from synthobj.kernel import GL_NODES as _GL_NODES_NUMPY
 from synthobj.kernel import GL_WEIGHTS as _GL_WEIGHTS_NUMPY
 from synthobj.objective import ACTIVE_EPS
+from util import chunk_vmap
 
 # (structure in {"additive", "product"}, sparsity prior in {"amplitude", "lengthscale"}).
 CellKey = tuple[str, str]
@@ -537,6 +539,20 @@ class Diagnostics:
     reason: str
 
 
+# Row-chunking policy for `FittedGP.posterior` (plan ruling R19), identical for every cell. Two
+# of the four kernels materialize an (n_test, n, D) broadcast that XLA declines to fuse -- Task 1
+# measured 420 MB (additive/lengthscale) and 775 MB (product/amplitude) peaks at 5000 x 200 x 100
+# -- and `cell_kernel_diag` builds an unfused (n_test, Q, D) tensor of its own (461 MB jitted at
+# 5000 x 100). Above 2**25 elements, i.e. 256 MB of float64, `posterior` therefore evaluates
+# X_test in row blocks, kernel and diagonal together in the same call. Blocking the test axis can
+# change no modelling quantity -- each test point's mean and variance depend on no other test
+# point -- so the most it can move is the last ulp, and it is deliberately out of reach of the
+# bit-for-bit comparison against the reference (D <= 5, n <= 30), which stays on the single-call
+# path. The two numbers are cell-independent on purpose: a per-cell rule would be a confound.
+_CHUNK_THRESHOLD: int = 2**25
+_CHUNK_ROWS: int = 256
+
+
 class FittedGP:
     """One cell's posterior on standardized, negated targets: what `fit` returns and `bo.py` sees.
 
@@ -569,6 +585,159 @@ class FittedGP:
         self.status = status  # "ok", "refit" or "excluded"
         self.status_reason = status_reason
         self.attempts = tuple(attempts)
+        # Cholesky factors of the S training kernel matrices, (S, n, n). Filled on the first
+        # prediction and kept, as the reference keeps its `Ls`: the acquisition optimizer
+        # scores thousands of candidates against one fit and must not refactorize per call.
+        self._Ls: Array | None = None
+
+    def _kernel(self) -> tuple[Callable[..., Array], Callable[..., Array]]:
+        """This cell's (kernel, diagonal) pair out of `KERNELS`.
+
+        Task 7's MAP references (`cell` = "dsp_map" or "oracle_S") are the reference ARD
+        Matern-5/2 carrying the lengthscale cells' parameter names, so they predict through
+        ("product", "lengthscale")'s entry. Prediction then has one code path for all six values
+        of `cell`, and what distinguishes the oracle is `active` alone.
+        """
+        return KERNELS[self.cell if isinstance(self.cell, tuple) else ("product", "lengthscale")]
+
+    def _param_sites(self) -> tuple[str, ...]:
+        """The names of this cell's kernel parameters, in the order prediction passes them around.
+
+        `util.chunk_vmap` indexes a *tuple* of arrays, so the per-sample parameters cannot travel
+        through it as a dict: they go positionally in this order and are rebuilt into the dict the
+        kernels take inside the vmapped function. The MAP references share the lengthscale cells'
+        names for the reason given in `_kernel`.
+        """
+        if isinstance(self.cell, tuple) and self.cell[1] == "amplitude":
+            return ("a_sq", "kernel_ell")
+        return ("kernel_var", "kernel_inv_length_sq")
+
+    def _params(self, s: int) -> dict[str, Array]:
+        """Retained sample `s`'s kernel parameters, in the form its kernel and diagonal take."""
+        return {site: self.samples[site][s] for site in self._param_sites()}
+
+    def _noises(self) -> Array:
+        """(S,): the observation variance carried by each retained sample.
+
+        `kernel_noise` when it was learned, else `fixed_noise` repeated. The reference splits
+        these two: `compute_choleskys` uses `observation_variance` while `posterior` hard-codes
+        1e-6 in the predictive variance. We use the configured value in both places, which agrees
+        with the reference exactly at 1e-6 -- the only fixed variance this study uses, and the one
+        the bit-for-bit test pins.
+        """
+        if "kernel_noise" in self.samples:
+            return self.samples["kernel_noise"]
+        return self.fixed_noise * jnp.ones(self.samples[self._param_sites()[0]].shape[0])
+
+    def _columns(self, X: Array) -> Array:
+        """`X` restricted to `active`, the coordinates Task 7's oracle reference was given.
+
+        `X_train` itself stays full-D -- `saasbo.optimize_ei`'s incumbent lookup and the run log
+        read it, and candidates arrive full-D -- so the restriction happens here, at every kernel
+        and diagonal evaluation, rather than the callers having to track which width they hold.
+        """
+        return X if self.active is None else X[:, self.active]
+
+    def _compute_choleskys(self, chunk_size: int | None = None) -> None:
+        """`SAASGP.compute_choleskys` generalized to the cell; fills the cache `self._Ls`.
+
+        The reference's body with `self.kernel(X, X, var, inv_length_sq, noise, True)` replaced by
+        this cell's kernel over this cell's parameters. `chunk_size` defaults to `min(8, S)`: 8 is
+        the reference's own, and the minimum keeps `util.get_chunks` off its latent `np` NameError
+        when S is smaller than 8 (Task 7's MAP references have S = 1), without touching the
+        vendored file.
+        """
+        kernel, _ = self._kernel()
+        sites = self._param_sites()
+        X = self._columns(self.X_train)
+
+        def _cholesky(*sample: Array) -> tuple[Array]:
+            # `zip` stops at `sites`, so the trailing noise argument is not taken for a parameter.
+            k_XX = kernel(X, X, dict(zip(sites, sample)), sample[-1], True)
+            return (cho_factor(k_XX, lower=True)[0],)
+
+        vmap_args = tuple(self.samples[site] for site in sites) + (self._noises(),)
+        if chunk_size is None:
+            chunk_size = min(8, vmap_args[0].shape[0])
+        self._Ls = chunk_vmap(_cholesky, vmap_args, chunk_size=chunk_size)[0]
+
+    def _predict(
+        self, X_test: Array, L: Array, params: dict[str, Array], noise: ArrayLike
+    ) -> tuple[Array, Array]:
+        """`SAASGP.predict` generalized to the cell: mean and noisy predictive variance at X_test.
+
+        The reference's four lines in the reference's order, for one sample, with its unused
+        `rng_key` dropped. The one generalization is the prior diagonal: `saasgp.kernel_diag(var,
+        noise)` is the scalar `var + noise + 1e-6`, constant in x because the ARD Matern's
+        marginal variance is, whereas the three centered kernels' diagonals vary with x. It
+        becomes `cell_kernel_diag(X_test, params) + noise + 1e-6`, and for ("product",
+        "lengthscale") that diagonal is `var * ones`; multiplying by one is exact and the sum is
+        associated the same way, so this reproduces the reference's line bit for bit.
+
+        `X_test` arrives full-D: `active` is applied here, to it and to the training inputs alike.
+        """
+        kernel, kernel_diag = self._kernel()
+        X, X_p = self._columns(self.X_train), self._columns(X_test)
+
+        k_pX = kernel(X_p, X, params, noise, False)
+        mean = jnp.matmul(k_pX, cho_solve((L, True), self.Y_train))
+
+        k_pp = kernel_diag(X_p, params) + noise + 1.0e-6
+        L_kXp = solve_triangular(L, jnp.transpose(k_pX), lower=True)
+        diag_cov = k_pp - (L_kXp * L_kXp).sum(axis=0)
+
+        return mean, diag_cov
+
+    def posterior(self, X_test: ArrayLike) -> tuple[Array, Array]:
+        """Per retained sample, the posterior mean and *noisy* predictive variance at X_test.
+
+        `(S, n_test)` each -- `SAASGP.posterior`'s shapes and, on ("product", "lengthscale"), its
+        values to the last bit. The Cholesky factors are computed on the first call and cached,
+        as the reference caches its own.
+
+        Above `_CHUNK_THRESHOLD` broadcast elements the test points are evaluated in blocks of
+        `_CHUNK_ROWS` rows and concatenated along the test axis; see that constant for why, and
+        for why doing so cannot change what is predicted.
+        """
+        X_test = jnp.asarray(X_test)
+        if self._Ls is None:
+            self._compute_choleskys()
+
+        sites = self._param_sites()
+        vmap_args = tuple(self.samples[site] for site in sites) + (self._noises(), self._Ls)
+        chunk_size = min(8, self._Ls.shape[0])
+
+        def _block(X_block: Array) -> tuple[Array, Array]:
+            def _one(*sample: Array) -> tuple[Array, Array]:
+                # `zip` stops at `sites`; the trailing noise and Cholesky are not parameters.
+                return self._predict(X_block, sample[-1], dict(zip(sites, sample)), sample[-2])
+
+            return chunk_vmap(_one, vmap_args, chunk_size=chunk_size)
+
+        n_train, D = self.X_train.shape
+        d_used = D if self.active is None else len(self.active)
+        if X_test.shape[0] * n_train * d_used <= _CHUNK_THRESHOLD:
+            return _block(X_test)
+
+        blocks = [
+            _block(X_test[start : start + _CHUNK_ROWS])
+            for start in range(0, X_test.shape[0], _CHUNK_ROWS)
+        ]
+        return (
+            jnp.concatenate([mean for mean, _ in blocks], axis=1),
+            jnp.concatenate([var for _, var in blocks], axis=1),
+        )
+
+    def alphas(self) -> Array:
+        """(S, n): K^-1 y per retained sample -- the weights `_predict`'s mean contracts k_pX with.
+
+        Task 5's readouts need them on their own (a component mean, an exact Sobol index) and must
+        get exactly the vector prediction uses, so they come off the same cached factors rather
+        than from a second solve against a freshly built kernel matrix.
+        """
+        if self._Ls is None:
+            self._compute_choleskys()
+        return vmap(lambda L: cho_solve((L, True), self.Y_train))(self._Ls)
 
 
 def _run_nuts(
@@ -610,8 +779,8 @@ def _run_nuts(
 # Every *sampled* positive site across the four cells. R-hat and ESS are computed on their logs --
 # the geometry the sampler actually moves in -- because the constrained half-Cauchy sites are
 # heavy-tailed enough that both statistics on them are dominated by single draws (plan D4). The
-# deterministic sites (`kernel_inv_length_sq`, `a_sq`) are left out on purpose: each is a product
-# of two sites already in the list and so carries no independent evidence about the chain.
+# deterministic sites (`kernel_inv_length_sq`, `a_sq`) are left out on purpose: the gate is applied
+# in the sampler's own coordinates, and those are the coordinates it moves in.
 _POSITIVE_SAMPLED_SITES: tuple[str, ...] = (
     "kernel_var",
     "kernel_noise",
