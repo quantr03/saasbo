@@ -86,9 +86,22 @@
 \newcommand{\SOcitePapenmeier}{Papenmeier et al.\ (2025)}
 
 %% --- Typographic helpers -------------------------------------------------
-\newcommand{\SOcode}[1]{\texttt{#1}}  % identifiers, e.g. \SOcode{make_family}
-\newcommand{\SOtest}[1]{\texttt{#1}}  % test names
-\newcommand{\SOfile}[1]{\texttt{#1}}  % paths
+%% Identifiers, test names and paths are typewriter and may break after each
+%% escaped underscore (\_), so a 66-character test name no longer forces an
+%% overfull line. Arguments keep the \_ escape: \SOcode{make\_family}. Each
+%% name is reserved with \newcommand first (a host that already defines it
+%% errors loudly, as for every other macro here) and then given its robust
+%% definition, so the macros are safe in \SOlevelC headings and in the table
+%% of contents. Under hyperref the bookmark string is the bare argument.
+\newcommand{\SObreakus}{\textunderscore\allowbreak}
+\newcommand{\SOcode}{}
+\DeclareRobustCommand{\SOcode}[1]{\begingroup\let\_\SObreakus\texttt{#1}\endgroup}  % identifiers, e.g. \SOcode{make\_family}
+\newcommand{\SOtest}{}
+\DeclareRobustCommand{\SOtest}[1]{\begingroup\let\_\SObreakus\texttt{#1}\endgroup}  % test names
+\newcommand{\SOfile}{}
+\DeclareRobustCommand{\SOfile}[1]{\begingroup\let\_\SObreakus\texttt{#1}\endgroup}  % paths
+\AtBeginDocument{\@ifpackageloaded{hyperref}{\pdfstringdefDisableCommands{%
+  \let\SOcode\@firstofone \let\SOtest\@firstofone \let\SOfile\@firstofone}}{}}
 
 %% --- Design-brief notation ------------------------------------------------
 %% \Enu, \Varnu, \Ehat, \Varhat and \Ex/\Varx below are all wrapped in
