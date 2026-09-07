@@ -577,6 +577,30 @@ def tab_quadrature_gap(outdir: Path, stats: dict) -> None:
 # =================================================================================================
 
 _ROTATION_ANGLES = [0.0, 15.0, 30.0, 45.0, 60.0, 90.0]
+_EXACT_ANGLES = (0.0, 90.0)
+
+
+def _describe_scale_column(kappa: np.ndarray) -> str:
+    """Whether `kappa` (scale) is exactly 1.0 at every seed, or how far it misses -- every number
+    here is read off `kappa`, never typed (fix round 2: a hand-typed version of exactly this
+    sentence was the bug)."""
+    if bool(np.all(kappa == 1.0)):
+        return f"exactly 1.0 for all {kappa.size} seeds"
+    max_dev = float(np.max(np.abs(kappa - 1.0)))
+    return f"not exactly 1.0 at every seed (max $|\\kappa - 1| = {max_dev:.2e}$)"
+
+
+def _describe_epsilon_column(values: np.ndarray) -> str:
+    """How many of `values` are exactly `0.0`, and the actual signed non-zero values (grouped by
+    value, formatted `+d.de-dd`) -- again, every number here is read off `values`."""
+    n_zero = int(np.sum(values == 0.0))
+    nonzero = values[values != 0.0]
+    if nonzero.size == 0:
+        return f"all {values.size} exactly 0.0"
+    unique_vals, counts = np.unique(nonzero, return_counts=True)
+    parts = [f"{n_zero} exactly 0.0"] if n_zero else []
+    parts += [f"{c} at {v:+.1e}" for v, c in zip(unique_vals, counts)]
+    return ", ".join(parts) + f" (of {values.size} seeds)"
 
 
 def tab_rotation_angle(outdir: Path, stats: dict) -> None:
@@ -589,6 +613,7 @@ def tab_rotation_angle(outdir: Path, stats: dict) -> None:
              r"$\kappa$ max", r"count($\kappa>1$)", r"$\max|\mu|$"]),
         r"\midrule",
     ]
+    exact_angle_data: dict[float, tuple[np.ndarray, np.ndarray]] = {}
     for theta in _ROTATION_ANGLES:
         objs = []
         for seed in range(10):
@@ -605,6 +630,8 @@ def tab_rotation_angle(outdir: Path, stats: dict) -> None:
         gamma_axis = np.array([o.labels.gamma_axis for o in objs])
         kappa = np.array([o.labels.scale for o in objs])
         mu = np.array([o.mu for o in objs])
+        if theta in _EXACT_ANGLES:
+            exact_angle_data[theta] = (gamma_axis, kappa)
         lines.append(row([
             f"{theta:.0f}",
             fmt_signed(gamma_axis.min()), fmt_signed(float(np.median(gamma_axis))), fmt_signed(gamma_axis.max()),
@@ -613,14 +640,20 @@ def tab_rotation_angle(outdir: Path, stats: dict) -> None:
             f"{np.max(np.abs(mu)):.4f}",
         ]))
     lines += [r"\bottomrule", r"\end{tabular}"]
-    write_generated(
-        outdir / "tab_rotation_angle.tex",
-        [r"% theta in {0, 90} is exact for kappa (scale == 1.0 at every one of seeds 0-9)."
-         r" gamma_axis there is exact only to floating-point epsilon, never a genuinely negative"
-         r" quantity: at theta=90, 8 of 10 seeds are exactly 0.0, one is +1.11e-16, one is"
-         r" -2.22e-16; at theta=0, all ten seeds measure >= 0.0 here."],
-        lines,
+
+    # Every number in this note is computed from exact_angle_data just above, not typed: a header
+    # comment stating specific per-seed figures must regenerate with the data, not merely quote a
+    # measurement taken once and pasted in (fix round 2 -- that was exactly the bug here).
+    header = [
+        f"% theta={theta:.0f}: kappa (scale) {_describe_scale_column(kappa)};"
+        f" gamma_axis {_describe_epsilon_column(gamma_axis)}"
+        for theta, (gamma_axis, kappa) in sorted(exact_angle_data.items())
+    ]
+    header.append(
+        "% gamma_axis at theta in {0, 90} is exact only to floating-point epsilon, never a"
+        " genuinely negative quantity"
     )
+    write_generated(outdir / "tab_rotation_angle.tex", header, lines)
 
 
 # =================================================================================================
@@ -776,13 +809,15 @@ def _reopt_stats(block_iter) -> tuple[int, int, float, float]:
 
     `gain` is `vg_fn(result.x)[0] - value0`: `vg_fn` is called fresh at the point L-BFGS-B
     reports, never `-result.fun` (scipy's own tracked value at that point). The two are not
-    always bit-identical -- one block was found where `result.x` is bit-identical to `x0` yet
+    always bit-identical -- a block was found where `result.x` is bit-identical to `x0` yet
     `-result.fun` differs from a fresh `vg_fn(result.x)` by a ulp, which is scipy's internal
-    bookkeeping, not the objective (reviewer finding, fix round 1: 13 of the module's original 15
-    "non-zero" gains were negative one-ulp artifacts of exactly this). `max_gain` starts at
-    `None` and is set from the first computed gain rather than seeded at `0.0`: if every real gain
-    happens to be <= 0 (as here), flooring at a literal `0.0` would silently misreport the true
-    (negative) worst case as an implausible exact zero.
+    bookkeeping, not the objective: several of the module's original "non-zero" gains, all
+    computed via `-result.fun`, turned out to be exactly this artifact (reviewer finding, fix
+    round 1) -- the exact count is `tab_fstar_reopt.tex`'s own `# exact-zero gain` column, before
+    and after this fix, not repeated here. `max_gain` starts at `None` and is set from the first
+    computed gain rather than seeded at `0.0`: if every real gain happens to be <= 0 (as here),
+    flooring at a literal `0.0` would silently misreport the true (negative) worst case as an
+    implausible exact zero.
     """
     n = n_exact_zero = 0
     max_gain: float | None = None
