@@ -21,15 +21,20 @@ the cpu platform are already in force when the arrays below are created.
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 
+import jax
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jax import Array, jit
 from jax.typing import ArrayLike
+from numpyro.diagnostics import summary
+from numpyro.infer import MCMC, NUTS
 from scipy.optimize import brentq
 
 import saasgp
@@ -476,3 +481,273 @@ CELLS: dict[CellKey, Cell] = {
         ),
     )
 }
+
+
+# --- inference ---
+
+
+@dataclass(frozen=True)
+class NUTSConfig:
+    """The reference's sampler settings, shared by every cell so the budget is never a confound.
+
+    `SAASGP`'s own defaults except `max_tree_depth`, which is the 6 the reference's driver passes
+    rather than the class's 7. `num_samples // thinning` = 16 draws are retained for prediction;
+    diagnostics run on all `num_samples` un-thinned draws, as the reference's `summary` call does.
+    """
+
+    num_warmup: int = 512
+    num_samples: int = 256
+    thinning: int = 16
+    max_tree_depth: int = 6
+    num_chains: int = 1
+
+
+@dataclass(frozen=True)
+class DiagThresholds:
+    """The preregistered pass rule for one NUTS attempt (plan D4).
+
+    Split-R-hat on the two halves of 128 draws resolves to about +-0.02, so 1.1 is the classical
+    bound and not a tuned one; 16 effective draws is the number of draws we retain, so fewer means
+    the retained set is not 16 draws' worth; 5 divergences is 2 % of 256. Fixed before the pilot
+    runs, deliberately, so the exclusion rate is a measurement rather than a choice.
+    """
+
+    r_hat_max: float = 1.1
+    n_eff_min: float = 16.0
+    max_divergences: int = 5
+
+
+@dataclass(frozen=True)
+class Diagnostics:
+    """One attempt's convergence summary, on its un-thinned draws; `passed` is the refit trigger.
+
+    `r_hat_median` and `frac_r_hat_below_1_05` do not gate anything: they are recorded so the
+    brief's R-hat < 1.05 criterion is reportable per fit while the gate stays at `DiagThresholds`.
+    `reason` names each failed criterion with its value and is "" exactly when `passed`.
+    """
+
+    r_hat_max: float
+    r_hat_median: float
+    frac_r_hat_below_1_05: float
+    n_eff_min: float
+    divergences: int
+    num_steps_mean: float
+    wall_s: float
+    passed: bool
+    reason: str
+
+
+class FittedGP:
+    """One cell's posterior on standardized, negated targets: what `fit` returns and `bo.py` sees.
+
+    The training data is kept under the reference's own attribute names (`X_train`, `Y_train`) so
+    that `saasbo.optimize_ei`'s incumbent lookup runs against this object unchanged. `samples`
+    holds the retained constrained draws, one entry per site of `cell.sites` present in the trace
+    (`kernel_noise` is absent when the noise was fixed), each of leading dimension S. `attempts`
+    carries one `Diagnostics` per NUTS attempt, so a run's log can count excluded fits rather
+    than averaging them in silently; its length is the row's `nuts_attempts`.
+    """
+
+    def __init__(
+        self,
+        cell: CellKey | str,
+        X_train: ArrayLike,
+        Y_train: ArrayLike,
+        samples: dict[str, Array],
+        fixed_noise: float | None,
+        active: ArrayLike | None,
+        status: str,
+        status_reason: str,
+        attempts: tuple[Diagnostics, ...],
+    ) -> None:
+        self.cell = cell  # a CellKey, or "dsp_map"/"oracle_S" for the MAP references
+        self.X_train = jnp.asarray(X_train, dtype=jnp.float64)  # (n, D)
+        self.Y_train = jnp.asarray(Y_train, dtype=jnp.float64)  # (n,)
+        self.samples = {site: jnp.asarray(draws) for site, draws in samples.items()}
+        self.fixed_noise = fixed_noise  # None when kernel_noise was learned
+        self.active = active  # the coordinates the oracle reference was given, else None
+        self.status = status  # "ok", "refit" or "excluded"
+        self.status_reason = status_reason
+        self.attempts = tuple(attempts)
+
+
+def _run_nuts(
+    model: Callable[..., None],
+    X: ArrayLike,
+    Y: ArrayLike,
+    key: Array,
+    nuts: NUTSConfig,
+) -> tuple[dict[str, Array], dict[str, Array], float]:
+    """`SAASGP.run_inference` copied, with a caller-supplied key, the extra fields and no printing.
+
+    The sampler call is the reference's line for line -- same kernel, same budget, same
+    non-progress-bar path -- which is what lets a ("product", "lengthscale") fit driven by the key
+    `SAASGP.fit` derives reproduce the reference's draws bit for bit. Three changes, each one the
+    plan requires (D1): `extra_fields` collects the divergence and step counters the reference
+    discards, `key` replaces the class's own `PRNGKey(seed)` split so the caller owns the seeding,
+    and the verbose printing and the `summary` call move to `_diagnose`, which needs the summary
+    on the log scale. `X` and `Y` reach `mcmc.run` exactly as the caller passed them, untouched,
+    for the same bit-for-bit reason.
+
+    Returns the un-thinned flat samples, the extra fields, and the run's wall-clock seconds.
+    """
+    start = time.perf_counter()
+    kernel = NUTS(model, max_tree_depth=nuts.max_tree_depth)
+    mcmc = MCMC(
+        kernel,
+        num_warmup=nuts.num_warmup,
+        num_samples=nuts.num_samples,
+        num_chains=nuts.num_chains,
+        progress_bar=False,
+    )
+    mcmc.run(key, X, Y, extra_fields=("diverging", "num_steps"))
+
+    flat_samples = mcmc.get_samples(group_by_chain=False)
+    extra = mcmc.get_extra_fields()
+    return flat_samples, extra, time.perf_counter() - start
+
+
+# Every *sampled* positive site across the four cells. R-hat and ESS are computed on their logs --
+# the geometry the sampler actually moves in -- because the constrained half-Cauchy sites are
+# heavy-tailed enough that both statistics on them are dominated by single draws (plan D4). The
+# deterministic sites (`kernel_inv_length_sq`, `a_sq`) are left out on purpose: each is a product
+# of two sites already in the list and so carries no independent evidence about the chain.
+_POSITIVE_SAMPLED_SITES: tuple[str, ...] = (
+    "kernel_var",
+    "kernel_noise",
+    "kernel_tausq",
+    "_kernel_inv_length_sq",
+    "_a_sq",
+    "kernel_ell",
+)
+
+
+def _diagnose(
+    flat_samples: dict[str, Array],
+    extra: dict[str, Array],
+    thresholds: DiagThresholds,
+    wall_s: float,
+) -> Diagnostics:
+    """The convergence verdict for one attempt, from its un-thinned draws (plan D4).
+
+    `numpyro.diagnostics.summary` is the reference's own, and with one chain its split-R-hat
+    compares the chain's two halves. Every per-coordinate site contributes D statistics and all of
+    them are pooled, so the rule reads "every scalar the sampler moved converged", not "the
+    average did" -- with 2D + 3 sites at D = 100 that is the criterion most likely to fire, which
+    is the point. The three criteria are written as negations of the pass conditions so that a
+    NaN R-hat -- what a site that never moved produces -- fails rather than silently passing.
+    """
+    logs = {
+        site: jnp.log(flat_samples[site])
+        for site in _POSITIVE_SAMPLED_SITES
+        if site in flat_samples
+    }
+    stats = summary(logs, prob=0.9, group_by_chain=False)
+    r_hat = np.concatenate([np.ravel(site_stats["r_hat"]) for site_stats in stats.values()])
+    n_eff = np.concatenate([np.ravel(site_stats["n_eff"]) for site_stats in stats.values()])
+
+    r_hat_max = float(np.max(r_hat))
+    n_eff_min = float(np.min(n_eff))
+    divergences = int(np.asarray(extra["diverging"]).sum())
+
+    failures = []
+    if not r_hat_max <= thresholds.r_hat_max:
+        failures.append(f"r_hat_max {r_hat_max:.3f} > {thresholds.r_hat_max}")
+    if not n_eff_min >= thresholds.n_eff_min:
+        failures.append(f"n_eff_min {n_eff_min:.1f} < {thresholds.n_eff_min}")
+    if not divergences <= thresholds.max_divergences:
+        failures.append(f"divergences {divergences} > {thresholds.max_divergences}")
+
+    return Diagnostics(
+        r_hat_max=r_hat_max,
+        r_hat_median=float(np.median(r_hat)),
+        frac_r_hat_below_1_05=float(np.mean(r_hat < 1.05)),
+        n_eff_min=n_eff_min,
+        divergences=divergences,
+        num_steps_mean=float(np.asarray(extra["num_steps"]).mean()),
+        wall_s=wall_s,
+        passed=not failures,
+        reason="; ".join(failures),
+    )
+
+
+def fit(
+    X: ArrayLike,
+    y: ArrayLike,
+    key: Array,
+    cell: CellKey | Cell,
+    *,
+    alpha: float | None = None,
+    fixed_noise: float | None = None,
+    nuts: NUTSConfig = NUTSConfig(),
+    thresholds: DiagThresholds = DiagThresholds(),
+    ell_prior: tuple[float, float] = ELL_PRIOR,
+) -> FittedGP:
+    """NUTS fit of `cell` to (X in [0,1]^D, y already standardized and negated by the caller).
+
+    `key` is used *unchanged* by the first attempt, so a caller handing over the key `SAASGP.fit`
+    derives reproduces the reference bit for bit; the refit uses `fold_in(key, 1)`, disjoint from
+    it and from the loop's exception-retry key. `alpha` defaults to the cell's calibrated value
+    (0.1 on the rho scale, `ALPHA_AMPLITUDE` on the a^2 scale), so the four cells' priors have the
+    same prior-predictive active count without the caller having to know which scale it is on.
+    `fixed_noise=None` learns `kernel_noise` ~ LogNormal(0, 10); a positive float fixes it.
+    `ell_prior` reaches the amplitude cells only -- the lengthscale cells have no ell prior at all.
+
+    On a failed verdict the refit is a *fresh* chain with twice the warm-up and no state reused,
+    as the brief's "no warm start" requires: status "ok" if attempt 0 passed, "refit" if attempt 1
+    did, "excluded" if neither. An excluded fit still returns the second attempt's draws, because
+    the loop has to keep querying; `status`, `status_reason` and `attempts` are what let the run's
+    log count those rows instead of averaging them in silently. Diagnostics never raise; an
+    exception out of JAX or NumPyro propagates, for `bo.py`'s failure policy to handle.
+    """
+    if fixed_noise is not None and fixed_noise == 0.0:
+        raise ValueError(
+            "fixed_noise=0.0 is ambiguous: the vendored reference spells 'learn the noise' as "
+            "observation_variance=0.0, while here it would fix the observation variance at zero. "
+            "Pass fixed_noise=None to learn kernel_noise, or a positive variance to fix it."
+        )
+    if not isinstance(cell, Cell):
+        cell = CELLS[cell]
+    if alpha is None:
+        alpha = cell.alpha_default
+
+    hyperparameters: dict[str, object] = {"alpha": alpha, "fixed_noise": fixed_noise}
+    if cell.prior == "amplitude":
+        hyperparameters["ell_prior"] = ell_prior
+    model = partial(cell.model, **hyperparameters)
+
+    flat, extra, wall_s = _run_nuts(model, X, y, key, nuts)
+    attempts = [_diagnose(flat, extra, thresholds, wall_s)]
+
+    if not attempts[-1].passed:
+        flat, extra, wall_s = _run_nuts(
+            model,
+            X,
+            y,
+            jax.random.fold_in(key, 1),
+            replace(nuts, num_warmup=2 * nuts.num_warmup),
+        )
+        attempts.append(_diagnose(flat, extra, thresholds, wall_s))
+
+    if not attempts[-1].passed:
+        status = "excluded"
+    else:
+        status = "ok" if len(attempts) == 1 else "refit"
+
+    return FittedGP(
+        cell=cell.key,
+        X_train=X,
+        Y_train=y,
+        # `flat` is attempt 0's when it passed and attempt 1's otherwise: the attempt whose
+        # verdict decided the status is the attempt whose draws prediction gets.
+        samples={site: flat[site][:: nuts.thinning] for site in cell.sites if site in flat},
+        fixed_noise=fixed_noise,
+        active=None,
+        status=status,
+        status_reason="; ".join(
+            f"attempt {i}: {attempt.reason}"
+            for i, attempt in enumerate(attempts)
+            if not attempt.passed
+        ),
+        attempts=tuple(attempts),
+    )
