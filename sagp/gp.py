@@ -573,7 +573,9 @@ class FittedGP:
     holds the retained constrained draws, one entry per site of `cell.sites` present in the trace
     (`kernel_noise` is absent when the noise was fixed), each of leading dimension S. `attempts`
     carries one `Diagnostics` per NUTS attempt, so a run's log can count excluded fits rather
-    than averaging them in silently; its length is the row's `nuts_attempts`.
+    than averaging them in silently; its length is the row's `nuts_attempts`. One attribute is not
+    set here: `fit_map` attaches a `map_result` dict to the objects it builds, since a MAP fit's
+    quality lives in the optimizer's outcome and not in `attempts`; read it with `getattr`.
     """
 
     def __init__(
@@ -980,6 +982,20 @@ def _ell_prior_loc(D_eff: int) -> float:
     return math.sqrt(2.0) + math.log(D_eff) / 2.0
 
 
+def _dsp_start(D_eff: int) -> np.ndarray:
+    """The unconstrained start point: both priors' modes exp(loc - scale^2), through the floors.
+
+    Those modes are BoTorch's own initial values (`GreaterThan(..., initial_value=prior.mode)`).
+    L-BFGS-B moves in u, so the start is the u whose constrained value is the mode, i.e. the
+    inverse log(value - floor) of the map `_dsp_neg_log_joint` applies.
+    """
+    ell0 = math.exp(_ell_prior_loc(D_eff) - _ELL_PRIOR_SCALE**2.0)
+    noise0 = math.exp(_NOISE_PRIOR_LOC - _NOISE_PRIOR_SCALE**2.0)
+    return np.concatenate(
+        [np.full(D_eff, math.log(ell0 - _ELL_FLOOR)), [math.log(noise0 - _NOISE_FLOOR)]]
+    )
+
+
 def _dsp_neg_log_joint(u: Array, X: Array, y: Array, D_eff: int) -> Array:
     """Negative log joint of the DSP reference at the unconstrained parameters `u`.
 
@@ -1049,10 +1065,18 @@ def fit_map(
     *full-D* design and answers full-D test points (`FittedGP._columns` applies the restriction at
     every kernel evaluation), so the BO loop cannot tell either reference from a cell.
 
+    The one further departure from a stock BoTorch `SingleTaskGP` is the mean function: that model
+    fits a constant mean, and this one is zero-mean, like the four cells and like the vendored
+    reference they all predict through. The targets are standardized before they get here, so the
+    constant it would fit is ~0 anyway, and holding the mean fixed across every method keeps the
+    comparison about the kernel and the prior.
+
     The MAP estimate comes back as a single retained "sample", so `posterior` is (1, n_test) like
     a cell's at S = 1. `map_result` records the optimizer's outcome -- final and initial objective,
     iterations, convergence flag -- which is the only trace of this fit's quality there is: a MAP
     fit has no `attempts`, and it is left empty rather than filled with a fabricated diagnostic.
+    A fit whose L-BFGS-B did not converge comes back with `status="excluded"` and the optimizer's
+    message as `status_reason` (R30), exactly as a NUTS fit that failed its diagnostics does.
     """
     X = jnp.asarray(X, dtype=jnp.float64)
     y = jnp.asarray(y, dtype=jnp.float64)
@@ -1061,13 +1085,7 @@ def fit_map(
     Xa = X if active is None else X[:, active]
     D_eff = Xa.shape[1]
 
-    # Both priors' modes, exp(loc - scale^2), mapped back through the floors: the optimizer moves
-    # in u, so the start has to be the u whose constrained value is the mode.
-    ell0 = math.exp(_ell_prior_loc(D_eff) - _ELL_PRIOR_SCALE**2.0)
-    noise0 = math.exp(_NOISE_PRIOR_LOC - _NOISE_PRIOR_SCALE**2.0)
-    u0 = np.concatenate(
-        [np.full(D_eff, math.log(ell0 - _ELL_FLOOR)), [math.log(noise0 - _NOISE_FLOOR)]]
-    )
+    u0 = _dsp_start(D_eff)
 
     def neg_log_joint(u: np.ndarray) -> tuple[float, np.ndarray]:
         """(value, gradient) at `u` as float64 numpy, which is what `minimize(jac=True)` takes."""
@@ -1092,8 +1110,10 @@ def fit_map(
         },
         fixed_noise=None,
         active=active,
-        status="ok",
-        status_reason="",
+        # R30: a MAP fit L-BFGS-B could not converge is reported the way a failed NUTS fit is, so
+        # that the loop's log counts it as excluded rather than averaging a bad surrogate in.
+        status="ok" if result.success else "excluded",
+        status_reason="" if result.success else f"L-BFGS-B: {result.message}",
         attempts=(),
     )
     fitted.map_result = {
