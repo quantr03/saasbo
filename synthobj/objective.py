@@ -39,14 +39,19 @@ curve and the wrong generator on two study variants, and nothing downstream woul
 """
 from __future__ import annotations
 
+import io
+import json
+import zipfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from synthobj.component import Component
 from synthobj.interaction import Interaction, block_argmax
+from synthobj.kernel import GL_NODES
 from synthobj.rotation import PairRotation, rotated_block_argmax, rotated_block_mean, rotated_block_stats
 
 if TYPE_CHECKING:
@@ -238,6 +243,153 @@ class SyntheticObjective:
             + [inter.nu_var() for inter in self.interactions]
         )
 
+    def save(self, stem: str | Path) -> tuple[Path, Path]:
+        """Write this objective to `<stem>.npz` and `<stem>.json`; returns `(npz_path, json_path)`.
+
+        Same seed -> bit-identical files (Global Constraint, ruling R5): the `.npz` is a
+        hand-rolled zip (every member's timestamp fixed at 1980-01-01, `ZIP_STORED`, members in
+        sorted-name order) rather than `np.savez`'s, whose `zipfile` stamps each member with
+        `time.localtime()` and would make two saves of the same arrays differ in bytes whenever
+        they straddle a one-second boundary. The `.json` is `json.dumps(..., sort_keys=True,
+        indent=1)`, so key order does not depend on dict insertion order.
+
+        `Labels.ell` is NaN off `S` by design (ruling R6): Python's `json` module writes a bare
+        `NaN` token there (not standard JSON, but round-tripped exactly by Python's own
+        `json.loads`), so a reader needs a NaN-tolerant parser.
+
+        `SyntheticObjective.mu` (ruling R30 follow-on) is stored in the JSON next to the labels'
+        `scale`, since `load` must read the rotation offset back rather than re-derive it even
+        though re-deriving it from the reloaded components would be numerically cheap.
+
+        Requires every component and every interaction factor to sit on one shared knot grid --
+        true of every family `synthobj.families` builds (a family either draws every active
+        coordinate on [0,1], or pairs all of them into a rotation and draws all of them on the
+        rotated family's extended grid) but not guaranteed by this class's own guards, since a
+        hand-built objective can mix domains. Raises `ValueError` naming the offending coordinate
+        rather than silently writing one component's grid under another's values.
+        """
+        stem = Path(stem)
+        npz_path, json_path = stem.with_suffix(".npz"), stem.with_suffix(".json")
+
+        factors = [comp for inter in self.interactions for comp in (inter.u_i, inter.u_j)]
+        grid = _shared_grid(list(self.components) + factors)
+
+        active = np.array([comp.coord for comp in self.components], dtype=np.int64)
+        main_values = np.array([comp.values for comp in self.components], dtype=np.float64)
+        s = np.array([comp.share for comp in self.components], dtype=np.float64)
+        ell = np.array([comp.ell for comp in self.components], dtype=np.float64)
+
+        n_pairs = len(self.interactions)
+        if n_pairs:
+            inter_values = np.array(
+                [
+                    values
+                    for inter in self.interactions
+                    for values in (inter.u_i.values, inter.u_j.values)
+                ],
+                dtype=np.float64,
+            )
+            pairs = np.array([[inter.i, inter.j] for inter in self.interactions], dtype=np.int64)
+            c_pairs = np.array([inter.c for inter in self.interactions], dtype=np.float64)
+        else:
+            inter_values = np.zeros((0, grid.size))
+            pairs = np.zeros((0, 2), dtype=np.int64)
+            c_pairs = np.zeros((0,))
+
+        arrays = {
+            "grid": grid,
+            "main_values": main_values,
+            "inter_values": inter_values,
+            "active": active,
+            "pairs": pairs,
+            "c_pairs": c_pairs,
+            "s": s,
+            "ell": ell,
+            "x_star": self.labels.x_star,
+        }
+        _write_npz_deterministic(npz_path, arrays)
+
+        spec_dict = (
+            None if self.spec is None else {f.name: getattr(self.spec, f.name) for f in fields(self.spec)}
+        )
+        payload = {
+            "version": 1,
+            "spec": spec_dict,
+            "labels": _labels_to_json(self.labels),
+            "rotation": (
+                None
+                if self.rotation is None
+                else {"theta_deg": self.rotation.theta_deg, "pairs": [list(p) for p in self.rotation.pairs]}
+            ),
+            "mu": self.mu,
+            "grid_lo": float(grid[0]),
+            "grid_hi": float(grid[-1]),
+            "grid_n": int(grid.size - GL_NODES.size),
+        }
+        json_path.write_text(json.dumps(payload, sort_keys=True, indent=1))
+        return npz_path, json_path
+
+    @classmethod
+    def load(cls, stem: str | Path) -> "SyntheticObjective":
+        """Rebuild the `SyntheticObjective` that `save` wrote to `<stem>.npz`/`<stem>.json`.
+
+        Never draws and never calls `synthobj.kernel.eigen_factor`. `Component`s and
+        `Interaction`s are reconstructed with the plain `Component` constructor -- not
+        `from_raw` -- directly from the stored knots and values, since those are already final
+        and pushing them back through the centre-and-rescale path would be a no-op only in exact
+        arithmetic, not in floating point. `Labels` is passed through to `__init__` verbatim, so
+        `f_star` is never recomputed either.
+
+        `__init__` recomputes `scale` and `mu` as a side effect of construction (it has no
+        parameter for either), but that recomputation is immediately overwritten here by the
+        stored `mu` (ruling R30 follow-on): the object this method returns carries the saved
+        float, not a fresh quadrature, regardless of what `__init__` did internally on the way.
+        """
+        stem = Path(stem)
+        npz_path, json_path = stem.with_suffix(".npz"), stem.with_suffix(".json")
+
+        payload = json.loads(json_path.read_text())
+        if payload["version"] != 1:
+            raise ValueError(f"unsupported save format version {payload['version']!r}")
+
+        spec = _spec_from_json(payload["spec"])
+        labels = _labels_from_json(payload["labels"])
+        rotation = _rotation_from_json(payload["rotation"])
+
+        with np.load(npz_path) as data:
+            grid = data["grid"]
+            main_values = data["main_values"]
+            inter_values = data["inter_values"]
+            active = data["active"]
+            pairs = data["pairs"]
+            c_pairs = data["c_pairs"]
+            s = data["s"]
+            ell = data["ell"]
+
+        components = tuple(
+            Component(int(active[k]), float(ell[k]), float(s[k]), grid, main_values[k])
+            for k in range(active.size)
+        )
+        # The interaction factors' own `ell` is not part of the file format (it is unused by any
+        # Component method -- see component.py -- and not surfaced by Labels), so it is not
+        # knowable here; NaN says so honestly rather than guessing a value that might not match
+        # what save() started from. `share` is not a guess: every Interaction factor is built
+        # with share = 1 by convention (interaction.py), so that value is genuinely known.
+        interactions = tuple(
+            Interaction(
+                int(pairs[p, 0]),
+                int(pairs[p, 1]),
+                float(c_pairs[p]),
+                Component(int(pairs[p, 0]), float("nan"), 1.0, grid, inter_values[2 * p]),
+                Component(int(pairs[p, 1]), float("nan"), 1.0, grid, inter_values[2 * p + 1]),
+            )
+            for p in range(pairs.shape[0])
+        )
+
+        obj = cls(labels.D, components, interactions, rotation, spec, labels.seed, labels=labels)
+        obj.mu = payload["mu"]
+        return obj
+
     def _as_points(self, X: np.ndarray) -> tuple[np.ndarray, bool]:
         """Validate `X`, return it as a `(n, D)` array clipped into the cube, and whether it was 1-D."""
         points = np.asarray(X, dtype=float)
@@ -401,3 +553,104 @@ class SyntheticObjective:
             noise_sd=self.noise_sd,
             active_eps=ACTIVE_EPS,
         )
+
+
+# --- save/load helpers (Task 8) ----------------------------------------------------------------
+
+def _labels_to_json(labels: Labels) -> dict[str, Any]:
+    """`Labels` as a JSON-safe dict: ndarray fields become lists; tuple fields are left as tuples,
+    since `json.dumps` already writes any tuple as a JSON array.
+
+    `ell`'s NaN entries survive as Python `float('nan')`, which `json.dumps`'s default
+    `allow_nan=True` writes as a bare `NaN` token (ruling R6) -- not standard JSON, but
+    round-tripped exactly by Python's own `json.loads`.
+    """
+    out: dict[str, Any] = {}
+    for f in fields(Labels):
+        value = getattr(labels, f.name)
+        out[f.name] = value.tolist() if isinstance(value, np.ndarray) else value
+    return out
+
+
+def _labels_from_json(data: dict[str, Any]) -> Labels:
+    """Reverse of `_labels_to_json`: ndarray fields rebuilt; tuple fields restored from the lists
+    JSON turned them into (ruling R9), including the inner `[i, j]` pairs of `pairs` and
+    `rotation_pairs`, which must become `(i, j)` or the reconstructed record compares unequal to
+    an in-memory one on those two fields.
+    """
+    kwargs = dict(data)
+    kwargs["active"] = np.array(kwargs["active"], dtype=bool)
+    for name in ("s", "ell", "g", "x_star", "s_axis"):
+        kwargs[name] = np.array(kwargs[name], dtype=float)
+    kwargs["S"] = tuple(kwargs["S"])
+    kwargs["s_pairs"] = tuple(kwargs["s_pairs"])
+    kwargs["pairs"] = tuple(tuple(pair) for pair in kwargs["pairs"])
+    kwargs["rotation_pairs"] = tuple(tuple(pair) for pair in kwargs["rotation_pairs"])
+    return Labels(**kwargs)
+
+
+def _spec_from_json(data: dict[str, Any] | None) -> "FamilySpec | None":
+    """Reverse of `save`'s inline `{field: value}` dump of `self.spec`: restores `shares` and
+    `ells` from the lists JSON turned them into (ruling R9).
+
+    Imports `FamilySpec` locally rather than at module scope: `families.py` imports this module
+    (ruling R15), so a module-level `from synthobj.families import FamilySpec` here would be a
+    cycle. `save` needs no such import at all -- `dataclasses.fields` works on `self.spec` by
+    duck typing -- so only this direction pays for it, and only when `load` actually runs.
+    """
+    if data is None:
+        return None
+    from synthobj.families import FamilySpec
+
+    kwargs = dict(data)
+    if kwargs["shares"] is not None:
+        kwargs["shares"] = tuple(kwargs["shares"])
+    if isinstance(kwargs["ells"], list):
+        kwargs["ells"] = tuple(kwargs["ells"])
+    return FamilySpec(**kwargs)
+
+
+def _rotation_from_json(data: dict[str, Any] | None) -> PairRotation | None:
+    """Reverse of `save`'s `{"theta_deg": ..., "pairs": [[i, j], ...]}`; `None` stays `None`."""
+    if data is None:
+        return None
+    return PairRotation(float(data["theta_deg"]), tuple(tuple(pair) for pair in data["pairs"]))
+
+
+def _shared_grid(blocks: list[Component]) -> np.ndarray:
+    """The one knot grid every component and interaction factor must share to be savable.
+
+    True of every family `synthobj.families` builds (a family either draws every active
+    coordinate on [0,1], or pairs all of them into a rotation and draws all of them on the
+    rotated extended grid), but not guaranteed by `SyntheticObjective`'s own guards -- a
+    hand-built objective can mix domains. Raises `ValueError` naming the offending coordinate
+    rather than silently writing one component's grid under another's values.
+    """
+    grid = blocks[0].grid
+    for comp in blocks[1:]:
+        if comp.grid.shape != grid.shape or not np.array_equal(comp.grid, grid):
+            raise ValueError(
+                f"save requires every component to share one knot grid; coordinate {comp.coord} "
+                f"does not match coordinate {blocks[0].coord}"
+            )
+    return grid
+
+
+def _write_npz_deterministic(path: Path, arrays: dict[str, np.ndarray]) -> None:
+    """Write `arrays` as a `.npz` with bit-identical bytes for bit-identical arrays (ruling R5).
+
+    `np.savez` builds its zip through `zipfile`, which stamps each member with
+    `time.localtime()`, so two saves of the same arrays differ in bytes whenever they straddle a
+    one-second boundary. Writing the zip directly -- a fixed 1980-01-01 timestamp on every
+    member, `ZIP_STORED` (no compression, whose parameters could otherwise vary by zlib version),
+    and members written in sorted-name order -- removes every source of non-determinism that
+    `np.save` itself (deterministic for a given array) does not already control. The result loads
+    with `np.load` exactly like a normal `.npz`.
+    """
+    with zipfile.ZipFile(path, mode="w") as zf:
+        for name in sorted(arrays):
+            buf = io.BytesIO()
+            np.save(buf, arrays[name], allow_pickle=False)
+            info = zipfile.ZipInfo(f"{name}.npy", date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_STORED
+            zf.writestr(info, buf.getvalue())
