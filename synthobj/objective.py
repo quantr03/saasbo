@@ -248,10 +248,15 @@ class SyntheticObjective:
 
         Same seed -> bit-identical files (Global Constraint, ruling R5): the `.npz` is a
         hand-rolled zip (every member's timestamp fixed at 1980-01-01, `ZIP_STORED`, members in
-        sorted-name order) rather than `np.savez`'s, whose `zipfile` stamps each member with
-        `time.localtime()` and would make two saves of the same arrays differ in bytes whenever
-        they straddle a one-second boundary. The `.json` is `json.dumps(..., sort_keys=True,
-        indent=1)`, so key order does not depend on dict insertion order.
+        sorted-name order, sizes known up front) rather than `np.savez`'s. `np.savez` writes each
+        member through `zipf.open(name, 'w', force_zip64=True)`, `zipfile`'s streaming,
+        unknown-size-in-advance code path, which pays a 20-byte-per-member overhead a `writestr`
+        call with a pre-built, known-size payload does not (measured directly on this method's own
+        9-array output for `interaction_g0.25` at D=20: 89588 bytes via `np.savez` against 89408
+        via this method -- exactly 20 x 9) -- a more complex, more version-sensitive layout for no
+        benefit here, since every array's size is already known before writing. The `.json` is
+        `json.dumps(..., sort_keys=True, indent=1)`, so key order does not depend on dict
+        insertion order.
 
         `Labels.ell` is NaN off `S` by design (ruling R6): Python's `json` module writes a bare
         `NaN` token there (not standard JSON, but round-tripped exactly by Python's own
@@ -269,7 +274,7 @@ class SyntheticObjective:
         rather than silently writing one component's grid under another's values.
         """
         stem = Path(stem)
-        npz_path, json_path = stem.with_suffix(".npz"), stem.with_suffix(".json")
+        npz_path, json_path = Path(f"{stem}.npz"), Path(f"{stem}.json")
 
         factors = [comp for inter in self.interactions for comp in (inter.u_i, inter.u_j)]
         grid = _shared_grid(list(self.components) + factors)
@@ -324,7 +329,7 @@ class SyntheticObjective:
             "mu": self.mu,
             "grid_lo": float(grid[0]),
             "grid_hi": float(grid[-1]),
-            "grid_n": int(grid.size - GL_NODES.size),
+            "grid_draw_n": int(grid.size - GL_NODES.size),
         }
         json_path.write_text(json.dumps(payload, sort_keys=True, indent=1))
         return npz_path, json_path
@@ -333,20 +338,32 @@ class SyntheticObjective:
     def load(cls, stem: str | Path) -> "SyntheticObjective":
         """Rebuild the `SyntheticObjective` that `save` wrote to `<stem>.npz`/`<stem>.json`.
 
-        Never draws and never calls `synthobj.kernel.eigen_factor`. `Component`s and
-        `Interaction`s are reconstructed with the plain `Component` constructor -- not
-        `from_raw` -- directly from the stored knots and values, since those are already final
-        and pushing them back through the centre-and-rescale path would be a no-op only in exact
-        arithmetic, not in floating point. `Labels` is passed through to `__init__` verbatim, so
-        `f_star` is never recomputed either.
+        Never draws -- not through `synthobj.kernel.eigen_factor` (the Matern generator's only
+        call site), nor through `synthobj.draws.sinusoid_draw` or `draw_until_monotone` (the
+        sinusoid and monotone-rejection paths, which never touch `eigen_factor` at all) -- and
+        never recomputes `f_star`, `x_star`, `g`, `s`, `ell`, `s_axis` or `gamma_axis`, since those
+        would otherwise come from `interaction.block_argmax`/`rotation.rotated_block_argmax` (the
+        block maximizations) inside `_compute_labels`. `Component`s and `Interaction`s are
+        reconstructed with the plain `Component` constructor -- not `from_raw` -- directly from
+        the stored knots and values, since those are already final and pushing them back through
+        the centre-and-rescale path would be a no-op only in exact arithmetic, not in floating
+        point. `Labels` is passed through to `__init__` verbatim (`labels=labels`), so `_compute_labels`
+        never runs at all.
 
-        `__init__` recomputes `scale` and `mu` as a side effect of construction (it has no
-        parameter for either), but that recomputation is immediately overwritten here by the
-        stored `mu` (ruling R30 follow-on): the object this method returns carries the saved
-        float, not a fresh quadrature, regardless of what `__init__` did internally on the way.
+        `__init__` recomputes `scale`, `mu` and `noise_sd` as a side effect of construction (it has
+        no parameter for any of them), but each is immediately overwritten here from the file
+        rather than left to that recompute: `mu` (ruling R30 follow-on) because re-deriving it,
+        while numerically cheap, is exactly the kind of ground-truth recomputation `load` exists to
+        avoid; `scale` and `noise_sd` (ruling R34) because the stored `labels.f_star` was computed
+        with the *original* `scale`, and `observe` reads `noise_sd` directly -- a future change to
+        `_compute_scale`'s formula or to the `noise_sd` default must not silently move `__call__`,
+        `observe` or a reloaded regret curve onto different numbers than the ones `f_star` and the
+        file's own `noise_sd` were computed against. All three come from `labels` (the object
+        parsed from this file), not from `obj.labels` after construction, so the restore is correct
+        even if a future regression stopped passing `labels=labels` into `__init__`.
         """
         stem = Path(stem)
-        npz_path, json_path = stem.with_suffix(".npz"), stem.with_suffix(".json")
+        npz_path, json_path = Path(f"{stem}.npz"), Path(f"{stem}.json")
 
         payload = json.loads(json_path.read_text())
         if payload["version"] != 1:
@@ -388,6 +405,8 @@ class SyntheticObjective:
 
         obj = cls(labels.D, components, interactions, rotation, spec, labels.seed, labels=labels)
         obj.mu = payload["mu"]
+        obj.scale = labels.scale
+        obj.noise_sd = labels.noise_sd
         return obj
 
     def _as_points(self, X: np.ndarray) -> tuple[np.ndarray, bool]:
@@ -577,15 +596,24 @@ def _labels_from_json(data: dict[str, Any]) -> Labels:
     JSON turned them into (ruling R9), including the inner `[i, j]` pairs of `pairs` and
     `rotation_pairs`, which must become `(i, j)` or the reconstructed record compares unequal to
     an in-memory one on those two fields.
+
+    Which fields need which treatment is read off `Labels`'s own declared annotations (`f.type`,
+    which `from __future__ import annotations` keeps as the literal source string -- `"np.ndarray"`
+    or `"tuple[tuple[int, int], ...]"`, say) rather than a hardcoded list of field names (ruling
+    M5): a future ndarray or pair-tuple field on `Labels` is then converted correctly without this
+    function needing an edit, and `np.array_equal(ndarray, list)` (which numpy happily accepts)
+    can't silently pass a round-trip test for a field this function forgot about, because there
+    would be nothing left to forget. `active`'s bool dtype is the one thing genuinely not
+    recoverable from the annotation string alone and stays a named special case.
     """
     kwargs = dict(data)
-    kwargs["active"] = np.array(kwargs["active"], dtype=bool)
-    for name in ("s", "ell", "g", "x_star", "s_axis"):
-        kwargs[name] = np.array(kwargs[name], dtype=float)
-    kwargs["S"] = tuple(kwargs["S"])
-    kwargs["s_pairs"] = tuple(kwargs["s_pairs"])
-    kwargs["pairs"] = tuple(tuple(pair) for pair in kwargs["pairs"])
-    kwargs["rotation_pairs"] = tuple(tuple(pair) for pair in kwargs["rotation_pairs"])
+    for f in fields(Labels):
+        if f.type == "np.ndarray":
+            kwargs[f.name] = np.array(kwargs[f.name], dtype=bool if f.name == "active" else float)
+        elif f.type.startswith("tuple[tuple"):
+            kwargs[f.name] = tuple(tuple(pair) for pair in kwargs[f.name])
+        elif f.type.startswith("tuple["):
+            kwargs[f.name] = tuple(kwargs[f.name])
     return Labels(**kwargs)
 
 
@@ -639,13 +667,16 @@ def _shared_grid(blocks: list[Component]) -> np.ndarray:
 def _write_npz_deterministic(path: Path, arrays: dict[str, np.ndarray]) -> None:
     """Write `arrays` as a `.npz` with bit-identical bytes for bit-identical arrays (ruling R5).
 
-    `np.savez` builds its zip through `zipfile`, which stamps each member with
-    `time.localtime()`, so two saves of the same arrays differ in bytes whenever they straddle a
-    one-second boundary. Writing the zip directly -- a fixed 1980-01-01 timestamp on every
-    member, `ZIP_STORED` (no compression, whose parameters could otherwise vary by zlib version),
-    and members written in sorted-name order -- removes every source of non-determinism that
-    `np.save` itself (deterministic for a given array) does not already control. The result loads
-    with `np.load` exactly like a normal `.npz`.
+    Fixed 1980-01-01 member timestamps, `ZIP_STORED` (no compression, whose parameters could
+    otherwise vary by zlib version), and members written in sorted-name order remove every source
+    of non-determinism that `np.save` itself (deterministic for a given array) does not already
+    control. `np.savez` writes each member through `zipf.open(name, 'w', force_zip64=True)`,
+    `zipfile`'s streaming, unknown-size-in-advance code path, instead of a `writestr` call with a
+    pre-built, known-size payload; that path pays a 20-byte-per-member overhead this one does not
+    (measured directly: `np.savez` on this method's own 9-array `interaction_g0.25` output is
+    89588 bytes against 89408 here, exactly 20 x 9) -- a more complex, more version-sensitive
+    layout for no benefit, since every array's size is already known before writing. The result
+    loads with `np.load` exactly like a normal `.npz`.
     """
     with zipfile.ZipFile(path, mode="w") as zf:
         for name in sorted(arrays):

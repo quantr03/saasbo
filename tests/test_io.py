@@ -7,7 +7,13 @@ mutant they appear to guard, the load-bearing ones are the ones that cross a rea
 
 - `test_repeated_save_is_byte_identical` compares the raw bytes of two files independently
   produced by two independently-built objects at the same seed -- not one file compared to
-  itself, which `np.savez` (ruling R5) would fail unpredictably depending on wall-clock timing.
+  itself. The hand-rolled `.npz` writer (ruling R5) exists because `np.savez` writes each member
+  through `zipfile`'s streaming, unknown-size code path (`zipf.open(name, "w",
+  force_zip64=True)`), which lays out a member differently -- and slightly larger, measured 20
+  bytes per member -- than a `writestr` call with a pre-built, known-size payload; not, as an
+  earlier draft of this file claimed, because `np.savez` stamps a wall-clock timestamp (on numpy
+  2.4.6, measured: it does not -- both paths default to a fixed 1980-01-01 `ZipInfo.date_time`).
+  This test's own correctness does not depend on wall-clock timing either way, by construction.
 - `test_round_trip_agrees_with_the_original_to_1e_15` compares `f` at 10**4 points between the
   object that wrote the files and the object `load` reconstructs from them -- an independent
   evaluation, not a readback of stored state compared to itself. Dropping or corrupting `mu`
@@ -31,6 +37,7 @@ own `spec ==` check has no power over that specific ruling.
 from __future__ import annotations
 
 import json
+import zipfile
 from dataclasses import fields
 from pathlib import Path
 
@@ -39,8 +46,13 @@ import pytest
 
 import synthobj.families as families
 import synthobj.kernel as kernel
+import synthobj.objective as objective_mod
+from synthobj.component import Component
+from synthobj.draws import gp_draw
 from synthobj.families import make_family
+from synthobj.kernel import eigen_factor, make_grid
 from synthobj.objective import Labels, SyntheticObjective
+from synthobj.rotation import EXT_HI, EXT_LO
 
 D = 20
 N_POINTS = 10_000
@@ -66,10 +78,10 @@ def _labels_equal(a: Labels, b: Labels) -> bool:
 
 def test_repeated_save_is_byte_identical(tmp_path: Path) -> None:
     """Same seed, two independently-built objectives, saved to two different stems -> identical
-    bytes on both files (ruling R5). `np.savez` cannot pass this: its zip member timestamps
-    (`time.localtime()`) would make two saves of the same arrays differ in bytes whenever they
-    straddle a one-second boundary, so this test would pass or fail by timing rather than by
-    correctness.
+    bytes on both files (ruling R5). Fixed member timestamps, `ZIP_STORED`, and sorted-name write
+    order make this independent of wall-clock timing and of dict/array insertion order by
+    construction -- see the module docstring for why the hand-rolled writer exists instead of
+    `np.savez` (a real, measured reason, but a different one than an earlier draft claimed).
     """
     obj_a = make_family("interaction_g0.25", seed=5, D=D)
     obj_b = make_family("interaction_g0.25", seed=5, D=D)
@@ -79,6 +91,46 @@ def test_repeated_save_is_byte_identical(tmp_path: Path) -> None:
 
     assert npz_a.read_bytes() == npz_b.read_bytes()
     assert json_a.read_bytes() == json_b.read_bytes()
+
+
+def test_save_path_survives_a_dotted_stem(tmp_path: Path) -> None:
+    """`Path.with_suffix` parses a decimal point in the stem as an existing suffix and replaces
+    it: `Path("interaction_g0.25").with_suffix(".npz")` is `interaction_g0.npz`, not
+    `interaction_g0.25.npz`. Every study variant name with a `gamma` in it
+    (`interaction_g0.00/0.10/0.25/0.50/0.75`) has exactly this shape, so `save`/`load` must build
+    paths by plain string concatenation, never `with_suffix`, or five of the study's variants
+    collapse onto one file with nothing raising to say so.
+    """
+    obj = make_family("interaction_g0.25", seed=0, D=D)
+    npz_path, json_path = obj.save(tmp_path / "interaction_g0.25")
+    assert npz_path == tmp_path / "interaction_g0.25.npz"
+    assert json_path == tmp_path / "interaction_g0.25.json"
+
+
+def test_two_gamma_variants_in_one_directory_do_not_collide(tmp_path: Path) -> None:
+    """The concrete failure `test_save_path_survives_a_dotted_stem` guards in the abstract:
+    `interaction_g0.25` and `interaction_g0.50`, saved to their own names in the same directory,
+    must produce four distinct files and reload as two distinct objectives -- not silently merge
+    onto one `interaction_g0.npz`/`.json` pair, which is what happened before this fix round.
+    """
+    obj_25 = make_family("interaction_g0.25", seed=0, D=D)
+    obj_50 = make_family("interaction_g0.50", seed=0, D=D)
+    obj_25.save(tmp_path / "interaction_g0.25")
+    obj_50.save(tmp_path / "interaction_g0.50")
+
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert names == [
+        "interaction_g0.25.json",
+        "interaction_g0.25.npz",
+        "interaction_g0.50.json",
+        "interaction_g0.50.npz",
+    ]
+
+    loaded_25 = SyntheticObjective.load(tmp_path / "interaction_g0.25")
+    loaded_50 = SyntheticObjective.load(tmp_path / "interaction_g0.50")
+    assert loaded_25.labels.family == "interaction_g0.25"
+    assert loaded_50.labels.family == "interaction_g0.50"
+    assert loaded_25.f_star != loaded_50.f_star
 
 
 @pytest.mark.parametrize("variant", ["interaction_g0.25", "rotated_t45"])
@@ -135,6 +187,94 @@ def test_load_reads_mu_from_the_file_rather_than_rederiving_it(tmp_path: Path) -
     assert np.allclose(shift, corrupted_mu - true_mu, atol=1e-12)
 
 
+def test_load_passes_stored_labels_through_without_recomputing(tmp_path: Path) -> None:
+    """The headline requirement's own no-power gap, found in review: nothing anywhere proved
+    `load` actually passes `labels=labels` into `__init__` rather than falling through to
+    `_compute_labels`. On this branch's own reloaded, bit-identical components, a full
+    recomputation of `f_star`/`x_star`/`g`/`s`/`ell`/`s_axis`/`gamma_axis` lands back on the same
+    bit-identical numbers `_labels_equal` and `loaded.f_star == obj.f_star` already check
+    (confirmed: deleting `labels=labels` from `load` left the full suite at 244/244) -- exactly
+    the `mu` lesson one level up, and this test is the fix, corrupting a value no recomputation
+    could ever reproduce and confirming `load` carries it through regardless.
+    """
+    obj = make_family("rotated_t45", seed=7, D=D)
+    npz_path, json_path = obj.save(tmp_path / "obj")
+
+    payload = json.loads(json_path.read_text())
+    payload["labels"]["f_star"] = -123.5
+    payload["labels"]["g"] = [0.0] * obj.labels.D
+    json_path.write_text(json.dumps(payload, sort_keys=True, indent=1))
+
+    loaded = SyntheticObjective.load(tmp_path / "obj")
+    assert loaded.f_star == -123.5
+    assert loaded.labels.f_star == -123.5
+    assert np.array_equal(loaded.labels.g, np.zeros(obj.labels.D))
+
+
+def test_load_does_not_call_the_block_maximizers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The eigen_factor lesson applied to `f_star`: `block_argmax` and `rotated_block_argmax` are
+    the two functions `_compute_labels` would call to re-derive `f_star`/`x_star` if `labels=`
+    were ever dropped, and both are imported by name into `synthobj.objective`
+    (`from synthobj.interaction import ... block_argmax`, `from synthobj.rotation import ...
+    rotated_block_argmax`), so they must be patched on `objective_mod`, not on
+    `synthobj.interaction`/`synthobj.rotation` where they're defined -- patching the defining
+    module would not touch the already-bound names `objective.py` actually calls.
+    """
+    obj = make_family("rotated_t45", seed=1, D=D)
+    obj.save(tmp_path / "obj")
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("load must not call the block maximizers")
+
+    monkeypatch.setattr(objective_mod, "block_argmax", _boom)
+    monkeypatch.setattr(objective_mod, "rotated_block_argmax", _boom)
+
+    loaded = SyntheticObjective.load(tmp_path / "obj")
+    assert loaded.f_star == obj.f_star
+
+
+def test_load_restores_scale_from_the_file_rather_than_rederiving_it(tmp_path: Path) -> None:
+    """Ruling R34. `__init__` recomputes `scale` from the reloaded components as a side effect of
+    construction, and on unmodified data that recompute is bit-exact -- but the stored
+    `labels.f_star` was computed against the *original* `_compute_scale()`'s output, so `load`
+    must read `scale` back from the file rather than trust a future `_compute_scale` to keep
+    agreeing with it. Corrupting the stored `scale` to 2x and confirming `f` scales by exactly 2x
+    is the only way to tell "reads the file" from "recomputes and happens to match": a `load` that
+    dropped the restore would report the recomputed (uncorrupted) scale instead.
+    """
+    obj = make_family("rotated_t45", seed=3, D=D)
+    npz_path, json_path = obj.save(tmp_path / "obj")
+
+    payload = json.loads(json_path.read_text())
+    payload["labels"]["scale"] *= 2.0
+    json_path.write_text(json.dumps(payload, sort_keys=True, indent=1))
+
+    loaded = SyntheticObjective.load(tmp_path / "obj")
+    assert loaded.scale == pytest.approx(obj.scale * 2.0)
+
+    X = np.random.default_rng(0).uniform(0.0, 1.0, size=(N_POINTS, D))
+    ratio = loaded(X) / obj(X)
+    assert np.median(ratio) == pytest.approx(2.0, abs=1e-9)
+
+
+def test_load_restores_noise_sd_from_the_file_rather_than_rederiving_it(tmp_path: Path) -> None:
+    """Ruling R34's other half. `__init__` sets `noise_sd` from the reconstructed `spec` (or the
+    0.1 default), which agrees with the stored `labels.noise_sd` today only because both paths
+    compute it the same way from the same spec -- `observe` reads `self.noise_sd` directly, so a
+    future change to either the spec-reading logic or the 0.1 default must not silently move a
+    reloaded objective's noise onto a different number than the file was actually built with.
+    """
+    obj = make_family("aligned10", seed=0, D=D)
+    npz_path, json_path = obj.save(tmp_path / "obj")
+
+    payload = json.loads(json_path.read_text())
+    payload["labels"]["noise_sd"] = 0.7
+    json_path.write_text(json.dumps(payload, sort_keys=True, indent=1))
+
+    loaded = SyntheticObjective.load(tmp_path / "obj")
+    assert loaded.noise_sd == 0.7
+
+
 def test_family_spec_shares_and_ells_round_trip_as_tuples(tmp_path: Path) -> None:
     """`decoupled` is the family whose `FamilySpec.shares` and `.ells` are real per-rank tuples
     (every interaction/rotated variant's `shares` is `None` and `ells` a scalar, so their own
@@ -151,21 +291,34 @@ def test_family_spec_shares_and_ells_round_trip_as_tuples(tmp_path: Path) -> Non
     assert isinstance(loaded.spec.ells, tuple)
 
 
-def test_load_does_not_call_eigen_factor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`load` must never re-draw. `eigen_factor` is defined in `synthobj.kernel` but imported by
-    name into `synthobj.families` (`_draw_fn`'s only call site), so patching `kernel.eigen_factor`
-    alone would not raise for a regression that reloaded by calling `families.build` -- both
-    bindings are patched here so the test has power against that failure mode, not just against
-    the one the brief names literally.
+@pytest.mark.parametrize("variant", ["rotated_t45", "aligned10_sin", "dense_weak"])
+def test_load_does_not_redraw_for_any_generator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str
+) -> None:
+    """`load` must never re-draw, for every generator the study uses, not just the one the brief
+    names literally. `_draw_fn` calls `eigen_factor` only for `generator == "matern"`
+    (`rotated_t45`); the sinusoid branch (`aligned10_sin`) goes through `joint_points`/`make_grid`/
+    `sinusoid_draw` and never touches `eigen_factor` at all, so a regression that reloaded a
+    sinusoid variant by calling `families.build` would raise nothing against a test that only
+    patched `eigen_factor` -- confirmed empirically before writing this test. `dense_weak` adds
+    `draw_until_monotone` (matern's rejection wrapper) to the same check. Every name checked here
+    is imported by name into `synthobj.families` at module scope, so each is patched on
+    `families`, not on `synthobj.kernel`/`synthobj.draws` where it's defined -- patching the
+    defining module alone would not touch the already-bound name `families.py` actually calls
+    (confirmed for `eigen_factor` specifically: patching only `kernel.eigen_factor` and then
+    calling `families.make_family` still succeeds).
     """
-    obj = make_family("rotated_t45", seed=1, D=D)
+    obj = make_family(variant, seed=1, D=D)
     obj.save(tmp_path / "obj")
 
     def _boom(*args: object, **kwargs: object) -> None:
-        raise AssertionError("load must not call eigen_factor")
+        raise AssertionError("load must not draw")
 
     monkeypatch.setattr(kernel, "eigen_factor", _boom)
     monkeypatch.setattr(families, "eigen_factor", _boom)
+    monkeypatch.setattr(families, "sinusoid_draw", _boom)
+    monkeypatch.setattr(families, "draw_until_monotone", _boom)
+    monkeypatch.setattr(families, "gp_draw", _boom)
 
     loaded = SyntheticObjective.load(tmp_path / "obj")
     assert loaded.f_star == obj.f_star
@@ -187,3 +340,53 @@ def test_different_seeds_give_different_S(tmp_path: Path) -> None:
     loaded_a = SyntheticObjective.load(tmp_path / "a")
     loaded_b = SyntheticObjective.load(tmp_path / "b")
     assert loaded_a.labels.S != loaded_b.labels.S
+    # M3: the check above alone would also pass for a load that re-derived S from the npz
+    # `active` array's coordinate set rather than reading the stored `Labels.S` -- both are
+    # correct on healthy data, so neither seed comparison distinguishes "read" from
+    # "re-derived". Comparing each loaded S to its own original closes that gap.
+    assert loaded_a.labels.S == obj_a.labels.S
+    assert loaded_b.labels.S == obj_b.labels.S
+
+
+def test_npz_members_and_json_keys_are_written_in_sorted_order(tmp_path: Path) -> None:
+    """Both determinism safeguards `_write_npz_deterministic` and `save` rely on, pinned directly
+    rather than only inferred from the byte-identity test passing: `zipfile` member order follows
+    insertion order, so `_write_npz_deterministic` must insert in `sorted(arrays)` order for the
+    namelist to come back sorted; `json.dumps(..., sort_keys=True)` must actually be passed for
+    `json.loads` (which preserves the text's own key order) to hand back a sorted dict. Confirmed
+    this has power: reversing the npz write order and dropping `sort_keys=True` together leaves
+    every other test in this module passing.
+    """
+    obj = make_family("interaction_g0.25", seed=0, D=D)
+    npz_path, json_path = obj.save(tmp_path / "obj")
+
+    with zipfile.ZipFile(npz_path) as zf:
+        names = zf.namelist()
+    assert names == sorted(names)
+
+    payload = json.loads(json_path.read_text())
+    assert list(payload) == sorted(payload)
+
+
+def test_save_rejects_components_that_do_not_share_one_knot_grid(tmp_path: Path) -> None:
+    """The file format's one shared `grid` array (true of every family `synthobj.families`
+    builds) is enforced by `_shared_grid`, not merely assumed: a hand-built objective mixing a
+    plain `[0,1]` component with an extended-domain one (as `test_objective.py`'s own
+    `test_rotation_is_accepted` does) must raise rather than have `save` silently write one
+    component's grid under another's values.
+    """
+    f_unit = Component.from_raw(
+        2, 0.5, 0.5, make_grid(0.0, 1.0, 256),
+        gp_draw(eigen_factor(0.0, 1.0, 256, 0.5), np.random.default_rng(1)),
+    )
+    f_ext = Component.from_raw(
+        5,
+        0.5,
+        0.5,
+        make_grid(EXT_LO, EXT_HI, 256),
+        gp_draw(eigen_factor(EXT_LO, EXT_HI, 256, 0.5), np.random.default_rng(2)),
+    )
+    obj = SyntheticObjective(D, (f_unit, f_ext), (), None, None, 0)
+
+    with pytest.raises(ValueError, match="share one knot grid"):
+        obj.save(tmp_path / "obj")
