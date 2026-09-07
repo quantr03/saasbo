@@ -930,13 +930,20 @@ def collect_test_count() -> int:
 def numbers_tex(outdir: Path, stats: dict) -> None:
     grid100 = get_grid100()  # already built by now; just ensures the cache-key count below is final
 
-    knots_unit = make_family("aligned3", seed=0, D=20).components[0].grid.size
+    unit_obj = make_family("aligned3", seed=0, D=20)
+    knots_unit = unit_obj.components[0].grid.size
     knots_ext = make_family("rotated_t0", seed=0, D=20).components[0].grid.size
 
     lines = [
         macro("Next", str(ROTATED_GRID_N)),
         macro("KnotsUnit", str(knots_unit)),
         macro("KnotsExt", str(knots_ext)),
+        # Both read off a built objective rather than repeating the literal: StudyD is the D the
+        # archived grid is built at, TableD the smaller D tab_families is built at. A2 needs both
+        # in prose (dense_weak's share clears ACTIVE_EPS at one and not the other), and reading
+        # them back off the objects keeps that prose from drifting if either D ever moves.
+        macro("StudyD", str(grid100[("aligned3", 0)].D)),
+        macro("TableD", str(unit_obj.D)),
         macro("ZLo", f"{EXT_LO:.4f}"),
         macro("ZHi", f"{EXT_HI:.4f}"),
         macro("ActiveEps", f"{ACTIVE_EPS:.2f}"),
