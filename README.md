@@ -137,7 +137,9 @@ python -m sagp.bo --family aligned10 --seed 3 --cell additive/amplitude --T 200 
 `--cell` also takes `sobol | dsp_map | oracle_S`; other flags are `--D 100`, `--n-init 20`,
 `--acq logei|ei`, `--alpha F`, `--fixed-noise F`, `--noiseless`, `--sobol-every 25`, `--no-resume`,
 `--nuts 512,256,16` (the fallback budget is passed here, identically for every cell),
-`--objective-dir` and `--dry-run`. See `python -m sagp.bo --help`.
+`--num-init-candidates 5000` and `--num-restarts-ei 5` (the reference acquisition optimizer's two
+sizes, held fixed across every method), `--objective-dir` and `--dry-run`. See
+`python -m sagp.bo --help`.
 
 Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 

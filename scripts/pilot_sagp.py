@@ -19,7 +19,8 @@ Four stages, each of which prints its rows as it measures them and rewrites its 
          timed `optimize_ei`
   refit  ten fits per cell, for the D4 diagnostic gate's false-failure rate
   alpha  the D2 prior-predictive active-count table that calibrates `ALPHA_AMPLITUDE`
-  all    all four, plus the run-cost section that combines them
+  all    `alpha` first (it is free), then `grad`, `fit`, `refit`, plus a run-cost section
+         combining them
 
 `grad` and `alpha` together take under fifteen seconds. `fit` and `refit` are the whole cost of
 `--stage all`: at the sizes below, and with the per-gradient times `--stage grad` measured on
@@ -323,11 +324,17 @@ def _design(objective: object, n: int, seed: int = 0) -> tuple[np.ndarray, np.nd
 
 
 def _fit_row(cell: CellKey, n: int, X: np.ndarray, z: np.ndarray, label: str, key) -> dict[str, object]:
-    """One timed `fit` at the production budget, flattened into a row of the stage's table."""
+    """One timed `fit` at the production budget, flattened into a row of the stage's table.
+
+    Both the deciding attempt's diagnostics (unprefixed) and attempt 0's (`a0_`) are recorded. On
+    a fit that passed first time they are the same numbers; on a `refit` or `excluded` fit the
+    `a0_` set is the only record of *how far outside* the gate the first attempt fell, which is
+    what makes the refit rate interpretable rather than just a count.
+    """
     start = time.perf_counter()
     fitted = fit(X, z, key, cell)
     wall_s = time.perf_counter() - start
-    diag = fitted.attempts[-1]
+    diag, first = fitted.attempts[-1], fitted.attempts[0]
     return {
         "cell": cell,
         "n": n,
@@ -339,6 +346,9 @@ def _fit_row(cell: CellKey, n: int, X: np.ndarray, z: np.ndarray, label: str, ke
         "n_eff_min": diag.n_eff_min,
         "divergences": diag.divergences,
         "num_steps_mean": diag.num_steps_mean,
+        "a0_r_hat_max": first.r_hat_max,
+        "a0_n_eff_min": first.n_eff_min,
+        "a0_divergences": first.divergences,
         "fitted": fitted,
     }
 
@@ -383,15 +393,17 @@ def _fit_body(rows: list[dict[str, object]], compile_s: dict[tuple[CellKey, int]
         _run_label(note)
         + "\n\nProduction `NUTSConfig()` (512 warm-up / 256 samples / thinning 16, tree depth 6) on\n"
         "`make_family(\"aligned10\", 0)` at D = 100, fitted to a scrambled Sobol design observed\n"
-        "through `noise_rng(0)` and standardized. Each (cell, n) is fitted twice, with `PRNGKey(0)`\n"
-        f"and `PRNGKey(1)`; `acq_s` times one `optimize_ei` against that fit at the production\n"
-        f"{ACQ_CANDIDATES} candidates / {ACQ_RESTARTS} restarts with `sobol_seed=0` and\n"
-        "`default_rng(0)`. Run 1 of each pair pays JAX compilation for both the fit and the\n"
-        "acquisition, run 2 pays neither.\n\n"
+        "through `noise_rng(0)` and standardized. Each (cell, n) is fitted twice under the **same**\n"
+        "key `PRNGKey(0)`: `fit` is deterministic given its key, so run 2 repeats run 1's chain\n"
+        "exactly and the two walls can differ only by the compilation run 1 paid. `acq_s` times one\n"
+        f"`optimize_ei` against that fit at the production {ACQ_CANDIDATES} candidates /\n"
+        f"{ACQ_RESTARTS} restarts with `sobol_seed=0` and `default_rng(0)`; run 1 pays JAX\n"
+        "compilation for both the fit and the acquisition, run 2 pays neither.\n\n"
         f"This stage fits {planned}; a pair missing from the table below was not reached before the\n"
         "run ended.\n\n"
         + table
-        + "\nCompile time, defined as run 1's wall minus run 2's at the same (cell, n):\n\n"
+        + "\nCompile time = run 1's wall minus run 2's at the same (cell, n), the two runs being the\n"
+        "same fit under the same key, so this is compilation and nothing else:\n\n"
         + compiles
     )
 
@@ -410,8 +422,12 @@ def stage_fit(out: Path, small: bool) -> dict[str, dict[CellKey, float]]:
         # The loop's own target: the incumbent of the standardized, negated observations.
         y_target = float(np.min(z))
         pair: list[dict[str, object]] = []
-        for label, key in (("1", jax.random.PRNGKey(0)), ("2", jax.random.PRNGKey(1))):
-            row = _fit_row(cell, n, X, z, label, key)
+        # The SAME key for both runs (ruling R38). `fit` is deterministic given its key, so run 2
+        # repeats run 1's trajectory exactly: the two walls differ by the compilation run 1 paid
+        # and by nothing else. Two different keys would have mixed compile time with fit-to-fit
+        # variation in the number of leapfrog steps, and could make the difference negative.
+        for label in ("1", "2"):
+            row = _fit_row(cell, n, X, z, label, jax.random.PRNGKey(0))
             start = time.perf_counter()
             optimize_ei(
                 row["fitted"],
@@ -438,7 +454,12 @@ def stage_fit(out: Path, small: bool) -> dict[str, dict[CellKey, float]]:
     return {"steps": steps, "acq": acq}
 
 
-_REFIT_COLUMNS = ("cell", "n", "k", "status", "attempts", "r_hat_max", "n_eff_min", "divergences", "wall_s")
+_REFIT_COLUMNS = (
+    "cell", "n", "k", "status", "attempts",
+    "r_hat_max", "n_eff_min", "divergences",
+    "a0_r_hat_max", "a0_n_eff_min", "a0_divergences",
+    "wall_s",
+)
 
 
 def _refit_body(rows: list[dict[str, object]]) -> str:
@@ -475,6 +496,11 @@ def _refit_body(rows: list[dict[str, object]]) -> str:
         f"as the fit stage, fitted {REFIT_KEYS} times with `fold_in(PRNGKey(0), k)`. `r` below is the\n"
         "fraction of fits that ran a second attempt -- both `refit` and `excluded` paid for one --\n"
         "which is the `r` the run-cost formula's `(1 + 1.67 r)` factor takes.\n\n"
+        "The unprefixed diagnostics are the *deciding* attempt's (the one whose draws are returned);\n"
+        "the `a0_` ones are attempt 0's. On an `ok` row the two are the same numbers; on a `refit`\n"
+        "or `excluded` row the `a0_` set says how far attempt 0 fell outside the gate\n"
+        "(`r_hat_max <= 1.1`, `n_eff_min >= 16`, `divergences <= 5`), which is what separates a gate\n"
+        "that fires on genuinely bad chains from one whose thresholds are simply too tight.\n\n"
         f"This stage fits {planned}; a pair missing below was not reached before the run ended.\n\n"
         + table
         + "\n"
@@ -590,7 +616,13 @@ def stage_cost(
         f"\n{', '.join(borrowed)} fall back to the reference cell's steps/iteration, acquisition\n"
         "wall and refit rate wherever the fit and refit stages did not fit that cell themselves:\n"
         "only two of the four are fitted, and steps/iteration is a property of the sampler's\n"
-        "adaptation rather than of the kernel's cost.\n"
+        "adaptation rather than of the kernel's cost.\n\n"
+        "`t_acq` is **not** such a property, and borrowing it is the one place this table is\n"
+        "optimistic. The acquisition scores its 5000 candidates through the very kernel the\n"
+        "gradient uses, and additive/lengthscale and product/amplitude are the two whose\n"
+        "`(n_test, n, D)` broadcast XLA declines to fuse, so a borrowed reference `t_acq`\n"
+        f"understates their `{ACQ_PER_RUN} x t_acq` term -- their core-hours above are a lower bound\n"
+        "in it. Only `--stage fit` at those cells measures it.\n"
         if borrowed
         else ""
     )
@@ -657,11 +689,13 @@ def main(argv: list[str] | None = None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     start = time.perf_counter()
 
+    # `alpha` runs first under `--stage all` because it is free (a second of numpy) and needs
+    # nothing from the others: an `all` run killed in its first minute still leaves the D2 table.
+    if args.stage in ("alpha", "all"):
+        stage_alpha(out)
     grad = stage_grad(out) if args.stage in ("grad", "all") else None
     fits = stage_fit(out, args.n_fit_small) if args.stage in ("fit", "all") else None
     refit_rates = stage_refit(out) if args.stage in ("refit", "all") else None
-    if args.stage in ("alpha", "all"):
-        stage_alpha(out)
     if args.stage == "all":
         stage_cost(out, grad, fits, refit_rates)
 
