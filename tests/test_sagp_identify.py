@@ -42,14 +42,17 @@ def test_identify_returns_every_key_at_the_right_shape():
         "family", "seed", "cell", "n", "D", "alpha", "status", "status_reason", "nuts_attempts",
         "diag_r_hat_max", "diag_r_hat_median", "diag_frac_r_hat_below_1_05", "diag_n_eff_min",
         "diag_divergences", "diag_num_steps_mean", "diag_wall_s", "diag_passed", "diag_reason",
+        "diag_r_hat_max_native", "diag_n_eff_min_native", "diag_r_hat_max_ell",
+        "diag_n_eff_min_ell", "diag_r_hat_max_global", "diag_n_eff_min_global",
         "wall_s", "y_mean", "y_std",
         "native_median", "p_active", "sobol_hat", "total_var_hat", "active_neutral",
         "active_native",
         "labels_s", "labels_g", "labels_active",
         "spearman_native_vs_s", "spearman_native_vs_g", "spearman_sobol_vs_s",
-        "spearman_native_vs_sobol", "amplitude_vs_realized",
+        "spearman_sobol_vs_g", "spearman_native_vs_sobol", "amplitude_vs_realized",
         "samples",
     }
+    assert len(expected_keys) == 43
     assert set(out) == expected_keys
 
     assert out["family"] == "aligned3"
@@ -65,7 +68,8 @@ def test_identify_returns_every_key_at_the_right_shape():
     # Every Diagnostics field of the attempt whose draws were retained, prefixed diag_.
     for field in (
         "r_hat_max", "r_hat_median", "frac_r_hat_below_1_05", "n_eff_min", "divergences",
-        "num_steps_mean", "wall_s", "passed", "reason",
+        "num_steps_mean", "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell",
+        "n_eff_min_ell", "r_hat_max_global", "n_eff_min_global", "wall_s", "passed", "reason",
     ):
         assert f"diag_{field}" in out
     assert out["diag_wall_s"] > 0.0
@@ -82,7 +86,7 @@ def test_identify_returns_every_key_at_the_right_shape():
 
     for key in (
         "spearman_native_vs_s", "spearman_native_vs_g", "spearman_sobol_vs_s",
-        "spearman_native_vs_sobol",
+        "spearman_sobol_vs_g", "spearman_native_vs_sobol",
     ):
         assert isinstance(out[key], float)
     assert out["amplitude_vs_realized"].shape == (3, 2)  # aligned3 has |S| = 3

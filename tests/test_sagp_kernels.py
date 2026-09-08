@@ -230,6 +230,34 @@ def test_cell_kernel_gradients_are_finite(key):
     assert all(bool(jnp.isfinite(g).all()) for g in jax.tree.leaves(grads))
 
 
+@pytest.mark.parametrize("key", CELL_KEYS, ids=CELL_IDS)
+def test_cell_kernel_gradients_match_central_differences(key):
+    """Finite and *correct*: one entry of the gradient NUTS follows, against the kernel's values.
+
+    Every other kernel test here reads the kernel's values, and `..._are_finite` above reads only
+    the gradient's shape and finiteness -- so a centering term differentiated with the wrong sign,
+    or a `v(ell)` left out of the derivative of a normalized component, would pass all of them
+    while sending the sampler in a direction the model does not have. Central differences on the
+    same summed kernel are the independent statement of what that derivative is; the coordinate is
+    the cell's own sparsity parameter, which is the one the study's conclusions rest on.
+    """
+    X, params = _points(12, seed=6), _params()
+    kernel = KERNELS[key][0]
+    site = "a_sq" if key[1] == "amplitude" else "kernel_inv_length_sq"
+    theta = params[site]
+
+    def total(value):
+        return kernel(X, X, params | {site: value}, 0.0, False).sum()
+
+    analytic = float(jax.grad(total)(theta)[0])
+
+    step = 1.0e-6 * float(theta[0])
+    shifted = jnp.zeros_like(theta).at[0].set(step)
+    finite_difference = float(total(theta + shifted) - total(theta - shifted)) / (2.0 * step)
+
+    assert analytic == pytest.approx(finite_difference, rel=1.0e-6)
+
+
 def _active_counts(rng: np.random.Generator, alpha: float, cutoff: float) -> np.ndarray:
     """#{i : tausq * lam_i > cutoff} per draw, for tausq ~ HalfCauchy(alpha), lam_i ~ HalfCauchy(1).
 

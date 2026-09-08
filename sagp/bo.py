@@ -56,7 +56,7 @@ import jax.lax as lax
 import jax.numpy as jnp
 import numpy as np
 from jax import Array, value_and_grad
-from jax.scipy.special import log_ndtr, logsumexp
+from jax.scipy.special import erfcx, logsumexp
 from jax.scipy.stats import norm
 from scipy.optimize import fmin_l_bfgs_b
 from scipy.stats import qmc
@@ -170,16 +170,20 @@ def log_h(z: Array) -> Array:
     h is the whole content of EI -- EI(x) = std * h((y_target - mu)/std) -- and it underflows to
     exactly zero in float64 at about z = -37, which is where the reference's EI stops having a
     gradient and its optimizer stops moving. Writing h(z) = phi(z) [1 - (-z) Phi(z)/phi(z)] and
-    taking the log turns the cancellation into `log1mexp` of a log Mills ratio, which stays
-    finite and differentiable arbitrarily far into the tail: this is the paper's erfcx form
-    rewritten through Phi/phi, so it needs no erfcx (JAX has none). Above z = -1 the naive form is
-    both accurate and cheaper. As in `log1mexp`, each branch is clamped into its own domain, since
-    the naive branch's gradient at z = -40 is 0/0 and the tail branch's `log(-z)` is NaN at z > 0.
+    taking the log turns the cancellation into `log1mexp` of a log Mills ratio, which stays finite
+    and differentiable arbitrarily far into the tail. The Mills ratio itself is the paper's own
+    erfcx form, Phi(z)/phi(z) = sqrt(pi/2) erfcx(-z/sqrt 2) for z < 0, evaluated as one scaled
+    special function rather than as log Phi(z) + z^2/2: those two terms are both O(z^2) and cancel
+    to an O(1) result, which costs the whole mantissa in the tail this branch exists for (0.04
+    absolute at z = -5e3, NaN by z = -3e4, and a gradient 3x wrong at z = -1e5 -- the gradient
+    being what the L-BFGS-B restarts follow). Above z = -1 the naive form is both accurate and
+    cheaper. As in `log1mexp`, each branch is clamped into its own domain, since the naive
+    branch's gradient at z = -40 is 0/0 and the tail branch's `log(-z)` is NaN at z > 0.
     """
     upper = jnp.maximum(z, -1.0)
     lower = jnp.minimum(z, -1.0)
     naive = jnp.log(norm.pdf(upper) + upper * norm.cdf(upper))
-    log_mills = jnp.log(-lower) + log_ndtr(lower) + 0.5 * lower**2 + _HALF_LOG_2PI
+    log_mills = jnp.log(-lower) + 0.5 * jnp.log(jnp.pi / 2) + jnp.log(erfcx(-lower / jnp.sqrt(2)))
     tail = -0.5 * lower**2 - _HALF_LOG_2PI + log1mexp(log_mills)
     return jnp.where(z > -1.0, naive, tail)
 
@@ -390,15 +394,20 @@ def _versions() -> dict[str, str]:
 def _environment() -> dict[str, object]:
     """The thread settings and host, because bit-identity is only claimed *within* them.
 
-    XLA's CPU backend is deterministic at a fixed thread count and not guaranteed across two
-    (plan section 4, step 7), so a resume on a differently configured machine is reproducible in
-    the sense the study needs -- same seeds, same design -- but not necessarily bit for bit, and
-    these four numbers are what tells a later reader which of the two they are looking at.
+    XLA's CPU backend is deterministic at a fixed thread count on a fixed CPU and not guaranteed
+    across two of either (plan section 4, step 7), so a resume on a differently configured machine
+    is reproducible in the sense the study needs -- same seeds, same design -- but not necessarily
+    bit for bit, and these numbers are what tells a later reader which of the two they are looking
+    at. `machine` and `processor` are here because `platform.platform()` names the OS build and
+    not the instruction set: a cluster's nodes can share it and still differ in the vector width
+    the kernels are compiled to, which is exactly the difference this block has to be able to show.
     """
     return {
         "XLA_FLAGS": os.environ.get("XLA_FLAGS"),
         "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"),
         "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
         "cpu_count": os.cpu_count(),
     }
 
@@ -438,14 +447,26 @@ _ROW_FIELDS: tuple[str, ...] = (
     "t", "method", "family", "seed", "y", "f", "best_obs", "best_f", "regret", "acq_value",
     "fit_wall_s", "acq_wall_s", "fit_calls", "nuts_attempts", "status", "reason",
     "r_hat_max", "r_hat_median", "frac_r_hat_below_1_05", "n_eff_min", "divergences",
-    "num_steps_mean", "y_mean", "y_std", "sobol_computed",
+    "num_steps_mean",
+    "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell", "n_eff_min_ell",
+    "r_hat_max_global", "n_eff_min_global",
+    "a0_r_hat_max", "a0_n_eff_min", "a0_divergences",
+    "y_mean", "y_std", "sobol_computed",
 )
-# The six numbers of the retained attempt's `Diagnostics` that the row carries (its `wall_s`,
-# `passed` and `reason` are already in `fit_wall_s`, `status` and `reason`).
+# The numbers of the retained attempt's `Diagnostics` that the row carries (its `wall_s`,
+# `passed` and `reason` are already in `fit_wall_s`, `status` and `reason`): the six pooled ones
+# and the six per-group ones the trigger is attributed with (`gp._DIAG_GROUPS`).
 _DIAG_FIELDS: tuple[str, ...] = (
     "r_hat_max", "r_hat_median", "frac_r_hat_below_1_05", "n_eff_min", "divergences",
     "num_steps_mean",
+    "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell", "n_eff_min_ell",
+    "r_hat_max_global", "n_eff_min_global",
 )
+# What the row keeps of *attempt 0* when a refit replaced it (ruling R43). Without these the
+# trigger is unrecoverable from `iterations.csv`: the unprefixed columns are the retained
+# attempt's, which on a refit row is the attempt that passed. `save_samples` keeps the whole
+# attempt-0 `Diagnostics` beside the draws; these three are the ones the gate reads.
+_ATTEMPT0_FIELDS: tuple[str, ...] = ("r_hat_max", "n_eff_min", "divergences")
 _COORD_FIELDS: tuple[str, ...] = ("t", "i", "native_median", "p_active", "sobol_hat")
 
 
@@ -538,6 +559,13 @@ class RunLogger:
         place the manifest can be destroyed by a kill, so it lands by tmp-file and `os.replace`
         like the checkpoint (ruling R36): a truncated manifest would take the run's whole
         provenance with it, and resume reads `config_hash` back out of it.
+
+        The entry carries this resume's `T` and its own `env` as well as the commit and the moved
+        versions. `T` because it is excluded from `config_hash` on purpose -- extending the budget
+        is the one setting a resume may change -- so the manifest's own `T` is the last resume's
+        and the earlier ones would otherwise be unrecoverable; `env` because bit-identity is only
+        claimed within one CPU and one thread setting, and a run's later iterations can have been
+        computed on a different machine from its first.
         """
         recorded = json.loads(self.manifest.read_text())
         was = recorded.get("versions", {})
@@ -545,7 +573,13 @@ class RunLogger:
         changed = sorted(name for name, version in now.items() if was.get(name) != version)
         git = _git_provenance()
         recorded.setdefault("resumed", []).append(
-            {"time": _now(), "commit": git["commit"], "versions_changed": changed}
+            {
+                "time": _now(),
+                "commit": git["commit"],
+                "versions_changed": changed,
+                "T": self.cfg.T,
+                "env": _environment(),
+            }
         )
         tmp = self.manifest.with_name(self.manifest.name + ".tmp")
         tmp.write_text(json.dumps(recorded, indent=2, sort_keys=True, default=str) + "\n")
@@ -631,11 +665,24 @@ class RunLogger:
 
         This is the only place `bo.py` touches `fitted.samples`, and it does not look inside: what
         a cell's sites mean is `gp.py`'s business, and every later analysis re-reads them from here.
+        Attempt 0's whole `Diagnostics` rides along as `a0_<field>` scalars (ruling R43), because
+        the draws in this file are the *retained* attempt's and the row's unprefixed diagnostics
+        are that attempt's too: without these, a refit's trigger is nowhere on disk. A MAP
+        reference has no attempts and writes none of them.
         """
         arrays = {site: np.asarray(draws) for site, draws in fitted.samples.items()}
+        attempt0 = (
+            {f"a0_{name}": value for name, value in dataclasses.asdict(fitted.attempts[0]).items()}
+            if fitted.attempts
+            else {}
+        )
         with (self.samples_dir / f"t{t:03d}.npz").open("wb") as handle:
             np.savez(
-                handle, status=fitted.status, nuts_attempts=len(fitted.attempts), **arrays
+                handle,
+                status=fitted.status,
+                nuts_attempts=len(fitted.attempts),
+                **attempt0,
+                **arrays,
             )
 
     def last_logged_t(self) -> int | None:
@@ -845,6 +892,7 @@ def _iteration(
         else readouts(fitted, compute_sobol=compute_sobol, sobol_n=cfg.sobol_n)
     )
     diagnostics = fitted.attempts[-1] if fitted is not None and fitted.attempts else None
+    attempt0 = fitted.attempts[0] if fitted is not None and fitted.attempts else None
 
     row: dict[str, object] = {
         "t": t,
@@ -870,6 +918,10 @@ def _iteration(
                 float("nan") if diagnostics is None else getattr(diagnostics, field)
             )
             for field in _DIAG_FIELDS
+        },
+        **{
+            f"a0_{field}": (float("nan") if attempt0 is None else getattr(attempt0, field))
+            for field in _ATTEMPT0_FIELDS
         },
         "y_mean": y_mean,
         "y_std": y_std,

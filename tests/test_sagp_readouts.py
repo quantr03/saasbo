@@ -319,9 +319,10 @@ def _readout_at_D10():
 
 def test_manipulation_checks_keys():
     # The manipulation checks are what turn one fit's readouts into the SQ1 record's columns, so
-    # what matters is that all five exist, are finite on a well-behaved readout, and pair the
+    # what matters is that all six exist, are finite on a well-behaved readout, and pair the
     # cell's *stated* variance with the objective's realized one on the active set in the labels'
-    # own order.
+    # own order. Both readouts are scored against both labels: `sobol_hat` against `labels.g` is
+    # what tells "the native readout tracks g" apart from "every readout of this fit does".
     readout, labels = _readout_at_D10()
 
     checks = gp.manipulation_checks(readout, labels)
@@ -330,6 +331,7 @@ def test_manipulation_checks_keys():
         "spearman_native_vs_s",
         "spearman_native_vs_g",
         "spearman_sobol_vs_s",
+        "spearman_sobol_vs_g",
         "spearman_native_vs_sobol",
         "amplitude_vs_realized",
     }

@@ -153,16 +153,20 @@ Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 | `checkpoint.npz`, `log.txt` | the resume point, and the run's narrative (timings, statuses, tracebacks) |
 
 **To resume, re-run the same command.** Every random draw of iteration `t` is a pure function of
-`(seed, t)`, so a killed run continues bit-identically from its checkpoint: the loop reloads
-`checkpoint.npz`, refuses to continue if the configuration hash differs, truncates the two CSVs
-and `samples/` back to the last complete row, and carries on. `--no-resume` starts over instead.
+`(seed, t)`, so a killed run continues from its checkpoint: the loop reloads `checkpoint.npz`,
+refuses to continue if the configuration hash differs, truncates the two CSVs and `samples/` back
+to the last complete row, and carries on. `--no-resume` starts over instead. The continuation is
+bit-identical on the same CPU model with the same thread settings; on a different CPU the design
+and the seeds are identical but the floating-point results may differ at the ulp level, which is
+why every resume records its own `env` (machine, processor, thread settings) in `manifest.json`.
 
-On SLURM, one array task per `(family, seed, cell)`; re-submitting the same array resumes every
-run in it:
+On SLURM, one array task per `(family, seed, method)`; re-submitting the same array resumes every
+run in it. Two arrays, because the four cells and the three references have different budgets:
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=sagp --array=0-159 --cpus-per-task=1 --mem=8G --time=16:00:00
+#SBATCH --job-name=sagp-cells --array=0-159 --cpus-per-task=1 --mem=8G --time=16:00:00
+REPO=/path/to/saasbo                       # this checkout
 FAMILIES=(aligned3 aligned10 decoupled interaction_g0.25)
 CELLS=(additive/amplitude additive/lengthscale product/amplitude product/lengthscale)
 i=$SLURM_ARRAY_TASK_ID; seed=$((i % 10)); c=$(( (i / 10) % 4 )); f=$(( i / 40 ))
@@ -171,6 +175,32 @@ cd $REPO && /opt/anaconda3/envs/saasbo/bin/python -m sagp.bo --family ${FAMILIES
     --cell ${CELLS[$c]} --T 200 --out runs/   # re-submitting the same array resumes
 ```
 
+```bash
+#!/bin/bash
+#SBATCH --job-name=sagp-refs --array=0-119 --cpus-per-task=1 --mem=8G --time=2:00:00
+REPO=/path/to/saasbo
+FAMILIES=(aligned3 aligned10 decoupled interaction_g0.25)
+REFS=(sobol dsp_map oracle_S)
+i=$SLURM_ARRAY_TASK_ID; seed=$((i % 10)); r=$(( (i / 10) % 3 )); f=$(( i / 30 ))
+export OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
+cd $REPO && /opt/anaconda3/envs/saasbo/bin/python -m sagp.bo --family ${FAMILIES[$f]} --seed $seed \
+    --cell ${REFS[$r]} --T 200 --out runs/
+```
+
+`--time` is a **checkpoint interval, not a deadline**: a task the wall clock kills has written a
+checkpoint after every completed iteration, and re-submitting the same array picks each run up
+where it stopped. Chain the resubmissions rather than watching for them:
+
+```bash
+jobid=$(sbatch --parsable sagp_cells.sbatch)
+for _ in 1 2 3; do jobid=$(sbatch --parsable --dependency=afterany:$jobid sagp_cells.sbatch); done
+```
+
+`afterany` rather than `afterok` on purpose -- a task killed at the wall clock exits non-zero, and
+that is exactly the case the next submission exists to continue. A run already at `T` records the
+resume in its manifest and exits 0 without fitting anything, so an over-long chain costs a few
+seconds per task and nothing else.
+
 `OMP_NUM_THREADS=1` matters: an array task gets one core, and letting XLA try to spread one fit
 over cores it does not have makes the whole node slower, not faster. On a laptop, run under
 `caffeinate -di` -- a sleeping Mac does not advance `perf_counter`, so a suspended run reports
@@ -178,23 +208,31 @@ timings that are wrong rather than merely late.
 
 **Two gotchas from the vendored reference.** (1) `SAASGP.posterior` chunks its samples at 8 and
 `util.get_chunks` raises `NameError` whenever the retained count is not a multiple of 8, so never
-hand the reference class fewer than 8 retained samples (our own `FittedGP` uses
-`chunk_size = min(8, S)` and is unaffected). (2) `saasgp.py` carries one compatibility line --
+hand the reference class a retained count 8 does not divide (our own `FittedGP` chunks at the
+largest divisor of `S` that is at most 8 -- still 8 at the study's 16 retained draws -- and is
+unaffected at any `--nuts`). (2) `saasgp.py` carries one compatibility line --
 `jnp.clip(dsq, 1.0e-12)` where upstream wrote `jnp.clip(dsq, a_min=1.0e-12)` -- because JAX 0.10
 removed the `a_min` keyword; it is numerically identical, it is the only edit to the vendored
 files, and `tests/test_sagp_env.py` guards it.
 
 **Cost.** One gradient of the log-joint at n = 200, D = 100, and what it implies for a fit (768
 NUTS iterations x 40-63 leapfrog steps) and for a `T = 200` run (`62 x t_fit`, before diagnostic
-refits and the acquisition), measured 2026-09-07 on an M3 laptop (wall time with XLA left
-unpinned; the plan's budget counts these as core-hours):
+refits and the acquisition), measured 2026-09-07 on an M3 laptop:
 
 | `--cell` | per gradient | one fit at n = 200 | one T = 200 run |
 |---|---|---|---|
-| `product/lengthscale` | 3.1 ms | 1.6-2.5 min | 1.7-2.6 core-hours |
-| `additive/amplitude` | 45 ms | 23-36 min | 24-37 core-hours |
-| `product/amplitude` | 135 ms | 69-109 min | 71-113 core-hours |
-| `additive/lengthscale` | 173 ms | 89-139 min | 92-144 core-hours |
+| `product/lengthscale` | 3.1 ms | 1.6-2.5 min | 1.7-2.6 wall-clock hours |
+| `additive/amplitude` | 45 ms | 23-36 min | 24-37 wall-clock hours |
+| `product/amplitude` | 135 ms | 69-109 min | 71-113 wall-clock hours |
+| `additive/lengthscale` | 173 ms | 89-139 min | 92-144 wall-clock hours |
+
+**These are multi-threaded wall times, not core-hours.** They were measured with XLA left
+unpinned -- its default CPU thread pool, on a laptop with 5-8 of 8 cores already busy -- so each
+entry is one fit's elapsed time on an unknown and varying number of cores rather than the
+core-hours a SLURM allocation is billed in, and no fixed factor converts the one to the other
+(the load was neither measured per entry nor held constant). The single-thread re-measurement
+(`OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"`,
+the array script's own setting) is what converts the table, and it goes into the pilot file below.
 
 The reference cell is affordable and the three centered cells are 15-55x more expensive per
 gradient: each evaluates one exponential per (pair, coordinate) rather than one per pair, and two

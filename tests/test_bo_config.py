@@ -168,7 +168,10 @@ def test_the_manifest_records_the_code_the_environment_and_the_problem(tmp_path,
     assert manifest["versions"]["python"] == platform.python_version()
     assert manifest["versions"]["numpyro"] == importlib.metadata.version("numpyro")
     assert set(manifest["versions"]) == {"python", "jax", "jaxlib", "numpyro", "numpy", "scipy"}
-    assert set(manifest["env"]) == {"XLA_FLAGS", "OMP_NUM_THREADS", "platform", "cpu_count"}
+    assert set(manifest["env"]) == {
+        "XLA_FLAGS", "OMP_NUM_THREADS", "platform", "machine", "processor", "cpu_count",
+    }
+    assert manifest["env"]["machine"] == platform.machine()
     assert manifest["env"]["cpu_count"] == os.cpu_count()
     assert manifest["env"]["OMP_NUM_THREADS"] == os.environ.get("OMP_NUM_THREADS")
 
@@ -212,10 +215,15 @@ def test_a_resume_records_itself_and_warns_about_a_version_that_moved(tmp_path):
     after = json.loads(path.read_text())
     assert len(after["resumed"]) == 1
     entry = after["resumed"][0]
-    assert set(entry) == {"time", "commit", "versions_changed"}
+    assert set(entry) == {"time", "commit", "versions_changed", "T", "env"}
     assert entry["versions_changed"] == ["jax"]
     assert entry["commit"] == after["git"]["commit"]
     assert datetime.fromisoformat(entry["time"]).tzinfo is not None
+    # The resume's own budget and environment, not the start's: `T` is outside `config_hash` so
+    # every resume may raise it, and bit-identity is only claimed within one CPU and one thread
+    # setting -- neither is recoverable from the manifest's top-level blocks, which are the run's.
+    assert entry["T"] == 9 and after["T"] == 7  # the resume's budget; the manifest keeps the run's
+    assert entry["env"] == after["env"]  # same machine here; the point is that it is recorded
     # The resume appends and does not rewrite: what the manifest says about the start of the run
     # is the whole point of having recorded it.
     assert after["versions"]["jax"] == "0.0.0+not-this-one"

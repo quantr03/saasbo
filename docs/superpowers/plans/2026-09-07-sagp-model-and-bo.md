@@ -76,7 +76,8 @@ class DiagThresholds:
 class Diagnostics:
     """One attempt's diagnostics on the un-thinned chain (numpyro.diagnostics.summary +
     extra_fields): r_hat_max, r_hat_median, frac_r_hat_below_1_05, n_eff_min, divergences,
-    num_steps_mean, wall_s, passed, reason."""
+    num_steps_mean, the same two extremes per group (r_hat_max_native/_ell/_global and
+    n_eff_min_native/_ell/_global, ruling R42), wall_s, passed, reason."""
 
 class FittedGP:
     """Posterior of one cell (or the MAP reference) on standardized, negated targets.
@@ -130,8 +131,9 @@ def component_means(fitted, x_grid) -> jnp.ndarray:
 
 def manipulation_checks(readout, labels) -> dict:
     """Spearman(native_median, labels.s), Spearman(native_median, labels.g),
-    Spearman(sobol_hat, labels.s), amplitude-vs-realized pairs (share_hat median, labels.s) on S,
-    and rank agreement between native_median and sobol_hat. scipy.stats.spearmanr only."""
+    Spearman(sobol_hat, labels.s), Spearman(sobol_hat, labels.g), amplitude-vs-realized pairs
+    (share_hat median, labels.s) on S, and rank agreement between native_median and sobol_hat.
+    scipy.stats.spearmanr only."""
 
 def identify(objective, cell, n, seed, *, sobol_n=2048, **fit_kwargs) -> dict:
     """SQ1 runner: X = qmc.Sobol(D, scramble=True, seed=seed).random(n); y = objective.observe(X,
@@ -254,7 +256,7 @@ run_bo(...) ; resolve_config(args) ; main(argv)
 6. Write `checkpoint.npz` (X, y, f, t, statuses) by tmp-file + `os.replace` **first**; then append the row, append `coords.csv` (native summaries `native_median`, `p_active` every iteration from stored samples via `readouts(compute_sobol=False)`; `sobol_hat` only every `sobol_every` iterations and at t = T−1, NaN otherwise, `sobol_computed` flag in the row), and save retained samples to `samples/t{t:03d}.npz` (attempt used, status).
 7. Resume: on start, if `checkpoint.npz` exists, load it, require `hash(RunConfig fields)` in the manifest to equal the resolved config's (git hash and package versions are compared and *warned* about in `log.txt` and appended to the manifest's `resumed` list, not asserted), truncate `iterations.csv`, `coords.csv` and `samples/` to the checkpoint's t (a kill between checkpoint and logs cannot then duplicate rows), and continue. Bit-identity follows from step 2's per-`(seed, t)` RNGs and XLA CPU determinism; the manifest records thread settings (`XLA_FLAGS`, `OMP_NUM_THREADS`) because a different thread count is not guaranteed bit-identical.
 
-Row schema (`iterations.csv`): `t, method, family, seed, y, f, best_obs, best_f, regret, acq_value, fit_wall_s, acq_wall_s, fit_calls, nuts_attempts, status, reason, r_hat_max, r_hat_median, frac_r_hat_below_1_05, n_eff_min, divergences, num_steps_mean, y_mean, y_std, sobol_computed, x_0 … x_{D-1}` (`fit_calls` counts exception retries, `nuts_attempts` diagnostic attempts).
+Row schema (`iterations.csv`): `t, method, family, seed, y, f, best_obs, best_f, regret, acq_value, fit_wall_s, acq_wall_s, fit_calls, nuts_attempts, status, reason, r_hat_max, r_hat_median, frac_r_hat_below_1_05, n_eff_min, divergences, num_steps_mean, r_hat_max_native, n_eff_min_native, r_hat_max_ell, n_eff_min_ell, r_hat_max_global, n_eff_min_global, a0_r_hat_max, a0_n_eff_min, a0_divergences, y_mean, y_std, sobol_computed, x_0 … x_{D-1}` (`fit_calls` counts exception retries, `nuts_attempts` diagnostic attempts; the six per-group columns are D4's attribution fields, ruling R42, and the three `a0_` ones are attempt 0's, ruling R43, since every unprefixed diagnostic is the *retained* attempt's).
 
 ## 5. The eight decisions
 
@@ -293,6 +295,8 @@ Simulation (10⁴ draws, D = 100, numpy, run during planning): reference count o
 Computed on all 256 post-warm-up draws (the reference already computes `summary` on the un-thinned flat samples; `numpyro.diagnostics.summary` uses `split_gelman_rubin`, which with one chain splits it into halves, and `effective_sample_size`). Applied to the log of every positive site (log ρ_i / log a_i², log τ², log σ_f², log σ_n², log ℓ_i) — the sampler's own geometry — because the constrained HC-distributed sites are so heavy-tailed that plain R̂/ESS on them is dominated by single draws. Rule, preregistered: pass iff `r_hat_max ≤ 1.1` and `n_eff_min ≥ 16` and `divergences ≤ 5`. Reasons: split-R̂ on two halves of 128 has resolution ≈ ±0.02, and 1.1 is the classical bound; 16 effective draws is the number of samples we retain, so fewer means the retained set is not 16 draws' worth; 5 divergences is 2 % of 256. `frac_r_hat_below_1_05` and `r_hat_median` are logged so the brief's R̂ < 1.05 criterion is reportable per fit without being the gate. Task 11's pilot (10 fits, aligned10, n = 100) reports the false-failure rate; the thresholds are not tuned to it.
 
 Refit: a second `MCMC(NUTS(model, max_tree_depth=6), num_warmup=1024, num_samples=256)` with `fold_in(key, 1)` (attempt 0 uses `key` unchanged), no state reuse (a fresh chain, as the brief's "no warm start" requires). Pass → `status="refit"`; fail → `status="excluded"`, reason = the failed criteria of both attempts; the second attempt's samples are returned either way. `identify()` and every BO row carry `status`, `nuts_attempts` and both `Diagnostics`, so excluded fits are counted downstream, never averaged silently. A refit costs 1280 NUTS iterations, 1.67 × a fit, so the pilot's refit rate r enters the budget (D8); the `n_eff_min ≥ 16` criterion over ≈ 2D + 3 sites at D = 100 is the one most likely to fire, and if the pilot's r exceeds 20 % the gate is revisited before SQ1 is preregistered, not after.
+
+The pooled rule counts `kernel_ell` too, so an amplitude cell is gated on 2D + 2 statistics against a lengthscale cell's D + 3 — a shape parameter the lengthscale cells do not have, whose ESS is being asked to clear the same bar as the sparsity parameter the study is about. `Diagnostics` therefore also records `r_hat_max`/`n_eff_min` per group (`native` = the cell's own sparsity site, `ell` = `kernel_ell`, `global` = the three scalars), carried into every `identify()` record and every BO row, so a trigger can be attributed rather than only counted. The gate itself is unchanged (ruling R42): whether `kernel_ell` belongs in it is decided from the pilot's per-cell refit rates and those per-group fields, before SQ1 is preregistered — dropping it from the pooled rule now, on the strength of an argument rather than a measurement, would be exactly the post-hoc tuning the preregistration exists to prevent.
 
 **Pilot (2026-09-08).** The refit rate r is **not yet measured**: `scripts/pilot_sagp.py --stage refit` (ten product/lengthscale fits at n = 100 and ten additive/amplitude fits at n = 50, keys `fold_in(PRNGKey(0), k)`) writes it into `docs/superpowers/plans/2026-09-07-sagp-pilot.md`, and `--stage all` refreshes that file; the stage was not run on the laptop because each of its twenty production-budget fits costs minutes. What has been measured, on `aligned10` seed 0 at D = 100, n = 50, is the product/lengthscale pair the fit stage runs: both attempts passed first time, `r_hat_max` 1.022 and 1.045 against the 1.1 gate, `n_eff_min` 39.5 and 25.6 against the 16 gate, 2 divergences each against the 5 gate. Two fits are far too few to be the rate this decision needs, but they are the first evidence that the gate does not fire trivially, and that `n_eff_min` is indeed the criterion running closest to its threshold.
 
@@ -334,6 +338,8 @@ A run fits at n = 20 … 199 (180 fits), and Σ_{n=20}^{199} cost(n) = 62.0 · c
 | 100 | 0.5 ms → 0.3–0.4 min     | 20 ms → 10–16 min    | 56 ms → 29–45 min    | 29 ms → 15–23 min    |
 | 200 | 3.1 ms → 1.6–2.5 min     | 45 ms → 23–36 min    | 173 ms → 89–139 min  | 135 ms → 69–109 min  |
 
+**These are multi-threaded wall times, not core-hours.** Every entry above and every hour quoted below it was measured with XLA left unpinned — its default CPU thread pool, on a laptop with 5–8 of its 8 cores already busy with other work — so each is one fit's elapsed time on an unknown and varying number of cores, not the core-hours this section's budget is denominated in, and no fixed factor converts the one to the other (the load was neither measured per entry nor held constant). The conversion needs the single-thread re-measurement, `OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"` — the array script's own setting, so the number it produces is the one a SLURM allocation is billed in — and it goes into `docs/superpowers/plans/2026-09-07-sagp-pilot.md` beside the table it corrects. Until then the core-hour figures below, and the ≈ 5,000–25,000 core-hour envelope ruling R26 states, are wall-clock hours read as if they were core-hours — which if anything **under**-states the one-core cost, by whatever parallel speed-up XLA was getting, so the fallback decision cannot be made looser on the strength of them.
+
 `--stage grad` re-ran this on 2026-09-08 (same laptop, 8 cores): every centered-cell entry reproduced to within about 30 %, giving 12–49× the reference at n = 200 against the 15–55× above, while the reference cell's sub-millisecond n = 50/100 entries varied by up to 3× between repeat runs — at that size the number is dispatch overhead and machine load, not kernel work. At the full budget, 62 · t_fit(n = 200) is ≈ 24–37 core-hours for additive/amplitude, 71–113 for product/amplitude and 92–144 for additive/lengthscale before any refit; ruling R26 states the envelope as **≈ 40–200 core-hours** per centered-cell run once the D4 refit factor and the 180 acquisitions are counted, and SQ2's 120 centered-cell runs as ≈ 5,000–25,000 core-hours against the brief's 2,500–4,000 total. The options, and the choice is the user's rather than this plan's (ruling R26): (i) the preregistered identical fallback `NUTSConfig(128, 128, 8)` (× 0.33, applied to all four cells and both studies); (ii) a kernel-level optimization — hoist the rank-2 centering terms out of the (n, n, D) reduction and chase the fusion failure in the two unfused cells, expected to bring all three to about additive/amplitude's level, ≈ 10–15× the reference, which is the transcendental floor; (iii) a smaller SQ2 (D = 50, T = 100, or fewer objectives); (iv) more cores. No code changes under any of them.
 
 ## 6. Tests mapped to files
@@ -359,7 +365,7 @@ A run fits at n = 20 … 199 (180 fits), and Σ_{n=20}^{199} cost(n) = 62.0 · c
 `tests/test_sagp_readouts.py`
 - QMC vs exact on a product/amplitude posterior (D = 8, n = 40): max |Ŝ_qmc − Ŝ_exact| ≤ 0.02.
 - exact additive Sobol on an exactly additive `synthobj` truth (aligned3 at D = 10 for speed; D = 100, n = 200 marked slow): |Ŝ_i − s_i| ≤ 0.03 on S, ≤ 0.03 off S.
-- `shares_from_amplitudes` inverts the D7 mapping on synthetic samples; `p_active` and active rules; `manipulation_checks` returns the five statistics.
+- `shares_from_amplitudes` inverts the D7 mapping on synthetic samples; `p_active` and active rules; `manipulation_checks` returns the six statistics.
 - Gate 1 replication (slow): the script's five cases at D = 1, n = 80, noise fixed at 0.01, additive/amplitude cell. The script (run 2026-09-07) gives, normalized kernel, P(var > 0.09): pure noise 0.01, strong-smooth 0.98, strong-rough 1.00, weak-smooth 0.07, weak-rough 0.05. The test asserts the robust partial order — both strong cases ≥ 0.9, both weak cases in [0.01, 0.3], noise ≤ 0.05, and min(strong) > max(weak) > noise — not the within-pair order, which the script itself resolves by 0.02.
 
 `tests/test_sagp_identify.py`

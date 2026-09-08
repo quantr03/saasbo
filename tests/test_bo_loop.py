@@ -30,9 +30,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from scipy.special import erfcx
 from scipy.stats import norm, qmc
 
 import saasbo
+import sagp.gp
 from sagp import bo
 from sagp.bo import (
     ACQUISITIONS,
@@ -45,7 +47,7 @@ from sagp.bo import (
     optimize_ei,
     run_bo,
 )
-from sagp.gp import DiagThresholds, FittedGP, NUTSConfig
+from sagp.gp import DiagThresholds, Diagnostics, FittedGP, NUTSConfig
 from synthobj.families import make_family
 
 # The acquisition optimizer's cost is 5 restarts x 100 L-BFGS-B evaluations per iteration, each a
@@ -100,6 +102,18 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
 # --- the acquisition ---
 
 
+def _log_h_reference(z: float) -> float:
+    """log h(z) for z < 0 in float64 numpy/scipy: the tail reference `log_h` is checked against.
+
+    h(z) = phi(z) [1 - (-z) Phi(z)/phi(z)] with the Mills ratio written as
+    Phi(z)/phi(z) = sqrt(pi/2) erfcx(-z/sqrt 2), so the bracket is a `log1p` of a quantity that
+    never needs the two cancelling O(z^2) terms. `scipy.special.erfcx` and `numpy.log1p` are the
+    only arithmetic here, which is what makes this independent of the JAX code under test.
+    """
+    ratio = -z * np.sqrt(np.pi / 2.0) * erfcx(-z / np.sqrt(2.0))
+    return -0.5 * z * z - 0.5 * np.log(2.0 * np.pi) + float(np.log1p(-ratio))
+
+
 def test_log_h_matches_naive_and_stays_finite():
     z = np.linspace(-6.0, 6.0, 200)
     h = norm.pdf(z) + z * norm.cdf(z)
@@ -113,6 +127,23 @@ def test_log_h_matches_naive_and_stays_finite():
     assert all(np.isfinite(tails)) and all(np.isfinite(grads))
     assert tails[0] > tails[1] > tails[2]
     assert norm.pdf(-40.0) + -40.0 * norm.cdf(-40.0) == 0.0  # the naive form has no value here
+
+    # Five decades of tail against an independent scipy reference (ruling R45). "Finite and
+    # decreasing" is not enough on its own: the form this replaced satisfied all of the above and
+    # was still 0.04 out at z = -5e3, NaN by -3e4 and 3x wrong in the gradient at -1e5, because it
+    # subtracted two O(z^2) terms. `erfcx` is the scaled complementary error function both forms
+    # are written in, so this reference shares no line of code with `log_h` but is exact.
+    for z_far in (-10.0, -100.0, -1000.0, -10000.0, -100000.0):
+        value, grad = float(log_h(jnp.asarray(z_far))), float(jax.grad(log_h)(z_far))
+        assert np.isfinite(value) and np.isfinite(grad)
+        assert value == pytest.approx(_log_h_reference(z_far), rel=1e-8)
+        # Central differences at a relative step: the reference has no closed-form derivative
+        # here that is any better conditioned than the value it differentiates.
+        step = 1e-6 * abs(z_far)
+        finite_difference = (
+            _log_h_reference(z_far + step) - _log_h_reference(z_far - step)
+        ) / (2.0 * step)
+        assert grad == pytest.approx(finite_difference, rel=1e-5)
 
     x = np.linspace(-30.0, -1.0e-3, 500)
     naive = np.log(1.0 - np.exp(x))
@@ -262,7 +293,11 @@ def test_rows_carry_the_schema_the_regret_and_the_sobol_schedule(reference_run):
         "t", "method", "family", "seed", "y", "f", "best_obs", "best_f", "regret", "acq_value",
         "fit_wall_s", "acq_wall_s", "fit_calls", "nuts_attempts", "status", "reason",
         "r_hat_max", "r_hat_median", "frac_r_hat_below_1_05", "n_eff_min", "divergences",
-        "num_steps_mean", "y_mean", "y_std", "sobol_computed",
+        "num_steps_mean",
+        "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell", "n_eff_min_ell",
+        "r_hat_max_global", "n_eff_min_global",
+        "a0_r_hat_max", "a0_n_eff_min", "a0_divergences",
+        "y_mean", "y_std", "sobol_computed",
         "x_0", "x_1", "x_2", "x_3", "x_4",
     ]
 
@@ -287,6 +322,72 @@ def test_rows_carry_the_schema_the_regret_and_the_sobol_schedule(reference_run):
         t = int(row["t"])
         assert np.isfinite(float(row["native_median"])) and np.isfinite(float(row["p_active"]))
         assert np.isfinite(float(row["sobol_hat"])) == (t % 5 == 0 or t == _T - 1)
+
+
+def _diagnostics(r_hat_max: float, n_eff_min: float, divergences: int, passed: bool):
+    """A `Diagnostics` whose pooled numbers are the caller's, for stubbing the gate's verdict."""
+    return Diagnostics(
+        r_hat_max=r_hat_max,
+        r_hat_median=1.0,
+        frac_r_hat_below_1_05=1.0,
+        n_eff_min=n_eff_min,
+        divergences=divergences,
+        num_steps_mean=1.0,
+        r_hat_max_native=r_hat_max,
+        n_eff_min_native=n_eff_min,
+        r_hat_max_ell=float("nan"),
+        n_eff_min_ell=float("nan"),
+        r_hat_max_global=1.0,
+        n_eff_min_global=n_eff_min,
+        wall_s=0.5,
+        passed=passed,
+        reason="" if passed else "stubbed failure",
+    )
+
+
+def test_a_refit_row_carries_both_attempts_diagnostics(tmp_path, monkeypatch):
+    """Ruling R43. The unprefixed columns are the *retained* attempt's, so on a refit row they are
+    the attempt that passed; without `a0_*` the trigger would be nowhere on disk at all.
+
+    The verdict decides the path, so it is stubbed rather than waited for -- no toy chain reliably
+    fails and then passes -- and the two attempts are given distinguishable numbers so that a row
+    reading attempt 1 into `a0_*`, or attempt 0 into the unprefixed columns, cannot pass.
+    """
+    attempts = [
+        _diagnostics(1.5, 4.0, 9, passed=False),
+        _diagnostics(1.01, 40.0, 0, passed=True),
+    ]
+    remaining = iter(attempts)
+    monkeypatch.setattr(
+        sagp.gp, "_diagnose", lambda flat, extra, thresholds, wall_s: next(remaining)
+    )
+
+    run_dir = run_bo(
+        _objective(), "product/lengthscale", seed=1, T=6, n_init=_N_INIT, out_dir=tmp_path,
+        nuts=NUTSConfig(32, 32, 4), **_LOOP_KW,
+    )
+
+    (row,) = _read_rows(run_dir / "iterations.csv")
+    assert row["status"] == "refit" and int(row["nuts_attempts"]) == 2
+    assert float(row["a0_r_hat_max"]) == 1.5
+    assert float(row["a0_n_eff_min"]) == 4.0
+    assert int(row["a0_divergences"]) == 9
+    assert float(row["r_hat_max"]) == 1.01
+    assert float(row["n_eff_min"]) == 40.0
+    assert int(row["divergences"]) == 0
+    # The per-group columns come off the retained attempt too, `ell` NaN because this cell has no
+    # `kernel_ell` site at all.
+    assert float(row["r_hat_max_native"]) == 1.01 and float(row["n_eff_min_global"]) == 40.0
+    assert np.isnan(float(row["r_hat_max_ell"])) and np.isnan(float(row["n_eff_min_ell"]))
+
+    # The npz keeps attempt 0 whole, `reason` included: the row's three numbers say the gate
+    # fired, and this says on which criterion.
+    with np.load(run_dir / "samples" / "t005.npz") as data:
+        assert str(data["status"]) == "refit" and int(data["nuts_attempts"]) == 2
+        assert float(data["a0_r_hat_max"]) == 1.5
+        assert bool(data["a0_passed"]) is False
+        assert str(data["a0_reason"]) == "stubbed failure"
+        assert float(data["a0_wall_s"]) == 0.5
 
 
 def test_resume_after_a_partial_write_rebuilds_the_missing_rows(tmp_path):

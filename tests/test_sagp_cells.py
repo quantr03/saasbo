@@ -268,6 +268,35 @@ def test_posterior_chunked_equals_unchunked(monkeypatch):
     assert np.max(np.abs(np.asarray(chunked[1]) - np.asarray(unchunked[1]))) < 1.0e-12
 
 
+@pytest.mark.parametrize(
+    ("retained", "expected"), [(16, 8), (8, 8), (1, 1), (12, 6), (22, 2), (9, 3)]
+)
+def test_chunk_size_is_the_largest_divisor_below_the_references_eight(retained, expected):
+    # Ruling R44. `util.get_chunks` builds its ragged final chunk with an `np.arange` in a module
+    # that never imports numpy, so anything that leaves a remainder raises `NameError` deep inside
+    # a prediction. The rule keeps the reference's own 8 wherever it divides -- 16 and 8 are the
+    # study's retained counts and 1 is a MAP reference's -- and takes a divisor everywhere else.
+    assert sagp.gp._chunk_size(retained) == expected
+    assert retained % sagp.gp._chunk_size(retained) == 0
+
+
+def test_posterior_works_at_a_retained_count_that_eight_does_not_divide():
+    # The case R44 is about, end to end: `--nuts 512,252,21` retains 12 draws, and under the old
+    # `min(8, S)` the first prediction of the run died in `util.get_chunks` rather than in
+    # anything a reader could attribute to a budget.
+    S, n_test = 12, 5
+    X, y = _data()
+    X_test = jnp.asarray(np.random.default_rng(11).uniform(0.0, 1.0, (n_test, P)))
+    fitted = _fitted(
+        ("additive", "amplitude"), X, y, _hand_made_samples("amplitude", S, P, seed=12)
+    )
+
+    mean, var = fitted.posterior(X_test)
+
+    assert mean.shape == var.shape == (S, n_test)
+    assert np.all(np.isfinite(np.asarray(mean))) and np.all(np.asarray(var) > 0.0)
+
+
 def test_unknown_string_cell_is_rejected():
     # "dsp_map" and "oracle_S" are the only non-CellKey cells; anything else would silently be
     # served the product/lengthscale kernel and reported under its own name.

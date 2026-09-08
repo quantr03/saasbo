@@ -185,21 +185,42 @@ def test_objective_matches_a_from_scratch_recomputation(D_eff):
     assert value == pytest.approx(expected, rel=1e-9)
 
 
-def test_a_failed_optimization_is_an_excluded_row(monkeypatch):
-    # R30: the loop reads `status` the same way whatever produced the fit, so a MAP fit L-BFGS-B
-    # could not converge has to be countable as excluded rather than quietly averaged in.
+@pytest.mark.parametrize(
+    ("message", "status", "reason"),
+    [
+        (
+            "ABNORMAL_TERMINATION_IN_LNSRCH",
+            "excluded",
+            "L-BFGS-B: ABNORMAL_TERMINATION_IN_LNSRCH",
+        ),
+        (
+            "STOP: TOTAL NO. of ITERATIONS REACHED LIMIT",
+            "ok",
+            "L-BFGS-B: iteration limit; last iterate used",
+        ),
+    ],
+    ids=["abnormal_line_search", "iteration_limit"],
+)
+def test_a_failed_optimization_is_read_off_the_optimizers_message(
+    monkeypatch, message, status, reason
+):
+    # R30 as amended by R41. `success=False` covers two outcomes with the same scipy `status`, and
+    # the loop reads `status` the same way whatever produced the fit, so they must not be
+    # conflated: an abnormal line search left the iterate wherever it gave up and is excluded,
+    # while `maxiter` left a descent step from the prior mode -- a usable surrogate, and one this
+    # study would otherwise throw away on every iteration of a hard problem.
     _, X, z = _data()
 
     def stub(fun, u0, **kwargs):
         """`minimize` that evaluates the start and reports failure, so no optimizer runs here."""
         value, _ = fun(u0)
-        return OptimizeResult(
-            x=u0, fun=value, nit=0, success=False, message="ABNORMAL_TERMINATION_IN_LNSRCH"
-        )
+        return OptimizeResult(x=u0, fun=value, nit=0, success=False, message=message)
 
     monkeypatch.setattr(gp, "minimize", stub)
     fitted = gp.fit_map(X, z)
 
-    assert fitted.status == "excluded"
-    assert fitted.status_reason == "L-BFGS-B: ABNORMAL_TERMINATION_IN_LNSRCH"
+    assert fitted.status == status
+    assert fitted.status_reason == reason
+    # Either way the optimizer's own outcome is recorded: `map_result` is where a reader learns
+    # that L-BFGS-B did not converge even on the row this now lets through as "ok".
     assert fitted.map_result["success"] is False

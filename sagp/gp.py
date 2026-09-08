@@ -506,6 +506,25 @@ class NUTSConfig:
     max_tree_depth: int = 6
     num_chains: int = 1
 
+    def __post_init__(self) -> None:
+        """Reject a budget whose damage would only show up later, in a fit or in a readout.
+
+        A non-positive count reaches NumPyro as an empty chain and fails somewhere inside it,
+        hours into a run; a `num_samples` that `thinning` does not divide silently retains
+        `ceil(num_samples / thinning)` draws instead of the `num_samples // thinning` every cost
+        estimate and every "16 retained draws" claim is written against. `replace` in `fit`'s
+        refit path changes `num_warmup` alone, so a config that passes here stays valid there.
+        """
+        for name in ("num_warmup", "num_samples", "thinning", "max_tree_depth", "num_chains"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or value < 1:
+                raise ValueError(f"NUTSConfig.{name} must be a positive int; got {value!r}")
+        if self.num_samples % self.thinning != 0:
+            raise ValueError(
+                f"NUTSConfig: num_samples {self.num_samples} is not a multiple of thinning "
+                f"{self.thinning}, so the retained count would not be num_samples // thinning"
+            )
+
 
 @dataclass(frozen=True)
 class DiagThresholds:
@@ -528,7 +547,12 @@ class Diagnostics:
 
     `r_hat_median` and `frac_r_hat_below_1_05` do not gate anything: they are recorded so the
     brief's R-hat < 1.05 criterion is reportable per fit while the gate stays at `DiagThresholds`.
-    `reason` names each failed criterion with its value and is "" exactly when `passed`.
+    Neither do the six per-group fields: `r_hat_max` and `n_eff_min` are the pooled statistics the
+    gate reads, and the groups (`_DIAG_GROUPS`) split those same per-site numbers three ways so a
+    trigger can be *attributed* -- to the cell's own sparsity site, to the amplitude cells' extra
+    `kernel_ell` block, or to the three scalars -- rather than only counted. A group with no site
+    in this cell reads NaN. `reason` names each failed criterion with its value and is "" exactly
+    when `passed`.
     """
 
     r_hat_max: float
@@ -537,6 +561,12 @@ class Diagnostics:
     n_eff_min: float
     divergences: int
     num_steps_mean: float
+    r_hat_max_native: float
+    n_eff_min_native: float
+    r_hat_max_ell: float
+    n_eff_min_ell: float
+    r_hat_max_global: float
+    n_eff_min_global: float
     wall_s: float
     passed: bool
     reason: str
@@ -563,6 +593,20 @@ _CHUNK_ROWS: int = 256
 # The two `FittedGP.cell` strings that are not a `CellKey`: Task 7's MAP references, which carry
 # the lengthscale cells' parameter names on the reference ARD Matern-5/2.
 _MAP_REFERENCES: frozenset[str] = frozenset({"dsp_map", "oracle_S"})
+
+
+def _chunk_size(S: int) -> int:
+    """`util.chunk_vmap`'s batch for S retained samples: the largest divisor of S that is <= 8.
+
+    8 is the reference's own chunk, but `util.get_chunks` builds its ragged final chunk with an
+    `np.arange` in a module that never imports numpy, so any S with `S % chunk_size != 0` and
+    `S > chunk_size` raises `NameError` deep inside a prediction. Taking a *divisor* keeps the
+    reference's batch wherever it already divides (16 -> 8, 8 -> 8, 1 -> 1, the study's own
+    counts) and never hands `get_chunks` a remainder anywhere else (12 -> 6, 22 -> 2, 9 -> 3),
+    without touching the vendored file. Chunking changes no predicted quantity -- the samples are
+    independent of each other -- so a different batch is a different memory peak and nothing more.
+    """
+    return max(c for c in range(1, min(8, S) + 1) if S % c == 0)
 
 
 class FittedGP:
@@ -674,10 +718,9 @@ class FittedGP:
         """`SAASGP.compute_choleskys` generalized to the cell; fills the cache `self._Ls`.
 
         The reference's body with `self.kernel(X, X, var, inv_length_sq, noise, True)` replaced by
-        this cell's kernel over this cell's parameters. `chunk_size` defaults to `min(8, S)`: 8 is
-        the reference's own, and the minimum keeps `util.get_chunks` off its latent `np` NameError
-        when S is smaller than 8 (Task 7's MAP references have S = 1), without touching the
-        vendored file.
+        this cell's kernel over this cell's parameters. `chunk_size` defaults to `_chunk_size(S)`,
+        which keeps `util.get_chunks` off its latent `np` NameError at every S -- 1 for Task 7's
+        MAP references, 16 for a cell, and whatever a non-default `--nuts` retains.
         """
         kernel, _ = self._kernel()
         sites = self._param_sites()
@@ -690,7 +733,7 @@ class FittedGP:
 
         vmap_args = tuple(self.samples[site] for site in sites) + (self._noises(),)
         if chunk_size is None:
-            chunk_size = min(8, vmap_args[0].shape[0])
+            chunk_size = _chunk_size(vmap_args[0].shape[0])
         self._Ls = chunk_vmap(_cholesky, vmap_args, chunk_size=chunk_size)[0]
 
     def _predict(
@@ -738,7 +781,7 @@ class FittedGP:
 
         sites = self._param_sites()
         vmap_args = tuple(self.samples[site] for site in sites) + (self._noises(), self._Ls)
-        chunk_size = min(8, self._Ls.shape[0])
+        chunk_size = _chunk_size(self._Ls.shape[0])
 
         def _block(X_block: Array) -> tuple[Array, Array]:
             def _one(*sample: Array) -> tuple[Array, Array]:
@@ -793,6 +836,12 @@ def _run_nuts(
 
     Returns the un-thinned flat samples, the extra fields, and the run's wall-clock seconds.
     """
+    if nuts.num_chains != 1:
+        raise ValueError(
+            f"num_chains must be 1; got {nuts.num_chains}. The plan pins one chain per fit, and "
+            "`_diagnose` pools with group_by_chain=False, so more chains would be flattened into "
+            "one and their split-R-hat would compare the halves of the concatenation."
+        )
     start = time.perf_counter()
     kernel = NUTS(model, max_tree_depth=nuts.max_tree_depth)
     mcmc = MCMC(
@@ -823,6 +872,34 @@ _POSITIVE_SAMPLED_SITES: tuple[str, ...] = (
     "kernel_ell",
 )
 
+# The three blocks `Diagnostics`' per-group fields report those same statistics over, together
+# exactly `_POSITIVE_SAMPLED_SITES`. They separate what the gate cannot: `native` is whichever
+# site the cell's own sparsity lives on, `ell` is the shape parameter only the amplitude cells
+# carry -- D extra scalars, which is why an amplitude cell pools 2D + 2 statistics against a
+# lengthscale cell's D + 3 -- and `global` is the handful of scalars every cell has.
+_DIAG_GROUPS: dict[str, tuple[str, ...]] = {
+    "native": ("_kernel_inv_length_sq", "_a_sq"),
+    "ell": ("kernel_ell",),
+    "global": ("kernel_var", "kernel_noise", "kernel_tausq"),
+}
+
+
+def _group_extremes(
+    per_site: dict[str, tuple[np.ndarray, np.ndarray]], group: tuple[str, ...]
+) -> tuple[float, float]:
+    """(max R-hat, min ESS) over one group's sites, or (NaN, NaN) when this cell has none of them.
+
+    NaN rather than an infinity so that a group's absence is visibly missing in a log rather than
+    a value that would compare as "worst" or "best" against a cell that does carry it.
+    """
+    present = [per_site[site] for site in group if site in per_site]
+    if not present:
+        return float("nan"), float("nan")
+    return (
+        float(np.max(np.concatenate([r_hat for r_hat, _ in present]))),
+        float(np.min(np.concatenate([n_eff for _, n_eff in present]))),
+    )
+
 
 def _diagnose(
     flat_samples: dict[str, Array],
@@ -838,6 +915,9 @@ def _diagnose(
     average did" -- with 2D + 3 sites at D = 100 that is the criterion most likely to fire, which
     is the point. The three criteria are written as negations of the pass conditions so that a
     NaN R-hat -- what a site that never moved produces -- fails rather than silently passing.
+
+    The per-group fields are read off these very statistics (`_DIAG_GROUPS`), so they can only
+    ever describe the pooled verdict, never disagree with it.
     """
     logs = {
         site: jnp.log(flat_samples[site])
@@ -845,8 +925,15 @@ def _diagnose(
         if site in flat_samples
     }
     stats = summary(logs, prob=0.9, group_by_chain=False)
-    r_hat = np.concatenate([np.ravel(site_stats["r_hat"]) for site_stats in stats.values()])
-    n_eff = np.concatenate([np.ravel(site_stats["n_eff"]) for site_stats in stats.values()])
+    per_site = {
+        site: (np.ravel(site_stats["r_hat"]), np.ravel(site_stats["n_eff"]))
+        for site, site_stats in stats.items()
+    }
+    r_hat = np.concatenate([site_r_hat for site_r_hat, _ in per_site.values()])
+    n_eff = np.concatenate([site_n_eff for _, site_n_eff in per_site.values()])
+    groups = {
+        name: _group_extremes(per_site, group) for name, group in _DIAG_GROUPS.items()
+    }
 
     r_hat_max = float(np.max(r_hat))
     n_eff_min = float(np.min(n_eff))
@@ -867,6 +954,12 @@ def _diagnose(
         n_eff_min=n_eff_min,
         divergences=divergences,
         num_steps_mean=float(np.asarray(extra["num_steps"]).mean()),
+        r_hat_max_native=groups["native"][0],
+        n_eff_min_native=groups["native"][1],
+        r_hat_max_ell=groups["ell"][0],
+        n_eff_min_ell=groups["ell"][1],
+        r_hat_max_global=groups["global"][0],
+        n_eff_min_global=groups["global"][1],
         wall_s=wall_s,
         passed=not failures,
         reason="; ".join(failures),
@@ -1075,8 +1168,11 @@ def fit_map(
     a cell's at S = 1. `map_result` records the optimizer's outcome -- final and initial objective,
     iterations, convergence flag -- which is the only trace of this fit's quality there is: a MAP
     fit has no `attempts`, and it is left empty rather than filled with a fabricated diagnostic.
-    A fit whose L-BFGS-B did not converge comes back with `status="excluded"` and the optimizer's
-    message as `status_reason` (R30), exactly as a NUTS fit that failed its diagnostics does.
+    A fit L-BFGS-B *abandoned* -- an abnormal line-search termination -- comes back with
+    `status="excluded"` and the optimizer's message as `status_reason` (R30, amended by R41),
+    exactly as a NUTS fit that failed its diagnostics does. Hitting `maxiter` is not that: it
+    leaves the last iterate, which is a descent step from the prior mode and a usable surrogate,
+    so it stays "ok" and says so in `status_reason` rather than throwing the iteration away.
     """
     X = jnp.asarray(X, dtype=jnp.float64)
     y = jnp.asarray(y, dtype=jnp.float64)
@@ -1099,6 +1195,20 @@ def fit_map(
     ell = _ELL_FLOOR + jnp.exp(u[:D_eff])
     noise = _NOISE_FLOOR + jnp.exp(u[D_eff])
 
+    # R41: `success=False` covers two outcomes the study must not conflate. An abnormal line
+    # search means L-BFGS-B could not take the step and the iterate is wherever it gave up, which
+    # is the excluded case R30 introduced; the iteration limit means it was still descending, and
+    # its last iterate is the MAP estimate to the accuracy `maxiter` bought. Matching on the
+    # message is what scipy offers -- `status` is 2 for both -- and "ABNORMAL" is the word its
+    # (Fortran) line-search messages carry.
+    message = str(result.message)
+    if "ABNORMAL" in message.upper():
+        status, status_reason = "excluded", f"L-BFGS-B: {message}"
+    elif not result.success:
+        status, status_reason = "ok", "L-BFGS-B: iteration limit; last iterate used"
+    else:
+        status, status_reason = "ok", ""
+
     fitted = FittedGP(
         cell="oracle_S" if active is not None else "dsp_map",
         X_train=X,
@@ -1110,10 +1220,8 @@ def fit_map(
         },
         fixed_noise=None,
         active=active,
-        # R30: a MAP fit L-BFGS-B could not converge is reported the way a failed NUTS fit is, so
-        # that the loop's log counts it as excluded rather than averaging a bad surrogate in.
-        status="ok" if result.success else "excluded",
-        status_reason="" if result.success else f"L-BFGS-B: {result.message}",
+        status=status,
+        status_reason=status_reason,
         attempts=(),
     )
     fitted.map_result = {
@@ -1434,10 +1542,13 @@ def manipulation_checks(readout: dict[str, object], labels: object) -> dict[str,
     The targets are `labels.s`, the first-order variance share `sobol_hat` estimates; `labels.g`,
     the realized slope share, which is what a lengthscale readout can be expected to track; and
     `sobol_hat` itself, against which `native_median` measures how much the cell's own
-    parameterization already tells you. `amplitude_vs_realized` pairs, on the active coordinates
-    only, the sample median of the readout that states a *variance* -- `share_hat` where the cell
-    has one, `native_median` otherwise -- with `labels.s`, so a calibration plot of stated against
-    realized share needs no further arithmetic. That median is over the usable draws only: a draw
+    parameterization already tells you. Both readouts are scored against both labels, `sobol_hat`
+    against `labels.g` included: it is the parameterization-neutral readout, so without that pair
+    "the native readout tracks g" could not be told from "every readout of this fit does".
+    `amplitude_vs_realized` pairs, on the active coordinates only, the sample median of the
+    readout that states a *variance* -- `share_hat` where the cell has one, `native_median`
+    otherwise -- with `labels.s`, so a calibration plot of stated against realized share needs no
+    further arithmetic. That median is over the usable draws only: a draw
     whose noise left no signal reads NaN (`shares_from_amplitudes`) and must not drag the median.
     """
     native_median = np.asarray(readout["native_median"])
@@ -1450,6 +1561,7 @@ def manipulation_checks(readout: dict[str, object], labels: object) -> dict[str,
         "spearman_native_vs_s": float(spearmanr(native_median, labels.s)[0]),
         "spearman_native_vs_g": float(spearmanr(native_median, labels.g)[0]),
         "spearman_sobol_vs_s": float(spearmanr(sobol_hat, labels.s)[0]),
+        "spearman_sobol_vs_g": float(spearmanr(sobol_hat, labels.g)[0]),
         "spearman_native_vs_sobol": float(spearmanr(native_median, sobol_hat)[0]),
         "amplitude_vs_realized": np.column_stack([stated[active], labels.s[active]]),
     }
