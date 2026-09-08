@@ -61,6 +61,10 @@ def test_batched_input_shape_and_values_match_numpy(obj) -> None:
     on the same flattened points independently of the adapter's own reshape logic, so a mutant that
     flattened rather than restored the batch shape, or that reordered points, would not coincide
     with this by chance.
+
+    Exact equality, not a tolerance: the adapter converts to numpy, calls the same evaluator and
+    converts back, so no arithmetic of its own can perturb a value. A3 claims the two agree "bit
+    for bit" and this is the assertion behind that claim (final-review Minor 3).
     """
     rng = np.random.default_rng(0)
     X_np = rng.uniform(size=(3, 4, D))
@@ -71,7 +75,7 @@ def test_batched_input_shape_and_values_match_numpy(obj) -> None:
     assert out.shape == (3, 4)
     assert out.dtype == torch.float64
     expected = obj(X_np.reshape(-1, D)).reshape(3, 4)
-    np.testing.assert_allclose(out.detach().numpy(), expected, atol=1e-12, rtol=0)
+    np.testing.assert_array_equal(out.detach().numpy(), expected)
 
 
 def test_bounds_is_zero_one_tensor(obj) -> None:

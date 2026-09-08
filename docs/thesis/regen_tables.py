@@ -16,8 +16,8 @@ in-process with `synthobj.make_family`/`synthobj.families.build`.
 Structure: one function per table (`TABLE_REGISTRY` below lists them in the brief's order), each
 with signature `fn(outdir: Path, stats: dict) -> None`. A function writes its own file under
 `outdir` and may stash a number into the shared `stats` dict for a later table (`numbers.tex`) to
-read -- `tab_grid_summary` and `tab_quadrature_gap` do this for the two worst-case figures
-`numbers.tex` quotes. `get_grid100()` builds the 14 x 10 = 140 objective D=100 study grid once
+read -- `tab_grid_summary` does this for the two worst-case figures `numbers.tex` quotes.
+`get_grid100()` builds the 14 x 10 = 140 objective D=100 study grid once
 (memoized at module scope) and every table that needs it shares that one build.
 """
 from __future__ import annotations
@@ -264,7 +264,7 @@ def tab_families(outdir: Path, stats: dict) -> None:
     `shares` and `$\\ell$` are `p{}` columns, not `l`: `decoupled` and `anti_aligned` print
     eight- and six-entry tuples there, and as unbreakable `l` columns those two rows alone kept
     this half 140pt wider than the text block even after the split. Wrapped at the spaces the
-    tuples already contain, the table fits at \\footnotesize.
+    tuples already contain, the table fits at \\small, which is where A2 places it.
     """
     lines = [
         r"\begin{tabular}{llrp{2.9cm}p{2.9cm}}",
@@ -593,7 +593,6 @@ def tab_quadrature_gap(outdir: Path, stats: dict) -> None:
         row([r"$\ell$", r"$\max|\Enu f_i|$", r"$\max|\Varnu f_i - s|$"]),
         r"\midrule",
     ]
-    worst_gap = 0.0
     for ell in ells:
         F = kernel.eigen_factor(0.0, 1.0, _QUAD_GAP_GRID_N, ell)
         max_mean_gap = 0.0
@@ -607,7 +606,6 @@ def tab_quadrature_gap(outdir: Path, stats: dict) -> None:
             mid_var = float((values**2).mean() - mid_mean**2)
             max_mean_gap = max(max_mean_gap, abs(mid_mean))
             max_var_gap = max(max_var_gap, abs(mid_var - _QUAD_GAP_SHARE))
-        worst_gap = max(worst_gap, max_mean_gap, max_var_gap)
         lines.append(row([f"{ell:.2f}", f"{max_mean_gap:.2e}", f"{max_var_gap:.2e}"]))
     lines += [r"\bottomrule", r"\end{tabular}"]
     write_generated(
@@ -617,7 +615,6 @@ def tab_quadrature_gap(outdir: Path, stats: dict) -> None:
          "nu-moments by a 10^6-point midpoint rule"],
         lines,
     )
-    stats["worst_quad_gap"] = worst_gap
 
 
 # =================================================================================================
@@ -1025,7 +1022,7 @@ def collect_test_count() -> int:
 
 
 def numbers_tex(outdir: Path, stats: dict) -> None:
-    grid100 = get_grid100()  # already built by now; just ensures the cache-key count below is final
+    grid100 = get_grid100()  # already built by now; StudyD is read off one of its objectives
 
     unit_obj = make_family("aligned3", seed=0, D=TABLE_D)
     knots_unit = unit_obj.components[0].grid.size
@@ -1047,10 +1044,8 @@ def numbers_tex(outdir: Path, stats: dict) -> None:
         macro("ActiveEps", f"{ACTIVE_EPS:.2f}"),
         macro("Variants", str(len(STUDY_GRID))),
         macro("Files", str(len(STUDY_GRID) * 10)),
-        macro("CacheKeys", str(len(kernel._eigen_cache))),
         macro("WorstVar", f"{stats['worst_var_dev']:.2e}"),
         macro("WorstMean", f"{stats['worst_mean']:.2e}"),
-        macro("WorstQuadGap", f"{stats['worst_quad_gap']:.2e}"),
         macro("TestCount", str(collect_test_count())),
     ]
     write_generated(outdir / "numbers.tex", [], lines)

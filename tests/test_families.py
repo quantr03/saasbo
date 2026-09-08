@@ -13,7 +13,7 @@ brief warns about).
 *Statistical design* tests cover the two families whose defining property only shows up in
 aggregate over draws: `decoupled`'s cell ordering (10/10 seeds, wide margin) and `anti_aligned`'s
 reversed variance ranking (ruling R13 replaces the plan's flaky per-seed Spearman test with a
-deterministic design check plus a pooled, rank-aligned realized check). Both are `slow` per the
+deterministic design check plus a seed-averaged, rank-aligned realized check). Both are `slow` per the
 brief's instruction, even though neither takes anywhere near the pytest.ini 10 s threshold on this
 machine -- the brief asks for the marker regardless of measured cost.
 
