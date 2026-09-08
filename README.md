@@ -147,7 +147,7 @@ Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 |---|---|
 | `iterations.csv` | one row per iteration: `y`, `f`, `best_obs`, `best_f`, `regret`, the acquisition value, wall times, `status`, the fit's diagnostics, `y_mean`/`y_std`, and the query point |
 | `coords.csv` | long format, `t, i, native_median, p_active, sobol_hat` -- the per-coordinate readouts (absent for `sobol` runs, which fit no model) |
-| `samples/t{t:03d}.npz` | that iteration's retained posterior draws (16 for a cell, 1 for a MAP reference), plus its `status` and `nuts_attempts` |
+| `samples/t{t:03d}.npz` | that iteration's retained posterior draws (16 for a cell, 1 for a MAP reference), plus its `status` and `nuts_attempts`, and the attempt-0 diagnostics as `a0_<field>` scalars |
 | `manifest.json` | the resolved `RunConfig` and its hash, the git commit, package versions, thread environment, the vendored files' SHA-256, the objective's labels, and a `resumed` entry per resume |
 | `environment.lock.txt` | every installed distribution as `name==version` |
 | `checkpoint.npz`, `log.txt` | the resume point, and the run's narrative (timings, statuses, tracebacks) |
@@ -226,13 +226,15 @@ refits and the acquisition), measured 2026-09-07 on an M3 laptop:
 | `product/amplitude` | 135 ms | 69-109 min | 71-113 wall-clock hours |
 | `additive/lengthscale` | 173 ms | 89-139 min | 92-144 wall-clock hours |
 
-**These are multi-threaded wall times, not core-hours.** They were measured with XLA left
-unpinned -- its default CPU thread pool, on a laptop with 5-8 of 8 cores already busy -- so each
-entry is one fit's elapsed time on an unknown and varying number of cores rather than the
-core-hours a SLURM allocation is billed in, and no fixed factor converts the one to the other
-(the load was neither measured per entry nor held constant). The single-thread re-measurement
-(`OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"`,
-the array script's own setting) is what converts the table, and it goes into the pilot file below.
+**The single-thread re-measurement agrees within 20% (see
+`docs/superpowers/plans/2026-09-07-sagp-pilot-singlethread.md`), so the table above is in
+core-time.** The pilot's cost stage gives, per `T = 200` run: product/lengthscale 5.2,
+additive/amplitude 12.2, additive/lengthscale 205 and product/amplitude 140 core-hours (the
+last three are lower bounds). The measured additive/amplitude fit at n = 100 took 20.7 min
+against the formula's 3.3 min. Realistic additive/amplitude cost is therefore 60-75 core-hours
+per run, and the unfused cells several hundred. Refit rates
+(`docs/superpowers/plans/2026-09-07-sagp-pilot.md`): the reference cell 0.30 at n = 100,
+additive/amplitude 0.00 at n = 50.
 
 The reference cell is affordable and the three centered cells are 15-55x more expensive per
 gradient: each evaluates one exponential per (pair, coordinate) rather than one per pair, and two
