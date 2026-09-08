@@ -110,8 +110,10 @@ def rotated_block_stats(f_a: Component, f_b: Component, rot: PairRotation) -> tu
     Returns `(Var phi, Var_{x_a} E_{x_b} phi, Var_{x_b} E_{x_a} phi)`: the block's total variance and
     its two axis-aligned first-order Sobol variances. `phi` is additive in `(z_a, z_b)` but the
     rotation mixes `(x_a, x_b)`, so in general `Var phi >= Var_{x_a}E_{x_b}phi + Var_{x_b}E_{x_a}phi`
-    (the ANOVA remainder is a variance and cannot be negative), with equality only when
-    `rot.theta_deg` is a multiple of 90 degrees -- and even then the two first-order terms reduce to
+    (the ANOVA remainder is a variance and cannot be negative), with equality at every multiple of
+    90 degrees, and away from those angles only in the degenerate case of two quadratics of equal
+    curvature (`d_a d_b phi = cos(theta) sin(theta) (f_b'' - f_a'')`), which a Matern-5/2 draw is
+    not, almost surely -- and even at a multiple of 90 the two first-order terms reduce to
     `f_a.nu_var()` and `f_b.nu_var()` **in order** only at an even multiple (0, 180, ...); at an odd
     multiple (90, 270, ...) the rotation exchanges the two coordinates (`z_a` depends only on `x_b`,
     `z_b` only on `x_a`), so the pair comes out swapped: `Var_{x_a}E_{x_b}phi = f_b.nu_var()` and
