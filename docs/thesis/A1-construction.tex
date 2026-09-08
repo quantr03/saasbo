@@ -364,7 +364,7 @@ there \emph{is} a gap: the Gauss-Legendre error committed on a piecewise
 cubic, which is governed by roughness, since $64$ nodes on the unit interval
 is only a few nodes per lengthscale for the study's roughest components.
 Table~\ref{app:so:a1:tab:tab_quadrature_gap} measures it. Stated plainly: the
-ground truth $\Varnu f=1$ is exact under $\nuhat$, and under $\refnu$ it holds
+ground truth is $\Varhat f=1$, an identity of $\nuhat$; under $\refnu$ it holds
 to the order the table's roughest rows report for the two families that
 contain rough components (\SOcode{anti\_aligned} and \SOcode{decoupled}), and
 to a far smaller order everywhere else. That is well below any effect this
@@ -405,9 +405,10 @@ $\Ex{}\hat V=\Ehat\kbar(x,x)-\sum_{q,q'}w_q w_{q'}\kbar(t_q,t_{q'})=1-0=1$,
 the first
 term by~\eqref{app:so:a1:eq:vell} and the second because $\ktil$ is doubly
 centered at exactly the nodes the double sum runs over. So the raw-draw column
-of Table~\ref{app:so:a1:tab:tab_slope_ratio} sits
-on~\eqref{app:so:a1:eq:slopefactor}, and the rescaled column exceeds it by a
-lengthscale-dependent factor.
+of Table~\ref{app:so:a1:tab:tab_slope_ratio} sits within about one standard
+error of~\eqref{app:so:a1:eq:slopefactor} at every lengthscale, on the low side
+of it throughout, while the rescaled column
+exceeds~\eqref{app:so:a1:eq:slopefactor} by a lengthscale-dependent factor.
 
 \begin{table}[htbp]
   \centering
@@ -612,8 +613,10 @@ since $\kappa>0$ and the map is affine increasing. And the maximum transforms
 as $\fstar=\kappa(\Sigma_{\max}-\mu)$.
 Table~\ref{app:so:a1:tab:tab_rotation_angle} shows how far $\mu$ moves and how
 far $\kappa$ departs from one; the \emph{sign} of $\kappa-1$ is seed-dependent
---- rotation can move variance either way across the boundary of $[0,1]$ ---
-as the count column records.
+at $15^\circ$ and at $60^\circ$, where the table's count of seeds with
+$\kappa>1$ is nonzero --- rotation can move variance either way across the
+boundary of $[0,1]$ --- and not at $30^\circ$ or $45^\circ$, where every seed
+has $\kappa<1$.
 
 \textbf{(iii) The first-order shares, derived.} Every expectation and variance
 in this part is under $\nuhat\otimes\nuhat$, the product rule

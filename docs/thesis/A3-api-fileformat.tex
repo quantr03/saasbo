@@ -45,7 +45,7 @@ explicit tuple, which would otherwise zip the first \SOcode{n\_active} shares
 against the first \SOcode{n\_active} lengthscales and build a real objective
 silently --- and a \SOcode{shares} tuple whose entries plus $\gamma$ do not sum
 to one raises \SOcode{ValueError} too. Together they are what makes
-$\Varnu f=1$ a property of every object this registry can produce, not merely
+$\Varhat f=1$ a property of every object this registry can produce, not merely
 of the fourteen it is asked for.
 
 \textbf{\SOcode{FamilySpec}.} The frozen, hashable description of one variant's
@@ -95,7 +95,7 @@ observation stream by re-seeding (\ref{app:so:a3:seeding}). Its return shape is
 \SOcode{f\_star}, \SOcode{labels}, \SOcode{scale}, \SOcode{mu} and
 \SOcode{noise\_sd}. \SOcode{component\_variances} returns one entry per block,
 main effects in rank order followed by the interactions; each is that block's
-own $\Varnu$ by the 64-node quadrature, so it is a \emph{measurement} that
+own $\Varhat$ by the 64-node quadrature, so it is a \emph{measurement} that
 equals the prescribed \SOcode{Labels.s} and \SOcode{Labels.s\_pairs} to
 roundoff exactly when the block was built to the share it claims. Ruling R31:
 those values are \textbf{pre-rotation and pre-scale}. Under a rotation each
@@ -131,9 +131,10 @@ Five points of its semantics regularly trip readers. First, $S$ is
 coordinates, not the rank order the
 components were built in --- a distinction with real consequences for the file
 format of~\ref{app:so:a3:files}. Second, \SOcode{active} is \emph{membership},
-$s_i>0$, not a comparison against \SOcode{active\_eps}. Ruling R8 keeps
-$\activeeps=\SOnumActiveEps$ on the record only so that downstream scoring reads
-one number instead of re-deriving it; the design brief's ``active iff share
+$s_i>0$, not a comparison against \SOcode{active\_eps}. Ruling~R29
+(\ref{app:so:a4:r29}) keeps $\activeeps=\SOnumActiveEps$ on the record only so
+that downstream scoring reads one number instead of re-deriving it; the design
+brief's ``active iff share
 $>\activeeps$'' is that scoring rule, while \SOcode{active} is the ground truth
 about which coordinates $f$ actually varies in, and only \SOcode{dense\_weak}
 makes the two disagree, as~\ref{app:so:a2:dense-weak} explains. Third,
@@ -179,13 +180,13 @@ Because \SOcode{from\_raw} solved the centre-and-rescale at exactly the 64
 Gauss-Legendre nodes that are then knots of the spline, \SOcode{nu\_var}
 returns \SOcode{share} to floating-point roundoff rather than to interpolation
 error, and \SOcode{nu\_mean} returns zero the same way; \SOcode{slope\_energy}
-is the realized $\Enu[{(f_i')}^2]$ behind \SOcode{Labels.g}. \SOcode{argmax}
+is the realized $\Ehat[{(f_i')}^2]$ behind \SOcode{Labels.g}. \SOcode{argmax}
 is closed form (\ref{app:so:a1:fstar}) and raises \SOcode{ValueError} on bounds
 outside the knot range or in the wrong order --- without that guard the spline's
 NaN outside its knots would win the comparison and a silently wrong maximum
 would be returned. An \SOcode{Interaction} is $c\,u_i(x_i)u_j(x_j)$ on a
 coordinate pair, its two factors being \SOcode{Component}s built with
-$\text{\SOcode{share}}=1$, so $c=\sqrt{s_{ij}}$ makes $\Varnu h_{ij}$ exactly
+$\text{\SOcode{share}}=1$, so $c=\sqrt{s_{ij}}$ makes $\Varhat h_{ij}$ exactly
 the prescribed pair share and the orthogonality identities
 of~\ref{app:so:a1:interaction} hold to machine precision. A
 \SOcode{PairRotation} carries \SOcode{theta\_deg} and a tuple of disjoint
@@ -312,8 +313,11 @@ repetitions.
   is allowed to move and what is bit-identical. ``Bit-identical'' is meant
   literally --- these are equalities of stored floating-point arrays, not
   tolerances --- with the exception noted in the \SOcode{n\_active} and
-  $\gamma$ rows, where the \emph{raw} draw is what is bit-identical and the
-  stored values differ from it by the new share's rescale alone. The Code / Test
+  $\gamma$ rows, where it is the \emph{main effects'} raw draw that is
+  bit-identical and their stored values differ from it by the new share's
+  rescale alone. The $\gamma$ row's interaction factors carry no such exception:
+  they are drawn at $\text{\SOcode{share}}=1$, so $\gamma$ moves $c$ alone and
+  their stored values are bit-identical outright. The Code / Test
   paragraph below names the test behind each row, with two caveats a reader
   should not have to discover: the first row is pinned only for the
   coordinates, its test comparing coordinate sets and never draws, and the fifth
@@ -356,7 +360,8 @@ the $\gamma$ sweep's invariance is
 \SOtest{test\_gamma\_sweep\_keeps\_S\_pairs\_and\_component\_shapes\_identical},
 which compares each component's values divided by the square root of its own
 share rather than trusting the implementation to report that the shape did not
-move; the $\theta$ sweep's is
+move, and asserts that the interaction factors' stored values are equal
+exactly, not merely closely, across the sweep; the $\theta$ sweep's is
 \SOtest{test\_rotated\_variants\_share\_S\_and\_pairs\_across\_theta}. That the
 seed controls everything is
 \SOtest{test\_different\_seeds\_give\_different\_S} and

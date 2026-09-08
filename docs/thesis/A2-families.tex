@@ -23,8 +23,13 @@ different lengths at one seed \emph{nests}: \SOcode{aligned3}'s coordinates are
 the first three of \SOcode{aligned10}'s at the same seed. Pairs are drawn the
 same way one level down, by \SOcode{select\_pairs}, which cuts disjoint pairs of
 \emph{ranks} from a permutation of the active ranks and leaves the caller to map
-them through $S$; they are drawn identically whether they go on to become
-interactions or rotations. The full seeding scheme is
+them through $S$; at a fixed
+$(D, \text{seed}, \SOcode{n\_active}, \SOcode{n\_pairs})$ they are drawn
+identically whether they go on to become interactions or rotations. The
+qualifier is the whole of the claim: the $\gamma$ sweep and the $\theta$ sweep
+carry different \SOcode{n\_active} and \SOcode{n\_pairs}, so each holds its own
+pairs fixed across its own members without sharing any pair with the other
+sweep. The full seeding scheme, and what this does \emph{not} say, are
 in~\ref{app:so:a3:seeding}.
 
 Two places in the thesis's design brief have been overtaken by the
@@ -58,8 +63,11 @@ design brief's own terms; and what the archived grid measured on it.
   from the same rows. Generated from
   \SOcode{FAMILIES} and \SOcode{STUDY\_GRID} by \SOfile{regen\_tables.py}, so
   no parameter printed here can drift from the specification the study built.
-  Exact: every column is a field of the \SOcode{FamilySpec} the registry
-  returns; no draw enters. Protocol, from the file's own header comment:
+  Exact: the variant and family names are \SOcode{STUDY\_GRID}'s own; $|S|$ and
+  the equal-split share are read off the built objective's \SOcode{Labels.S} and
+  \SOcode{Labels.s}, and $\knots$ off its first component's grid; every
+  remaining column is a field of the \SOcode{FamilySpec} the registry returns.
+  No draw enters any of them. Protocol, from the file's own header comment:
   built at $D=\SOnumTableD$ per variant, ``family shape is $D$-invariant;
   \SOcode{dense\_weak}'s $|S|$ equals $D$ here''. Every row but
   \SOcode{dense\_weak}'s is therefore the study's configuration verbatim at its
@@ -206,7 +214,7 @@ holds exactly for it too, by~\eqref{app:so:a1:eq:exactshare}.
 strength-by-roughness grid: two variance shares crossed with two lengthscales,
 the four cells Table~\ref{app:so:a2:tab:decoupled} names weak-rough,
 weak-smooth, strong-rough and strong-smooth. The four strong and the four weak
-shares together sum to one, so $\Varnu f=1$ with no interaction budget to
+shares together sum to one, so $\Varhat f=1$ with no interaction budget to
 subtract; there are no pairs, $\gamma=0$, the generator is Mat\'ern, there is no
 monotone rejection, and the grid is the unit-interval one.
 Table~\ref{app:so:a2:tab:families} gives the shares and lengthscales per rank
@@ -385,7 +393,7 @@ monotone, unit grid --- with the interaction budget $\gamma$ raised to the
 value Table~\ref{app:so:a2:tab:families-flags} prints, split equally between the two
 pairs as $s_{ij}=\gamma/n_{\text{pairs}}$ with $c_{ij}=\sqrt{s_{ij}}$
 (\eqref{app:so:a1:eq:hshare}). The main shares fall to $(1-\gamma)/|S|$ so that
-$\sum_i s_i+\gamma=1$ and $\Varnu f$ is still one
+$\sum_i s_i+\gamma=1$ and $\Varhat f$ is still one
 (\eqref{app:so:a1:eq:budget}). At a given seed the active set, the two pairs
 and every raw draw are the same as in every other member of the sweep; only the
 shares and the pair coefficients move.

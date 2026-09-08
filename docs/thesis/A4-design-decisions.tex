@@ -454,7 +454,7 @@ which asserts both halves at once: the share is under the cutoff and
 \textbf{Decision.} \SOcode{SyntheticObjective.component\_variances} returns
 each component's, and each interaction's, pre-rotation variance under $\nuhat$,
 excluding \SOcode{scale}. Under a rotation those numbers therefore neither sum
-to the realized $\Varnu f$
+to the realized $\Varhat f$
 --- which $\kappa$ forces to one --- nor give per-coordinate axis variances.
 The ruling fixed the docstring and added a test; it did not change the return
 value.
@@ -463,7 +463,7 @@ value.
 \SOcode{Labels.s} and \SOcode{Labels.s\_pairs}, measured rather than
 prescribed, so it diverges from them precisely when one of them was not built
 to the share it claims --- which is what a diagnostic is for. What was false was
-the promise that it reports realized per-block variances summing to $\Varnu f$;
+the promise that it reports realized per-block variances summing to $\Varhat f$;
 that holds without a rotation and only by coincidence with one. The rejected
 alternative was to make it rotation-aware, and it was rejected on contract
 grounds rather than on difficulty: the realized axis-aligned quantity is per

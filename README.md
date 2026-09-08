@@ -87,7 +87,8 @@ plus a `manifest.json` describing the resulting directory (paths, SHA-256 hashes
 `gamma`, and the active-coordinate count for every entry). That description is of the
 **directory**, not of this run: its top-level `Ds`/`seeds` are unions over whatever is present,
 its hashes are per-platform, and a non-zero exit means an objective-shaped file went
-undescribed. `SyntheticObjective.save`/`.load` round-trip an objective without ever re-drawing,
+undescribed (exit 1) or the arguments were rejected (exit 2).
+`SyntheticObjective.save`/`.load` round-trip an objective without ever re-drawing,
 and the same seed always produces bit-identical files **on the same platform**: the zip header
 records the OS and text-mode newline translation changes the JSON's hash across platforms (the
 reason the manifest carries in its own `hash_note`), and the draws themselves depend on the BLAS
