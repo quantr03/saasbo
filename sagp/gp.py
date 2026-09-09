@@ -1,22 +1,11 @@
 """sagp.gp: the four surrogate cells -- kernels, models, NUTS inference and prediction.
 
-The thesis compares four Gaussian-process cells ({additive, product} kernel structure x
-{amplitude, lengthscale} sparsity prior) that must differ in *nothing* but the kernel/prior
-block, so any difference in regret or identification is attributable to the parameterization.
-The only way to guarantee "everything else is identical" is to make everything else literally
-the vendored SAASBO reference's code path (`saasgp.py`, `saasbo.py`, `util.py`), imported rather
-than copied wherever it is unchanged -- hence one module holding all four cells side by side.
-
-This first section holds the kernels. All four have the reference's signature
-`(X, Z, params, noise, include_noise)` and return an (n, m) covariance matrix, so prediction can
-reach any cell through `KERNELS` without knowing how that cell is parameterized. Three of them
-are built from a Matern-5/2 component per coordinate, centered under the uniform reference
-measure U[0,1] at a 64-node Gauss-Legendre grid (Lu et al. 2022, eq. 8) -- the same 64-node rule
-`synthobj.kernel` uses, pinned equal by test rather than imported, so the objectives and the
-surrogate cannot drift apart. The fourth cell *is* the reference's `saasgp.matern_kernel`.
-
-`sagp/__init__.py` is this module's package and therefore runs before its body, so float64 and
-the cpu platform are already in force when the arrays below are created.
+The thesis compares four Gaussian-process cells ({additive, product} kernel structure x {amplitude,
+lengthscale} sparsity prior) that must differ in *nothing* but the kernel/prior block, so
+everything else is literally the vendored SAASBO reference's code path (`saasgp.py`, `saasbo.py`,
+`util.py`), imported rather than copied wherever unchanged. All four kernels take `(X, Z, params,
+noise, include_noise)` and return an (n, m) matrix, so prediction reaches any cell through
+`KERNELS`.
 """
 from __future__ import annotations
 
@@ -47,9 +36,8 @@ CellKey = tuple[str, str]
 
 # --- kernels ---
 
-# 64-node Gauss-Legendre quadrature on [0,1], realizing the uniform reference measure U[0,1];
-# defined here rather than imported from `synthobj.kernel`, so `sagp.gp` never imports the
-# objectives -- `test_gp_constants_are_bit_identical_to_synthobjs` pins the two grids equal.
+# 64-node Gauss-Legendre quadrature on [0,1], the reference measure U[0,1]. Defined here so
+# `sagp.gp` never imports the objectives; a test pins it equal to `synthobj.kernel`'s.
 _NODES, _WEIGHTS = leggauss(64)
 GL_NODES, GL_WEIGHTS = jnp.asarray(0.5 * (_NODES + 1)), jnp.asarray(0.5 * _WEIGHTS)
 
@@ -59,9 +47,7 @@ _ROOT_FIVE = math.sqrt(5.0)
 def matern52_1d(r: ArrayLike) -> Array:
     """Unit-variance Matern-5/2 covariance at scaled distance r >= 0: (1 + s + s^2/3) e^-s, s = sqrt(5) r.
 
-    Elementwise, any shape. Written in r rather than r^2 on purpose: the equivalent r^2 form
-    needs a sqrt, whose derivative at zero distance is infinite, and that produces NaN gradients
-    at repeated inputs -- of which every k(X, X) has a whole diagonal.
+    Elementwise. In r rather than r^2, whose sqrt has an infinite derivative at zero distance.
     """
     s = _ROOT_FIVE * jnp.asarray(r)
     return (1.0 + s + s * s / 3.0) * jnp.exp(-s)
@@ -70,9 +56,7 @@ def matern52_1d(r: ArrayLike) -> Array:
 def v_of_ell(ell: ArrayLike) -> Array:
     """Average marginal variance of the centered unit-amplitude component under U[0,1].
 
-    v(ell) = 1 - c(ell) with c(ell) = sum_{q,q'} w_q w_q' k(|t_q - t_q'| / ell), the double
-    quadrature mean of the raw kernel. Reproduces `synthobj.kernel.v`. `ell` may be a scalar or
-    a (D,) vector of per-coordinate lengthscales; the result has the same shape.
+    v(ell) = 1 - sum_{q,q'} w_q w_q' k(|t_q - t_q'| / ell), reproducing `synthobj.kernel.v`.
     """
     ell = jnp.asarray(ell)
     r = jnp.abs(GL_NODES[:, None, None] - GL_NODES[:, None]) / jnp.atleast_1d(ell)  # (Q, Q, D)
@@ -90,15 +74,10 @@ def _quad_mean(X: Array, ell_vec: Array) -> Array:
 def kbar_all(X: Array, Z: Array, ell_vec: Array, normalize: bool) -> Array:
     """Per-coordinate centered Matern-5/2 kernels; X (n, D), Z (m, D), ell_vec (D,) -> (n, m, D).
 
-    Entry [a, b, i] is k~_i(X[a, i], Z[b, i]) = k_i - m_i(X[a, i]) - m_i(Z[b, i]) + c_i, i.e.
-    coordinate i's kernel projected onto the orthogonal complement of the constants under U[0,1]
-    (Lu et al. 2022, eq. 8), divided by v(ell_i) when `normalize`. Kept as one broadcast
-    elementwise expression feeding the caller's reduction, the form `saasgp.matern_kernel`
-    itself uses, so that XLA is free to fuse the (n, m, D) tensor into that reduction rather
-    than the caller having to materialize it -- the acquisition optimizer scores 5000 test
-    points against 200 training points in D = 100, where that tensor would be 800 MB. (Whether
-    XLA takes the opportunity is its own cost model's call: measured on the pinned stack at that
-    size it fuses for `kernel_additive_amplitude` but not for `kernel_product_amplitude`.)
+    Entry [a, b, i] is coordinate i's kernel projected onto the orthogonal complement of the
+    constants under U[0,1] (Lu et al. 2022, eq. 8), divided by v(ell_i) when `normalize`. One
+    broadcast expression feeding the caller's reduction, so XLA may fuse the (n, m, D) tensor --
+    800 MB at 5000 test points, n = 200, D = 100.
     """
     v = v_of_ell(ell_vec)  # (D,)
     k = matern52_1d(jnp.abs(X[:, None, :] - Z) / ell_vec)  # (n, m, D)
@@ -107,10 +86,7 @@ def kbar_all(X: Array, Z: Array, ell_vec: Array, normalize: bool) -> Array:
 
 
 def _kbar_diag(X: Array, ell_vec: Array, normalize: bool) -> Array:
-    """The diagonal of `kbar_all(X, X, ell_vec, normalize)`, in O(n D Q); X (n, D) -> (n, D).
-
-    At zero distance k_i = 1, so k~_i(x_i, x_i) = 1 - 2 m_i(x_i) + c_i.
-    """
+    """The diagonal of `kbar_all(X, X, ell_vec, normalize)`, in O(n D Q); X (n, D) -> (n, D)."""
     v = v_of_ell(ell_vec)
     kbar = 1.0 - 2.0 * _quad_mean(X, ell_vec) + (1.0 - v)
     return kbar / v if normalize else kbar
@@ -119,10 +95,7 @@ def _kbar_diag(X: Array, ell_vec: Array, normalize: bool) -> Array:
 def centered_matern52_1d(x: Array, z: Array, ell: ArrayLike, normalize: bool = False) -> Array:
     """Centered Matern-5/2 kernel of one coordinate; x (n,), z (m,) -> (n, m).
 
-    k~(x, z) = k(|x - z| / ell) - m(x) - m(z) + c, divided by v(ell) = 1 - c when `normalize`.
-    This is the D = 1 case of `kbar_all`, and delegates to it, so the properties the tests
-    assert here (zero quadrature integral, unit quadrature-mean variance after normalization)
-    are properties of the code the cells below actually run.
+    The D = 1 case of `kbar_all`, delegating to it, so what is tested here is what the cells run.
     """
     return kbar_all(x[:, None], z[:, None], jnp.atleast_1d(ell), normalize)[:, :, 0]
 
@@ -133,9 +106,7 @@ def kernel_additive_amplitude(
 ) -> Array:
     """Additive structure, amplitude sparsity: k(x, z) = sum_i a_sq_i kbar_i(x_i, z_i).
 
-    `params`: "a_sq" (D,), "kernel_ell" (D,). Every component is normalized, so
-    E_nu[kbar_i(x, x)] = 1 and a_sq_i is component i's variance under the reference measure
-    whatever its lengthscale -- the property that makes an amplitude threshold well defined.
+    `params`: "a_sq", "kernel_ell" (D,); normalized, so a_sq_i is coordinate i's variance under nu.
     """
     kbar = kbar_all(X, Z, params["kernel_ell"], True)
     k = jnp.sum(params["a_sq"] * kbar, axis=-1)
@@ -150,10 +121,9 @@ def kernel_additive_lengthscale(
 ) -> Array:
     """Additive structure, lengthscale (SAAS) sparsity: k(x, z) = var * sum_i k~_i(x_i, z_i).
 
-    `params`: "kernel_var" scalar, "kernel_inv_length_sq" (D,) = rho_i, the SAAS prior's native
-    scale, with ell_i = rho_i^-0.5. The components are deliberately *not* normalized: sparsity
-    here means rho_i -> 0, i.e. ell_i -> infinity, which is exactly what drives v(ell_i) -- and
-    with it the component -- to zero, so dividing v out would undo the prior's shrinkage.
+    `params`: "kernel_var", "kernel_inv_length_sq" (D,) = rho_i, ell_i = rho_i^-0.5. Deliberately
+    *not* normalized: sparsity is rho_i -> 0, which drives v(ell_i) and the component to zero, so
+    dividing v out would undo the shrinkage.
     """
     ell = params["kernel_inv_length_sq"] ** -0.5
     k = params["kernel_var"] * jnp.sum(kbar_all(X, Z, ell, False), axis=-1)
@@ -168,9 +138,7 @@ def kernel_product_amplitude(
 ) -> Array:
     """Product structure, amplitude sparsity: k(x, z) = prod_i (1 + a_sq_i kbar_i(x_i, z_i)).
 
-    `params`: "a_sq" (D,), "kernel_ell" (D,). Expanding the product gives 1 plus every
-    interaction of the normalized components, so a_sq_i = 0 removes coordinate i from all of
-    them at once.
+    `params`: "a_sq", "kernel_ell" (D,); a_sq_i = 0 removes coordinate i from every interaction.
     """
     kbar = kbar_all(X, Z, params["kernel_ell"], True)
     k = jnp.prod(1.0 + params["a_sq"] * kbar, axis=-1)
@@ -185,8 +153,7 @@ def kernel_product_lengthscale(
 ) -> Array:
     """Product structure, lengthscale (SAAS) sparsity: the reference's ARD Matern-5/2 itself.
 
-    `params`: "kernel_var" scalar, "kernel_inv_length_sq" (D,). This cell is SAASBO, so it is
-    `saasgp.matern_kernel` -- imported, never copied -- and its noise term is that function's.
+    `params`: "kernel_var", "kernel_inv_length_sq" (D,). SAASBO itself: `saasgp.matern_kernel`.
     """
     return saasgp.matern_kernel(
         X, Z, params["kernel_var"], params["kernel_inv_length_sq"], noise, include_noise
@@ -226,50 +193,40 @@ KERNELS: dict[CellKey, tuple[Callable[..., Array], Callable[..., Array]]] = {
 def cell_kernel_diag(key: CellKey, X: Array, params: dict[str, Array]) -> Array:
     """Prior marginal variance diag k(X, X) of cell `key` at X; X (n, D) -> (n,), O(n D Q).
 
-    Neither noise nor jitter: prediction adds `noise + 1e-6` on top, which for
-    ("product", "lengthscale") reproduces the reference's `saasgp.kernel_diag(var, noise)`
-    exactly. Never forms the (n, n) matrix -- the acquisition optimizer asks for this at
-    thousands of test points at a time, and only that one cell has a diagonal constant in x.
+    No noise or jitter -- prediction adds `noise + 1e-6` -- and never forms the (n, n) matrix.
     """
     return KERNELS[key][1](X, params)
 
 
 # --- cells ---
 
-# Prior calibration, plan decisions D2 and D3. `ACTIVE_EPS` -- a coordinate is active when it
-# carries more than 2 % of the variance -- is restated here rather than imported from
-# `synthobj.objective`, so `sagp.gp` never imports the objectives;
-# `test_gp_constants_are_bit_identical_to_synthobjs` pins the two constants equal, so the
-# objectives' labels and the surrogate's prior stay calibrated against one cutoff.
+# A coordinate is active when it carries more than 2 % of the variance. Restated here rather than
+# imported, and pinned equal by test, so labels and prior share one cutoff.
 ACTIVE_EPS: float = 0.02
 
 # The reference SAASGP's own sparsity hyperparameter, on its rho scale.
 ALPHA_LENGTHSCALE: float = 0.1
 
 # v(ELL_EPS) = ACTIVE_EPS: the lengthscale at which a unit-amplitude centered component's variance
-# under U[0,1] falls to the active cutoff, so "share > eps" <=> "ell < ELL_EPS" <=> "rho > RHO_EPS".
-# That equivalence is what makes the two priors' *active counts* comparable below, and it is also
-# the lengthscale cells' native active rule. Solved at import rather than hardcoded so it tracks
-# `v_of_ell` instead of silently disagreeing with it: v is strictly decreasing (v(0.5) = 0.282,
-# v(50) = 5.6e-5), so the bracket contains exactly one root, and brentq costs a few dozen 64x64
-# quadrature sums.
+# under U[0,1] falls to the active cutoff, so "share > eps" <=> "ell < ELL_EPS" <=> "rho > RHO_EPS"
+# -- the equivalence that makes the two priors' active counts comparable, and the lengthscale
+# cells' own active rule. Solved at import so it tracks `v_of_ell`, strictly decreasing
+# (v(0.5) = 0.282, v(50) = 5.6e-5), so the bracket holds one root.
 ELL_EPS: float = float(brentq(lambda ell: float(v_of_ell(ell)) - ACTIVE_EPS, 0.5, 50.0))
 RHO_EPS: float = ELL_EPS**-2.0
 
 # Both priors are the same half-Cauchy scale mixture, theta_i = tausq * lam_i with tausq ~
 # HC(alpha) and lam_i ~ HC(1), whose prior-predictive active count #{i : theta_i > c} depends on
-# (alpha, c) only through c / alpha. Matching the a^2-count at c = ACTIVE_EPS to the reference's
-# rho-count at c = RHO_EPS therefore fixes alpha in closed form -- and matches the whole count
-# distribution, not merely its median (plan D2, checked by `test_alpha_matches_reference_count`).
+# (alpha, c) only through c / alpha. Matching the a^2-count at ACTIVE_EPS to the reference's
+# rho-count at RHO_EPS therefore fixes alpha in closed form, and matches the whole count
+# distribution, not its median (`test_alpha_matches_reference_count`).
 ALPHA_AMPLITUDE: float = ALPHA_LENGTHSCALE * ACTIVE_EPS / RHO_EPS
 
-# LogNormal(mu, sigma) on each coordinate's lengthscale in the amplitude cells, where the
-# amplitude carries the sparsity and ell is left a free shape parameter: median 1 (one wiggle
-# across [0,1]), 95 % interval [0.053, 18.9]. That covers the study families' 0.06-3 without being
-# tuned to them, and puts only 1 % below 0.03, discouraging the ell -> 0 corner where a normalized
-# component degenerates into white noise and competes with `kernel_noise` (plan D3). The
-# lengthscale cells have no ell prior at all: there the half-Cauchy on rho *is* the lengthscale
-# prior, and adding a second one would change the model being compared.
+# LogNormal(mu, sigma) on each coordinate's lengthscale in the amplitude cells, where ell is a
+# free shape parameter: median 1 (one wiggle across [0,1]), 95 % interval [0.053, 18.9], only 1 %
+# below 0.03 -- discouraging the ell -> 0 corner where a normalized component degenerates into
+# white noise and competes with `kernel_noise`. The lengthscale cells have none: there the
+# half-Cauchy on rho *is* the lengthscale prior.
 ELL_PRIOR: tuple[float, float] = (0.0, 1.5)
 
 
@@ -278,17 +235,9 @@ def model_product_lengthscale(
 ) -> None:
     """SAASBO itself: ARD Matern-5/2 under the SAAS prior rho_i = tausq * lam_i, tausq ~ HC(alpha).
 
-    The vendored `SAASGP.model` body verbatim, with `self.alpha` -> `alpha`, `self.learn_noise` ->
-    `fixed_noise is None`, `self.observation_variance` -> `fixed_noise`, and `self.kernel` -> this
-    cell's kernel, which delegates to the very `saasgp.matern_kernel` the reference calls. Copied
-    rather than imported only because the plan needs a module-level model carrying these site
-    names in this order; `test_product_lengthscale_log_joint_matches_reference` pins the copy to
-    the reference class's log joint so the copy cannot drift.
-
-    Sites in order: `kernel_var` ~ LogNormal(0, 10); `kernel_noise` ~ LogNormal(0, 10), present
-    only when the noise is learned (`fixed_noise is None`); `kernel_tausq` ~ HalfCauchy(alpha), the
-    global shrinkage; `_kernel_inv_length_sq` ~ HalfCauchy(1) per coordinate, the local shrinkage;
-    and the deterministic `kernel_inv_length_sq` = tausq * `_kernel_inv_length_sq`.
+    The vendored `SAASGP.model` body verbatim, its `self.*` hyperparameters replaced by the
+    arguments and its sites kept in order; `test_product_lengthscale_log_joint_matches_reference`
+    pins the copy to the reference's log joint.
     """
     N, P = X.shape
 
@@ -315,9 +264,7 @@ def model_additive_lengthscale(
 ) -> None:
     """Additive structure under the SAAS prior: `model_product_lengthscale` with the other kernel.
 
-    Identical to `model_product_lengthscale` site for site and prior for prior -- same names, same
-    order, same distributions -- so that a difference between this cell and SAASBO is attributable
-    to the kernel's structure alone. Sites: see `model_product_lengthscale`.
+    Identical to `model_product_lengthscale` site for site, so only the kernel structure differs.
     """
     N, P = X.shape
 
@@ -343,18 +290,10 @@ def model_additive_amplitude(
 ) -> None:
     """Additive structure with the sparsity moved onto the amplitudes: a_sq_i = tausq * lam_i.
 
-    The same half-Cauchy scale mixture as the lengthscale cells, applied to the components'
-    variances instead of their inverse squared lengthscales -- with `alpha = ALPHA_AMPLITUDE` the
-    two induce the same prior-predictive active count (plan D2). Because every component is
-    normalized, a_sq_i is coordinate i's variance under the reference measure whatever its
-    lengthscale, so shrinking a_sq_i to zero removes the coordinate outright rather than merely
-    flattening it; the lengthscale is then a free shape parameter and gets its own prior (D3).
-
-    Sites in order: `kernel_noise` ~ LogNormal(0, 10) when learned; `kernel_tausq` ~
-    HalfCauchy(alpha); `_a_sq` ~ HalfCauchy(1) per coordinate; the deterministic `a_sq` = tausq *
-    `_a_sq`; and `kernel_ell` ~ LogNormal(*ell_prior) per coordinate. There is no `kernel_var`
-    site: `a_sq` already carries every component's scale, and a global factor on top of it would
-    be unidentifiable against tausq.
+    The lengthscale cells' half-Cauchy scale mixture applied to the components' variances, at
+    `alpha = ALPHA_AMPLITUDE` for the same prior-predictive active count. Components being
+    normalized, shrinking a_sq_i to zero removes the coordinate rather than flattening it, ell gets
+    a prior of its own, and there is no `kernel_var`: it would be unidentifiable against tausq.
     """
     N, P = X.shape
 
@@ -365,8 +304,8 @@ def model_additive_amplitude(
     )
     tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(alpha))
 
-    # As in the reference: the deterministic reparameterization is what gives NUTS a geometry it
-    # can move in, since sampling a_sq directly would have tausq's scale baked into every step.
+    # As in the reference: the deterministic reparameterization gives NUTS a geometry it can move
+    # in, sampling a_sq directly having tausq's scale baked into every step.
     a_sq = numpyro.sample("_a_sq", dist.HalfCauchy(jnp.ones(P)))
     a_sq = numpyro.deterministic("a_sq", tausq * a_sq)
     ell = numpyro.sample("kernel_ell", dist.LogNormal(jnp.full(P, ell_prior[0]), ell_prior[1]))
@@ -380,9 +319,7 @@ def model_product_amplitude(
 ) -> None:
     """Product structure with amplitude sparsity: `model_additive_amplitude` with the other kernel.
 
-    Identical to `model_additive_amplitude` site for site and prior for prior, so that a
-    difference between the two amplitude cells is attributable to the kernel's structure alone.
-    Sites: see `model_additive_amplitude`.
+    Identical to `model_additive_amplitude` site for site, so only the kernel structure differs.
     """
     N, P = X.shape
 
@@ -405,10 +342,7 @@ def model_product_amplitude(
 class Cell:
     """One of the four surrogates: everything inference, prediction and the readouts need of it.
 
-    Bundling the model with its kernel, its sites and its alpha is what lets `fit`, `posterior`
-    and `experiments.identify` be written once against `Cell` and be literally the same code for
-    all four -- the design's central requirement, since any per-cell branch downstream would be a
-    confound.
+    One `Cell` per surrogate lets `fit`, `posterior` and `identify` be written once, branch-free.
     """
 
     structure: str  # "additive" or "product"
@@ -426,8 +360,8 @@ class Cell:
         return (self.structure, self.prior)
 
 
-# The four cells of the 2x2. `sites` includes `kernel_noise` unconditionally; a fit with
-# `fixed_noise` set drops it, because then it is not a site at all.
+# The four cells of the 2x2. `sites` lists `kernel_noise` unconditionally; a fit with
+# `fixed_noise` set drops it, since then it is not a site at all.
 CELLS: dict[CellKey, Cell] = {
     cell.key: cell
     for cell in (
@@ -494,9 +428,7 @@ CELLS: dict[CellKey, Cell] = {
 class NUTSConfig:
     """The reference's sampler settings, shared by every cell so the budget is never a confound.
 
-    `SAASGP`'s own defaults except `max_tree_depth`, which is the 6 the reference's driver passes
-    rather than the class's 7. `num_samples // thinning` = 16 draws are retained for prediction;
-    diagnostics run on all `num_samples` un-thinned draws, as the reference's `summary` call does.
+    `SAASGP`'s defaults but `max_tree_depth` 6, the reference driver's; 16 draws are retained.
     """
 
     num_warmup: int = 512
@@ -508,11 +440,9 @@ class NUTSConfig:
     def __post_init__(self) -> None:
         """Reject a budget whose damage would only show up later, in a fit or in a readout.
 
-        A non-positive count reaches NumPyro as an empty chain and fails somewhere inside it,
-        hours into a run; a `num_samples` that `thinning` does not divide silently retains
-        `ceil(num_samples / thinning)` draws instead of the `num_samples // thinning` every cost
-        estimate and every "16 retained draws" claim is written against. `replace` in `fit`'s
-        refit path changes `num_warmup` alone, so a config that passes here stays valid there.
+        A non-positive count reaches NumPyro as an empty chain and fails hours into a run; a
+        `num_samples` that `thinning` does not divide retains `ceil(num_samples / thinning)` draws,
+        not the 16 assumed elsewhere.
         """
         for name in ("num_warmup", "num_samples", "thinning", "max_tree_depth", "num_chains"):
             value = getattr(self, name)
@@ -525,55 +455,37 @@ class NUTSConfig:
             )
 
 
-# Row-chunking policy for `FittedGP.posterior` (plan rulings R19, R21), identical for every cell.
-# Two of the four kernels materialize an (n_test, n, D) broadcast that XLA declines to fuse --
-# Task 1 measured 420 MB (additive/lengthscale) and 775 MB (product/amplitude) peaks at
-# 5000 x 200 x 100 -- and `cell_kernel_diag` builds an unfused (n_test, Q, D) tensor of its own
-# (461 MB jitted at 5000 x 100) whose size does not fall with n. The threshold is therefore
-# compared against `n_test * (n + Q) * D_used`, the two tensors' shapes added, so that the
-# quadrature axis counts even where n is small: at n = 20, D = 100 and 5000 candidates the
-# kernel's tensor is only 1e7 elements while the quadrature one is 256 MB per sample on its own.
-# Above 2**24 of those elements `posterior` evaluates X_test in row blocks, kernel and diagonal
-# together in the same call; the per-block peak is then `chunk_vmap`'s 8-sample batch times one
-# block's tensors, about 430 MB at n = 200, D = 100. Blocking the test axis can change no
-# modelling quantity -- each test point's mean and variance depend on no other test point -- so
-# the most it can move is the last ulp, and it is deliberately out of reach of the bit-for-bit
-# comparison against the reference (D <= 5, n <= 30), which stays on the single-call path. The
-# two numbers are cell-independent on purpose: a per-cell rule would be a confound.
+# Row-chunking policy for `FittedGP.posterior`, identical for every cell -- a per-cell rule would
+# be a confound. Two kernels materialize an (n_test, n, D) broadcast XLA declines to fuse, and
+# `cell_kernel_diag` an (n_test, Q, D) tensor whose size does not fall with n, so the threshold is
+# compared against `n_test * (n + Q) * D_used`. Above 2**24 such elements `posterior` evaluates
+# X_test in row blocks, kernel and diagonal in the same call; a test point's mean and variance
+# depend on no other test point, so blocking changes no modelling quantity.
 _CHUNK_THRESHOLD: int = 2**24
 _CHUNK_ROWS: int = 256
 
-# The two `FittedGP.cell` strings that are not a `CellKey`: Task 7's MAP references, which carry
-# the lengthscale cells' parameter names on the reference ARD Matern-5/2.
+# The two `FittedGP.cell` strings that are not a `CellKey`: the MAP references, on the reference
+# ARD Matern-5/2 under the lengthscale cells' parameter names.
 _MAP_REFERENCES: frozenset[str] = frozenset({"dsp_map", "oracle_S"})
 
 
 def _chunk_size(S: int) -> int:
     """`util.chunk_vmap`'s batch for S retained samples: the largest divisor of S that is <= 8.
 
-    8 is the reference's own chunk, but `util.get_chunks` builds its ragged final chunk with an
-    `np.arange` in a module that never imports numpy, so any S with `S % chunk_size != 0` and
-    `S > chunk_size` raises `NameError` deep inside a prediction. Taking a *divisor* keeps the
-    reference's batch wherever it already divides (16 -> 8, 8 -> 8, 1 -> 1, the study's own
-    counts) and never hands `get_chunks` a remainder anywhere else (12 -> 6, 22 -> 2, 9 -> 3),
-    without touching the vendored file. Chunking changes no predicted quantity -- the samples are
-    independent of each other -- so a different batch is a different memory peak and nothing more.
+    `util.get_chunks` builds a ragged final chunk with an `np.arange` in a module that never
+    imports numpy, so a remainder raises `NameError` inside a prediction; a divisor of S keeps the
+    reference's 8 where it divides. The samples are independent, so chunking changes nothing
+    predicted.
     """
     return max(c for c in range(1, min(8, S) + 1) if S % c == 0)
 
 
 class FittedGP:
     """One cell's posterior on standardized, negated targets: what `fit` returns and the loop
-    (`sagp.bo`) and the readouts (`sagp.readouts`) consume.
 
-    The training data is kept under the reference's own attribute names (`X_train`, `Y_train`) so
-    that `saasbo.optimize_ei`'s incumbent lookup runs against this object unchanged. `samples`
-    holds the retained constrained draws, one entry per site of `cell.sites` present in the trace
-    (`kernel_noise` is absent when the noise was fixed), each of leading dimension S. `attempts`
-    carries one `Diagnostics` per NUTS attempt, so a run's log can count excluded fits rather
-    than averaging them in silently; its length is the row's `nuts_attempts`. One attribute is not
-    set here: `fit_map` attaches a `map_result` dict to the objects it builds, since a MAP fit's
-    quality lives in the optimizer's outcome and not in `attempts`; read it with `getattr`.
+    The training data keeps the reference's names (`X_train`, `Y_train`) so `saasbo.optimize_ei`'s
+    incumbent lookup runs against this object unchanged. `samples` holds the retained constrained
+    draws, one entry per site of `cell.sites` present in the trace, leading dimension S.
     """
 
     def __init__(
@@ -597,17 +509,15 @@ class FittedGP:
         self.status = status  # "ok", "refit" or "excluded"
         self.status_reason = status_reason
         self.attempts = tuple(attempts)
-        # Cholesky factors of the S training kernel matrices, (S, n, n). Filled on the first
-        # prediction and kept, as the reference keeps its `Ls`: the acquisition optimizer
-        # scores thousands of candidates against one fit and must not refactorize per call.
+        # Cholesky factors of the S training kernel matrices, (S, n, n), filled on the first
+        # prediction and kept as the reference keeps its `Ls`: the acquisition optimizer scores
+        # thousands of candidates per fit and must not refactorize.
         self._Ls: Array | None = None
 
     def _is_map_reference(self) -> bool:
-        """True when `cell` names one of Task 7's MAP references; raises on any other string.
+        """True when `cell` names one of the MAP references; raises on any other string.
 
-        Both `_kernel` and `param_sites` fall back to the lengthscale cells' kernel and parameter
-        names for those two, so without this check a mistyped cell name would be served the
-        product/lengthscale cell silently -- a wrong surrogate reported under the wrong label.
+        Without it an unknown cell name would be served the lengthscale cells' kernel silently.
         """
         if isinstance(self.cell, tuple):
             return False
@@ -619,13 +529,7 @@ class FittedGP:
         return True
 
     def _kernel(self) -> tuple[Callable[..., Array], Callable[..., Array]]:
-        """This cell's (kernel, diagonal) pair out of `KERNELS`.
-
-        Task 7's MAP references (`cell` = "dsp_map" or "oracle_S") are the reference ARD
-        Matern-5/2 carrying the lengthscale cells' parameter names, so they predict through
-        ("product", "lengthscale")'s entry. Prediction then has one code path for all six values
-        of `cell`, and what distinguishes the oracle is `active` alone.
-        """
+        """This cell's (kernel, diagonal) pair out of `KERNELS`."""
         if self._is_map_reference():
             return KERNELS[("product", "lengthscale")]
         return KERNELS[self.cell]
@@ -633,10 +537,7 @@ class FittedGP:
     def param_sites(self) -> tuple[str, ...]:
         """The names of this cell's kernel parameters, in the order prediction passes them around.
 
-        `util.chunk_vmap` indexes a *tuple* of arrays, so the per-sample parameters cannot travel
-        through it as a dict: they go positionally in this order and are rebuilt into the dict the
-        kernels take inside the vmapped function. The MAP references share the lengthscale cells'
-        names for the reason given in `_kernel`.
+        `util.chunk_vmap` indexes a *tuple*, so parameters travel positionally in this order.
         """
         if self._is_map_reference() or self.cell[1] == "lengthscale":
             return ("kernel_var", "kernel_inv_length_sq")
@@ -649,32 +550,23 @@ class FittedGP:
     def noises(self) -> Array:
         """(S,): the observation variance carried by each retained sample.
 
-        `kernel_noise` when it was learned, else `fixed_noise` repeated. The reference splits
-        these two: `compute_choleskys` uses `observation_variance` while `posterior` hard-codes
-        1e-6 in the predictive variance. We use the configured value in both places, which agrees
-        with the reference exactly at 1e-6 -- the only fixed variance this study uses, and the one
-        the bit-for-bit test pins.
+        `kernel_noise` when learned, else `fixed_noise` repeated. The reference splits the two --
+        `compute_choleskys` uses `observation_variance`, `posterior` hard-codes 1e-6 -- and we use
+        the configured value in both, agreeing at the 1e-6 the bit-for-bit test pins.
         """
         if "kernel_noise" in self.samples:
             return self.samples["kernel_noise"]
         return self.fixed_noise * jnp.ones(self.samples[self.param_sites()[0]].shape[0])
 
     def columns(self, X: Array) -> Array:
-        """`X` restricted to `active`, the coordinates Task 7's oracle reference was given.
-
-        `X_train` itself stays full-D -- `saasbo.optimize_ei`'s incumbent lookup and the run log
-        read it, and candidates arrive full-D -- so the restriction happens here, at every kernel
-        and diagonal evaluation, rather than the callers having to track which width they hold.
-        """
+        """`X` restricted to `active`, the coordinates the oracle reference was given."""
         return X if self.active is None else X[:, self.active]
 
     def _compute_choleskys(self, chunk_size: int | None = None) -> None:
         """`SAASGP.compute_choleskys` generalized to the cell; fills the cache `self._Ls`.
 
-        The reference's body with `self.kernel(X, X, var, inv_length_sq, noise, True)` replaced by
-        this cell's kernel over this cell's parameters. `chunk_size` defaults to `_chunk_size(S)`,
-        which keeps `util.get_chunks` off its latent `np` NameError at every S -- 1 for Task 7's
-        MAP references, 16 for a cell, and whatever a non-default `--nuts` retains.
+        `chunk_size` defaults to `_chunk_size(S)`, keeping `util.get_chunks` off its `np`
+        NameError.
         """
         kernel, _ = self._kernel()
         sites = self.param_sites()
@@ -695,16 +587,9 @@ class FittedGP:
     ) -> tuple[Array, Array]:
         """`SAASGP.predict` generalized to the cell: mean and noisy predictive variance at X_test.
 
-        The reference's four lines in the reference's order, for one sample, with its unused
-        `rng_key` dropped. The one generalization is the prior diagonal: `saasgp.kernel_diag(var,
-        noise)` is the scalar `var + noise + 1e-6`, constant in x because the ARD Matern's
-        marginal variance is, whereas the three centered kernels' diagonals vary with x. It
-        becomes `diag_fn(X_test, params) + noise + 1e-6`, `diag_fn` being the cell's own diagonal
-        out of `_kernel`, and for ("product", "lengthscale") that diagonal is `var * ones`;
-        multiplying by one is exact and the sum is associated the same way, so this reproduces
-        the reference's line bit for bit.
-
-        `X_test` arrives full-D: `active` is applied here, to it and to the training inputs alike.
+        The reference's four lines in its order, for one sample, minus its unused `rng_key`. The
+        one generalization is the prior diagonal, `diag_fn(X_test, params) + noise + 1e-6`, which
+        for ("product", "lengthscale") is the reference's scalar exactly.
         """
         kernel, diag_fn = self._kernel()
         X, X_p = self.columns(self.X_train), self.columns(X_test)
@@ -722,12 +607,8 @@ class FittedGP:
         """Per retained sample, the posterior mean and *noisy* predictive variance at X_test.
 
         `(S, n_test)` each -- `SAASGP.posterior`'s shapes and, on ("product", "lengthscale"), its
-        values to the last bit. The Cholesky factors are computed on the first call and cached,
-        as the reference caches its own.
-
-        Above `_CHUNK_THRESHOLD` broadcast elements the test points are evaluated in blocks of
-        `_CHUNK_ROWS` rows and concatenated along the test axis; see that constant for why, and
-        for why doing so cannot change what is predicted.
+        values to the last bit. Above `_CHUNK_THRESHOLD` broadcast elements the test points go in
+        blocks of `_CHUNK_ROWS`.
         """
         X_test = jnp.asarray(X_test)
         if self._Ls is None:
@@ -759,12 +640,7 @@ class FittedGP:
         )
 
     def alphas(self) -> Array:
-        """(S, n): K^-1 y per retained sample -- the weights `_predict`'s mean contracts k_pX with.
-
-        Task 5's readouts need them on their own (a component mean, an exact Sobol index) and must
-        get exactly the vector prediction uses, so they come off the same cached factors rather
-        than from a second solve against a freshly built kernel matrix.
-        """
+        """(S, n): K^-1 y per retained sample, the weights `_predict`'s mean contracts."""
         if self._Ls is None:
             self._compute_choleskys()
         return vmap(lambda L: cho_solve((L, True), self.Y_train))(self._Ls)
@@ -779,16 +655,10 @@ def _run_nuts(
 ) -> tuple[dict[str, Array], dict[str, Array], float]:
     """`SAASGP.run_inference` copied, with a caller-supplied key, the extra fields and no printing.
 
-    The sampler call is the reference's line for line -- same kernel, same budget, same
-    non-progress-bar path -- which is what lets a ("product", "lengthscale") fit driven by the key
-    `SAASGP.fit` derives reproduce the reference's draws bit for bit. Three changes, each one the
-    plan requires (D1): `extra_fields` collects the divergence and step counters the reference
-    discards, `key` replaces the class's own `PRNGKey(seed)` split so the caller owns the seeding,
-    and the verbose printing and the `summary` call move to `_diagnose`, which needs the summary
-    on the log scale. `X` and `Y` reach `mcmc.run` exactly as the caller passed them, untouched,
-    for the same bit-for-bit reason.
-
-    Returns the un-thinned flat samples, the extra fields, and the run's wall-clock seconds.
+    The sampler call is the reference's line for line, so a fit driven by the key `SAASGP.fit`
+    derives reproduces its draws bit for bit. Three changes: `extra_fields` collects the counters
+    the reference discards, `key` replaces its `PRNGKey(seed)` split, and `summary` moves to
+    `diagnose`.
     """
     if nuts.num_chains != 1:
         raise ValueError(
@@ -826,20 +696,9 @@ def fit(
 ) -> FittedGP:
     """NUTS fit of `cell` to (X in [0,1]^D, y already standardized and negated by the caller).
 
-    `key` is used *unchanged* by the first attempt, so a caller handing over the key `SAASGP.fit`
-    derives reproduces the reference bit for bit; the refit uses `fold_in(key, 1)`, disjoint from
-    it and from the loop's exception-retry key. `alpha` defaults to the cell's calibrated value
-    (0.1 on the rho scale, `ALPHA_AMPLITUDE` on the a^2 scale), so the four cells' priors have the
-    same prior-predictive active count without the caller having to know which scale it is on.
-    `fixed_noise=None` learns `kernel_noise` ~ LogNormal(0, 10); a positive float fixes it.
-    `ell_prior` reaches the amplitude cells only -- the lengthscale cells have no ell prior at all.
-
-    On a failed verdict the refit is a *fresh* chain with twice the warm-up and no state reused,
-    as the brief's "no warm start" requires: status "ok" if attempt 0 passed, "refit" if attempt 1
-    did, "excluded" if neither. An excluded fit still returns the second attempt's draws, because
-    the loop has to keep querying; `status`, `status_reason` and `attempts` are what let the run's
-    log count those rows instead of averaging them in silently. Diagnostics never raise; an
-    exception out of JAX or NumPyro propagates, for `sagp.bo.run_bo`'s failure policy to handle.
+    `key` is used *unchanged* by the first attempt, which is what reproduces the reference bit for
+    bit; the refit uses `fold_in(key, 1)` on a *fresh* chain with twice the warm-up, giving "ok",
+    "refit" or "excluded" -- whose draws still come back, because the loop has to keep querying.
     """
     if fixed_noise is not None and fixed_noise == 0.0:
         raise ValueError(
@@ -880,7 +739,7 @@ def fit(
         X_train=X,
         Y_train=y,
         # `flat` is attempt 0's when it passed and attempt 1's otherwise: the attempt whose
-        # verdict decided the status is the attempt whose draws prediction gets.
+        # verdict decided the status is the one whose draws prediction gets.
         samples={site: flat[site][:: nuts.thinning] for site in cell.sites if site in flat},
         fixed_noise=fixed_noise,
         active=None,
@@ -896,17 +755,14 @@ def fit(
 
 # --- standardize ---
 
-# `standardize` stays beside `fit` because it is `fit`'s precondition. Both `sagp.bo.run_bo` and
-# `experiments.identify` need it.
+# `standardize` stays beside `fit` because it is `fit`'s precondition; `sagp.bo.run_bo` and
+# `experiments.identify` both need it.
 
 
 def standardize(y: ArrayLike) -> tuple[np.ndarray, float, float]:
     """Standardize `y` to zero mean, unit variance (ddof 0), and negate it: z = -(y - mean) / std.
 
-    The negation turns `synthobj`'s maximization convention into the one the vendored NUTS models
-    were written for -- `saasgp.py`/`saasbo.py` minimize -- applied once here rather than at every
-    call site. `mean` and `std` come back as plain Python floats, not numpy scalars, since
-    `identify` records them verbatim in a plain dict.
+    `mean` and `std` are plain floats; the negation is the vendored code's minimization convention.
     """
     y = np.asarray(y)
     mean, std = float(y.mean()), float(y.std())

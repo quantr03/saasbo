@@ -1,17 +1,10 @@
 """sagp.bo: the Bayesian-optimization loop -- the vendored SAASBO driver, generalized.
 
-`run_bo` generalizes `saasbo.run_saasbo` into one loop every method shares: the four cells, Sobol
-and the two MAP references differ only in the two adapters they hand it, `surrogate` and
-`propose`, plus an `on_iteration` observer. Every random draw of iteration `t` is a pure function
-of `(seed, t)` (`iteration_rngs`), so a killed run resumes bit-identically from its `state`, and a
-fit that raises is retried once, then replaced by a random query rather than ending the run.
-
-The acquisition is LogEI (Ament et al. 2023) combined over the retained samples by log-mean-exp --
-the exact log of the reference's sample-averaged EI, so the argmax is unchanged and only the
-underflow behaviour differs; `acq="ei"` runs the vendored `saasbo.ei` itself, for the
-reference-reproduction test, and `optimize_ei` is the reference's own optimizer, copied verbatim.
-`synthobj` maximizes and the vendored code minimizes: `gp.standardize` negates once on the way in,
-so copied code runs unchanged while `y`, `best_f` and the regret stay in the objective's units.
+`run_bo` generalizes `saasbo.run_saasbo` into one loop every method shares, differing only in the
+`surrogate`, `propose` and `on_iteration` adapters. The acquisition is LogEI (Ament et al. 2023),
+the exact log of the reference's sample-averaged EI, and `acq="ei"` is the vendored `saasbo.ei`
+itself. `synthobj` maximizes where the vendored code minimizes, so `gp.standardize` negates on the
+way in.
 """
 from __future__ import annotations
 
@@ -43,11 +36,7 @@ from synthobj.families import noise_rng
 class IterRNG(NamedTuple):
     """Every random draw iteration `t` needs, derived from `(seed, t)` and nothing else.
 
-    Five independent streams rather than one, because they are consumed by four different
-    libraries (JAX, `scipy.stats.qmc`, NumPy's Generator, `synthobj`'s own noise stream) and a
-    single counter shared across them would make each one's draws depend on how many the others
-    took -- so a change to, say, the number of EI restarts would silently move the observation
-    noise. Salting each stream keeps them disjoint and keeps resume a function of `(seed, t)`.
+    Five streams, not one: four libraries consume them and one counter would couple their draws.
     """
 
     key: Array  # the fit's PRNG key; `fit` uses it unchanged, so a run can match the reference
@@ -63,13 +52,7 @@ def _salted_seed(seed: int, t: int, salt: int) -> int:
 
 
 def iteration_rngs(seed: int, t: int) -> IterRNG:
-    """All randomness of iteration `t` (plan section 4), as a pure function of `(seed, t)`.
-
-    `t` is the index of the point being chosen -- equivalently the number of points already
-    evaluated -- so the initial design's point `t` draws its observation noise from the same
-    stream the loop would have used for it. Resume therefore needs nothing but `(seed, t)`: no
-    generator state is ever carried across iterations, and none is stored in the checkpoint.
-    """
+    """All randomness of iteration `t`, as a pure function of `(seed, t)`."""
     return IterRNG(
         key=jax.random.fold_in(jax.random.PRNGKey(seed), t),
         sobol_seed=_salted_seed(seed, t, 0xCA),
@@ -82,12 +65,7 @@ def iteration_rngs(seed: int, t: int) -> IterRNG:
 def initial_design(D: int, n_init: int, seed: int) -> np.ndarray:
     """The reference's initial design: `n_init` points of a scrambled Sobol sequence on [0,1]^D.
 
-    Identical for every method at a given seed, which is what makes the comparison paired: two
-    methods differ from their first fitted iteration onward and not before. `qmc.Sobol` warns when
-    the count is not a power of two (the balance property); the reference suppresses that warning
-    and so do we, since `n_init` is a budget, not a choice about balance. The Sobol *search*
-    reference draws `T` rows of this same sequence, whose first `n_init` rows are exactly this
-    design.
+    Identical per seed, so comparisons are paired; `qmc.Sobol`'s power-of-two warning is muted.
     """
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
@@ -103,35 +81,22 @@ _HALF_LOG_2PI = 0.5 * math.log(2.0 * math.pi)
 def log1mexp(x: Array) -> Array:
     """log(1 - exp(x)) for x < 0, accurate at both ends (Machler 2012).
 
-    `log(-expm1(x))` loses nothing as x -> 0 but cancels for very negative x; `log1p(-exp(x))` is
-    the other way round. The switch is at -log 2, where the two are equally conditioned. Each
-    branch is evaluated on inputs *clamped into its own domain* rather than on the raw `x`: under
-    `jnp.where` both branches are computed everywhere, and a NaN in the branch not taken poisons
-    the gradient of the branch that is (the standard JAX where-NaN trap), which would leave the
-    acquisition optimizer with a NaN step deep in the tail -- the regime this function exists for.
+    The switch at -log 2 picks the better-conditioned branch, and each branch runs on inputs
+    *clamped into its own domain*: a NaN in the branch not taken would poison the other's gradient.
     """
     upper = jnp.maximum(x, -_LOG2)  # the naive branch never sees the tail's inputs
     lower = jnp.minimum(x, -_LOG2)  # and the tail branch never sees log1p(-1) = -inf
-    # `maximum`/`minimum` split the derivative evenly at a tie, so the clamps halve d/dx exactly
-    # at the branch point (and likewise in `log_h`): one point, measure zero, harmless here.
+    # `maximum`/`minimum` split the derivative at a tie, halving d/dx exactly at the branch point.
     return jnp.where(x > -_LOG2, jnp.log(-jnp.expm1(upper)), jnp.log1p(-jnp.exp(lower)))
 
 
 def log_h(z: Array) -> Array:
     """log h(z), h(z) = phi(z) + z Phi(z): the standardized improvement, stably (Ament et al. 2023).
 
-    h is the whole content of EI -- EI(x) = std * h((y_target - mu)/std) -- and it underflows to
-    exactly zero in float64 at about z = -37, which is where the reference's EI stops having a
-    gradient and its optimizer stops moving. Writing h(z) = phi(z) [1 - (-z) Phi(z)/phi(z)] and
-    taking the log turns the cancellation into `log1mexp` of a log Mills ratio, which stays finite
-    and differentiable arbitrarily far into the tail. The Mills ratio itself is the paper's own
-    erfcx form, Phi(z)/phi(z) = sqrt(pi/2) erfcx(-z/sqrt 2) for z < 0, evaluated as one scaled
-    special function rather than as log Phi(z) + z^2/2: those two terms are both O(z^2) and cancel
-    to an O(1) result, which costs the whole mantissa in the tail this branch exists for (0.04
-    absolute at z = -5e3, NaN by z = -3e4, and a gradient 3x wrong at z = -1e5 -- the gradient
-    being what the L-BFGS-B restarts follow). Above z = -1 the naive form is both accurate and
-    cheaper. As in `log1mexp`, each branch is clamped into its own domain, since the naive
-    branch's gradient at z = -40 is 0/0 and the tail branch's `log(-z)` is NaN at z > 0.
+    h is the whole content of EI, EI(x) = std * h((y_target - mu)/std), and underflows to zero in
+    float64 at about z = -37, where the reference's EI loses its gradient. The log form goes
+    through `log1mexp` of the paper's erfcx Mills ratio, which keeps the mantissa lost by log
+    Phi(z) + z^2/2.
     """
     upper = jnp.maximum(z, -1.0)
     lower = jnp.minimum(z, -1.0)
@@ -144,14 +109,8 @@ def log_h(z: Array) -> Array:
 def log_ei(x: Array, y_target: float, gp: FittedGP, xi: float = 0.0) -> Array:
     """log EI at `x`, with `saasbo.ei`'s signature and conventions (minimization, std floor 1e-6).
 
-    The reference averages EI over the retained posterior samples; the log of that average is
-    `logsumexp(log EI_s) - log S`, which is what this returns -- so under exact arithmetic
-    `log_ei` and `log(saasbo.ei)` have the same argmax and the same ranking of candidates, and the
-    only difference is that this one still separates candidates after every per-sample EI has
-    underflowed to zero. A degenerate sample's NaN reaches `nan_to_num`'s own neginf pass and so
-    comes out as `finfo.min` rather than as a literal -inf; inside `logsumexp` that is the neutral
-    element of the combination all the same, since it exponentiates to exactly zero against any
-    other sample -- where the reference maps such a sample to 0, the neutral element of its own.
+    `logsumexp(log EI_s) - log S` is the log of the reference's sample-average, so the argmax
+    matches `saasbo.ei`'s; a degenerate sample's NaN becomes `finfo.min`, neutral in `logsumexp`.
     """
     mu, var = gp.posterior(x)
     std = jnp.maximum(jnp.sqrt(var), 1e-6)
@@ -165,8 +124,8 @@ def log_ei_sum(x: Array, y_target: float, gp: FittedGP, xi: float = 0.0) -> Arra
     return log_ei(x, y_target, gp, xi).sum()
 
 
-# The acquisitions a run may take. "ei" is the vendored reference itself, kept so that the
-# reproduction test can run this loop against `run_saasbo` with nothing but the seeding changed.
+# "ei" is the vendored reference itself, so the reproduction test can run this loop against
+# `run_saasbo` with nothing but the seeding changed.
 ACQUISITIONS: dict[str, Callable[..., Array]] = {"logei": log_ei, "ei": saasbo.ei}
 
 
@@ -182,12 +141,9 @@ def optimize_ei(
 ) -> tuple[np.ndarray, float]:
     """`saasbo.optimize_ei` with five changed lines; `acq=saasbo.ei` reproduces it exactly.
 
-    The changes are the seeding the study's reproducibility requires (the candidate Sobol set and
-    the incumbent's jitter both come from `iteration_rngs`, where the reference draws them from
-    global state), the acquisition as a callable in the two places the reference names `ei`, and
-    returning the value as well as the point so the row can log it. Everything else -- the 5000
-    candidates, the jitter's 1e-3, `top_k`, `maxfun=100`, the bounds, the sign flips -- is the
-    reference's, deliberately unexamined: it is held fixed across every method compared.
+    The changes: the candidate Sobol set and the jitter come from `iteration_rngs`, not global
+    state; the acquisition is a callable where the reference names `ei`; the value is returned too.
+    The rest is the reference's -- 5000 candidates, jitter 1e-3, `top_k`, `maxfun=100`, bounds.
     """
 
     # Helper function for optimizing EI
@@ -247,9 +203,7 @@ def propose_ei(
 ) -> tuple[np.ndarray, float]:
     """`optimize_ei` driven by iteration `t`'s streams: the loop's default proposer.
 
-    `t` is unused here -- the acquisition's randomness is already in `rngs` -- and is part of the
-    proposer protocol for the proposers that walk a sequence instead of optimizing, above all
-    `references.propose_sobol`.
+    `t` is unused here; it belongs to the proposer protocol, for those that walk a sequence.
     """
     x, value = optimize_ei(
         fitted,
@@ -264,12 +218,7 @@ def propose_ei(
 
 
 class BOState(NamedTuple):
-    """Every point evaluated so far: the design, its observations, and the noise-free values.
-
-    The whole of what an iteration depends on besides `(seed, t)`, which is what makes it both the
-    loop's running state and the thing a checkpoint has to hold: `run_bo(..., state=...)` resumes
-    from one and cannot tell it from the state its own earlier iterations would have built.
-    """
+    """Every point evaluated so far: the design, its observations, and the noise-free values."""
 
     X: np.ndarray  # (t, D), the design in the unit cube
     y: np.ndarray  # (t,), the observations the loop optimizes against -- noisy unless `noiseless`
@@ -277,13 +226,7 @@ class BOState(NamedTuple):
 
 
 class Iteration(NamedTuple):
-    """What one iteration produced, handed whole to `on_iteration` after the append.
-
-    Everything a run's row needs and nothing derived from it: the loop reports, and what a row
-    should say about an iteration is the observer's business (`experiments.runlog.RunLogger`).
-    `state` is the arrays *after* this point was appended -- the very objects `run_bo` returns --
-    so an observer's `state.y.max()` is the incumbent including this iteration.
-    """
+    """What one iteration produced, handed whole to `on_iteration` after the append."""
 
     t: int
     x: np.ndarray  # the point chosen at t
@@ -311,13 +254,10 @@ def _fit_with_retry(
 ) -> tuple[FittedGP | None, int, float, str | None]:
     """Fit, retrying once on an exception; returns (fitted, fit_calls, wall_s, failure reason).
 
-    A fit whose *diagnostics* failed is not a failure here -- `fit` returns it with
-    `status="excluded"` and the loop queries with it anyway, because a study that stopped at every
-    bad chain would report a survivorship-biased regret. An *exception* out of JAX or NumPyro is
-    different: it leaves no surrogate at all, so it is logged with its traceback, retried once on
-    a key disjoint from both of `fit`'s own (`fold_in(key, 2)`; `fit`'s refit uses 1), and if that
-    raises too the caller falls back to a random query. The run continues either way. A `None`
-    surrogate is the model-free method: no call, no clock, and nothing that could fail.
+    A fit whose *diagnostics* failed is not a failure here: `fit` returns it with
+    `status="excluded"` and the loop queries with it anyway, since stopping at every bad chain
+    would bias the regret. An *exception* leaves no surrogate: logged, then retried on
+    `fold_in(key, 2)`.
     """
     if surrogate is None:
         return None, 0, float("nan"), None
@@ -359,23 +299,12 @@ def run_bo(
 ) -> BOState:
     """Run `T` evaluations of `objective` under `surrogate` and `propose`; returns the final state.
 
-    The first `n_init` points are the shared Sobol design of `seed` and are not iterations: they
-    have no fit and nothing to report but their observation. From `t = n_init` on, each iteration
-    standardizes what has been observed, fits, maximizes the acquisition, evaluates, appends, and
-    hands the whole of itself to `on_iteration` (plan section 4, steps 2-6).
-
-    The three adapters are what makes this the *same* loop for all seven methods.
-    `surrogate(X, z, key) -> FittedGP` is the fit, and `None` is the model-free method -- the Sobol
-    search -- which costs no fit call and reports a NaN `fit_wall_s`; `propose(fitted, y_target,
-    rngs, t) -> (x, acq_value)` chooses the next point, `propose_ei` by default and
-    `references.propose_sobol` for that same search; `on_iteration(Iteration)` is the observer,
-    called once per iteration after the append, and `log(str)` receives the two messages of the
-    exception policy. Nothing in here writes a file or reads a configuration.
-
-    `state` is a resume: iterating starts at `len(state.X)` and the run continues bit-identically,
-    since iteration `t` is a function of `(seed, t)` and of the points before it alone. Without one
-    the design is drawn and observed here, each of its points from the stream iteration `t` would
-    have used for it, so a resumed run and an uninterrupted one draw the same noise.
+    The first `n_init` points are the shared Sobol design of `seed` and are not iterations; from `t
+    = n_init` on, each iteration standardizes, fits, maximizes the acquisition, evaluates, appends
+    and hands itself to `on_iteration`. The adapters: `surrogate(X, z, key) -> FittedGP` is the
+    fit, `None` being the model-free method, which costs no fit call and reports a NaN
+    `fit_wall_s`, and `propose(fitted, y_target, rngs, t) -> (x, acq_value)` chooses the next
+    point. `state` is a resume: iterating starts at `len(state.X)`.
     """
     D = objective.D
     if state is None:
@@ -398,8 +327,8 @@ def run_bo(
             t, surrogate, state.X, z, rngs, log
         )
         if failure is not None:
-            # Both attempts raised: query at random rather than end the run, and mark the
-            # iteration so the analysis can count these instead of reading them as ordinary ones.
+            # Both attempts raised: query at random rather than end the run, and mark the row so
+            # the analysis can count these rather than read them as ordinary iterations.
             x_next = initial_design(D, 1, rngs.fallback_seed)[0]
             acq_value, acq_wall_s = float("nan"), float("nan")
             status, reason = "excluded", failure
@@ -409,8 +338,8 @@ def run_bo(
             acq_wall_s = time.perf_counter() - start
             status, reason = ("ok", "") if fitted is None else (fitted.status, fitted.status_reason)
 
-        # A proposer is an argument, so what it returns is normalized here rather than trusted:
-        # the objective and the state below are numpy's, whatever the proposer computed in.
+        # A proposer is an argument, so what it returns is normalized here: the state below is
+        # numpy's, whatever the proposer computed in.
         x_next = np.asarray(x_next, dtype=float)
         f_next = float(objective(x_next))
         y_next = _observe(objective, x_next, noiseless, rngs)

@@ -1,9 +1,8 @@
 """sagp.diagnostics: the NUTS convergence verdict for one fit attempt.
 
-Pools every positive sampled site's R-hat and effective sample size against `DiagThresholds`,
-on the log scale the sampler actually moves in, and reduces them to one pass/fail `Diagnostics`
-record. It runs on an attempt's un-thinned draws, not the thinned draws `fit` retains for
-prediction. `sagp.gp.fit` is its only caller, once per attempt.
+Pools every positive sampled site's R-hat and effective sample size against `DiagThresholds` --
+on the log scale the sampler moves in, over the attempt's un-thinned draws, not the thinned draws
+`fit` retains -- into one pass/fail `Diagnostics` record.
 """
 from __future__ import annotations
 
@@ -16,12 +15,10 @@ from numpyro.diagnostics import summary
 
 @dataclass(frozen=True)
 class DiagThresholds:
-    """The preregistered pass rule for one NUTS attempt (plan D4).
+    """The pass rule for one NUTS attempt, fixed for every cell.
 
     Split-R-hat on the two halves of 128 draws resolves to about +-0.02, so 1.1 is the classical
-    bound and not a tuned one; 16 effective draws is the number of draws we retain, so fewer means
-    the retained set is not 16 draws' worth; 5 divergences is 2 % of 256. Fixed before the pilot
-    runs, deliberately, so the exclusion rate is a measurement rather than a choice.
+    bound, not a tuned one; 16 is the number of draws retained for prediction; 5 is 2 % of 256.
     """
 
     r_hat_max: float = 1.1
@@ -33,14 +30,10 @@ class DiagThresholds:
 class Diagnostics:
     """One attempt's convergence summary, on its un-thinned draws; `passed` is the refit trigger.
 
-    `r_hat_median` and `frac_r_hat_below_1_05` do not gate anything: they are recorded so the
-    brief's R-hat < 1.05 criterion is reportable per fit while the gate stays at `DiagThresholds`.
-    Neither do the six per-group fields: `r_hat_max` and `n_eff_min` are the pooled statistics the
-    gate reads, and the groups (`_DIAG_GROUPS`) split those same per-site numbers three ways so a
-    trigger can be *attributed* -- to the cell's own sparsity site, to the amplitude cells' extra
-    `kernel_ell` block, or to the three scalars -- rather than only counted. A group with no site
-    in this cell reads NaN. `reason` names each failed criterion with its value and is "" exactly
-    when `passed`.
+    Only `r_hat_max`, `n_eff_min` and `divergences` gate; the rest is recorded for reporting. The
+    six per-group fields split those same per-site statistics three ways (`_DIAG_GROUPS`) so a
+    trigger can be *attributed* rather than only counted, and read NaN for a group this cell has
+    no site in. `reason` names each failed criterion and is "" exactly when `passed`.
     """
 
     r_hat_max: float
@@ -60,11 +53,9 @@ class Diagnostics:
     reason: str
 
 
-# Every *sampled* positive site across the four cells. R-hat and ESS are computed on their logs --
-# the geometry the sampler actually moves in -- because the constrained half-Cauchy sites are
-# heavy-tailed enough that both statistics on them are dominated by single draws (plan D4). The
-# deterministic sites (`kernel_inv_length_sq`, `a_sq`) are left out on purpose: the gate is applied
-# in the sampler's own coordinates, and those are the coordinates it moves in.
+# Every *sampled* positive site across the four cells; the deterministic `kernel_inv_length_sq`
+# and `a_sq` are left out, so the gate reads the sampler's own coordinates. R-hat and ESS are
+# taken on the logs: on the constrained half-Cauchy sites both are dominated by single draws.
 _POSITIVE_SAMPLED_SITES: tuple[str, ...] = (
     "kernel_var",
     "kernel_noise",
@@ -74,11 +65,10 @@ _POSITIVE_SAMPLED_SITES: tuple[str, ...] = (
     "kernel_ell",
 )
 
-# The three blocks `Diagnostics`' per-group fields report those same statistics over, together
-# exactly `_POSITIVE_SAMPLED_SITES`. They separate what the gate cannot: `native` is whichever
-# site the cell's own sparsity lives on, `ell` is the shape parameter only the amplitude cells
-# carry -- D extra scalars, which is why an amplitude cell pools 2D + 2 statistics against a
-# lengthscale cell's D + 3 -- and `global` is the handful of scalars every cell has.
+# The three blocks the per-group fields report over, together exactly `_POSITIVE_SAMPLED_SITES`:
+# `native` is whichever site the cell's own sparsity lives on, `ell` the shape parameter only the
+# amplitude cells carry (2D + 2 pooled statistics against a lengthscale cell's D + 3), and
+# `global` the scalars every cell has.
 _DIAG_GROUPS: dict[str, tuple[str, ...]] = {
     "native": ("_kernel_inv_length_sq", "_a_sq"),
     "ell": ("kernel_ell",),
@@ -91,8 +81,8 @@ def _group_extremes(
 ) -> tuple[float, float]:
     """(max R-hat, min ESS) over one group's sites, or (NaN, NaN) when this cell has none of them.
 
-    NaN rather than an infinity so that a group's absence is visibly missing in a log rather than
-    a value that would compare as "worst" or "best" against a cell that does carry it.
+    NaN rather than an infinity, so a group's absence is visibly missing in a log rather than a
+    value that would compare as "worst" or "best" against a cell that does carry it.
     """
     present = [per_site[site] for site in group if site in per_site]
     if not present:
@@ -109,17 +99,14 @@ def diagnose(
     thresholds: DiagThresholds,
     wall_s: float,
 ) -> Diagnostics:
-    """The convergence verdict for one attempt, from its un-thinned draws (plan D4).
+    """The convergence verdict for one attempt, from its un-thinned draws.
 
     `numpyro.diagnostics.summary` is the reference's own, and with one chain its split-R-hat
     compares the chain's two halves. Every per-coordinate site contributes D statistics and all of
     them are pooled, so the rule reads "every scalar the sampler moved converged", not "the
-    average did" -- with 2D + 3 sites at D = 100 that is the criterion most likely to fire, which
-    is the point. The three criteria are written as negations of the pass conditions so that a
-    NaN R-hat -- what a site that never moved produces -- fails rather than silently passing.
-
-    The per-group fields are read off these very statistics (`_DIAG_GROUPS`), so they can only
-    ever describe the pooled verdict, never disagree with it.
+    average did". The criteria are negations of the pass conditions, so a NaN R-hat -- what a site
+    that never moved produces -- fails rather than silently passing; the per-group fields are read
+    off these very statistics and so cannot disagree with the verdict.
     """
     logs = {
         site: jnp.log(flat_samples[site])
