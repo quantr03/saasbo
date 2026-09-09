@@ -139,7 +139,7 @@ def test_rows_carry_the_schema_the_regret_and_the_sobol_schedule(reference_run):
     assert [int(row["t"]) for row in rows] == list(range(_N_INIT, _T))
 
     # The plan's row schema, spelled out rather than imported: this is the contract every later
-    # analysis reads, so a rename in `bo.py` has to fail here.
+    # analysis reads, so a rename in `experiments/runlog.py` has to fail here.
     assert list(rows[0]) == [
         "t", "method", "family", "seed", "y", "f", "best_obs", "best_f", "regret", "acq_value",
         "fit_wall_s", "acq_wall_s", "fit_calls", "nuts_attempts", "status", "reason",

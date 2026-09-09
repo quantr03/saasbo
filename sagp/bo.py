@@ -1,36 +1,17 @@
 """sagp.bo: the Bayesian-optimization loop -- the vendored SAASBO driver, generalized.
 
-`saasbo.run_saasbo` is one loop hard-wired to one surrogate. The thesis compares seven methods
-(the four cells, a Sobol search, and the two MAP references) whose regret differences must be
-attributable to the surrogate alone, so the loop around them has to be *literally* the same code:
-this module is that loop, and every difference between the methods reaches it as an argument --
-`surrogate` and `propose`, with `on_iteration` for whoever wants to watch. It reaches `sagp.gp`
-only through `standardize` and `FittedGP.posterior` and never asks how a cell is parameterized --
-a per-method branch here would be exactly the confound the design is built to avoid -- and `gp.py`
-in turn never sees a budget or an acquisition. Which method a run takes, where it writes and how
-it is resumed are `experiments.run_bo`'s and `experiments.runlog`'s; nothing here knows about
-either.
+`run_bo` generalizes `saasbo.run_saasbo` into one loop every method shares: the four cells, Sobol
+and the two MAP references differ only in the two adapters they hand it, `surrogate` and
+`propose`, plus an `on_iteration` observer. Every random draw of iteration `t` is a pure function
+of `(seed, t)` (`iteration_rngs`), so a killed run resumes bit-identically from its `state`, and a
+fit that raises is retried once, then replaced by a random query rather than ending the run.
 
-What is new relative to the reference driver is bookkeeping, not method: every random draw of
-iteration `t` is a pure function of `(seed, t)` (`iteration_rngs`), so a killed run resumes
-bit-identically from its `state` and paired runs across methods share the same design and the
-same observation noise; every iteration is handed whole to `on_iteration`, which is where a run
-directory's row, readouts and retained samples get written; and a fit that raises is retried once
-and then replaced by a random query rather than being allowed to end the run.
-
-The acquisition is LogEI (Ament et al. 2023) combined over the retained samples by log-mean-exp,
-which is the exact log of the reference's sample-averaged EI: the argmax is unchanged in exact
-arithmetic, and what differs is only that the log form still has a gradient where the reference's
-EI has underflowed to zero -- the regime a sparse GP in 100 dimensions spends most of its time in.
-`acq="ei"` runs the vendored `saasbo.ei` itself, which is what the reference-reproduction test
-needs.
-
-`synthobj` maximizes and the vendored code minimizes: `gp.standardize` negates once, on the way
-into the GP, so every line copied from the reference runs unchanged while `y`, `best_f` and the
-regret in the logs stay in the objective's own units.
-
-`python -m experiments.run_bo --help` is the study's entry point: one (family, seed, cell) per
-invocation, resumable, with its whole provenance written into the run directory's `manifest.json`.
+The acquisition is LogEI (Ament et al. 2023) combined over the retained samples by log-mean-exp --
+the exact log of the reference's sample-averaged EI, so the argmax is unchanged and only the
+underflow behaviour differs; `acq="ei"` runs the vendored `saasbo.ei` itself, for the
+reference-reproduction test, and `optimize_ei` is the reference's own optimizer, copied verbatim.
+`synthobj` maximizes and the vendored code minimizes: `gp.standardize` negates once on the way in,
+so copied code runs unchanged while `y`, `best_f` and the regret stay in the objective's units.
 """
 from __future__ import annotations
 

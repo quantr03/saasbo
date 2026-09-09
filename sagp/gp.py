@@ -1,4 +1,4 @@
-"""sagp.gp: the four surrogate cells -- kernels, models, NUTS inference, prediction and readouts.
+"""sagp.gp: the four surrogate cells -- kernels, models, NUTS inference and prediction.
 
 The thesis compares four Gaussian-process cells ({additive, product} kernel structure x
 {amplitude, lengthscale} sparsity prior) that must differ in *nothing* but the kernel/prior
@@ -406,8 +406,9 @@ class Cell:
     """One of the four surrogates: everything inference, prediction and the readouts need of it.
 
     Bundling the model with its kernel, its sites and its alpha is what lets `fit`, `posterior`
-    and `identify` be written once against `Cell` and be literally the same code for all four --
-    the design's central requirement, since any per-cell branch downstream would be a confound.
+    and `experiments.identify` be written once against `Cell` and be literally the same code for
+    all four -- the design's central requirement, since any per-cell branch downstream would be a
+    confound.
     """
 
     structure: str  # "additive" or "product"
@@ -562,7 +563,8 @@ def _chunk_size(S: int) -> int:
 
 
 class FittedGP:
-    """One cell's posterior on standardized, negated targets: what `fit` returns and `bo.py` sees.
+    """One cell's posterior on standardized, negated targets: what `fit` returns and the loop
+    (`sagp.bo`) and the readouts (`sagp.readouts`) consume.
 
     The training data is kept under the reference's own attribute names (`X_train`, `Y_train`) so
     that `saasbo.optimize_ei`'s incumbent lookup runs against this object unchanged. `samples`
@@ -837,7 +839,7 @@ def fit(
     did, "excluded" if neither. An excluded fit still returns the second attempt's draws, because
     the loop has to keep querying; `status`, `status_reason` and `attempts` are what let the run's
     log count those rows instead of averaging them in silently. Diagnostics never raise; an
-    exception out of JAX or NumPyro propagates, for `bo.py`'s failure policy to handle.
+    exception out of JAX or NumPyro propagates, for `sagp.bo.run_bo`'s failure policy to handle.
     """
     if fixed_noise is not None and fixed_noise == 0.0:
         raise ValueError(
@@ -892,12 +894,10 @@ def fit(
     )
 
 
-# --- identification ---
+# --- standardize ---
 
-# SQ1: the thesis's first study fits one cell to a fixed Sobol design and reads off every summary
-# in one call, with no acquisition loop. `standardize` lives here rather than in `bo.py` (ruling
-# R11), since both this function and the loop need it and the loop already imports this module for
-# `fit`/`FittedGP`.
+# `standardize` stays beside `fit` because it is `fit`'s precondition. Both `sagp.bo.run_bo` and
+# `experiments.identify` need it.
 
 
 def standardize(y: ArrayLike) -> tuple[np.ndarray, float, float]:

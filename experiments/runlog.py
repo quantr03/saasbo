@@ -524,8 +524,9 @@ class RunLogger:
     def save_samples(self, t: int, fitted: FittedGP) -> None:
         """The retained draws of iteration `t`, with the status and attempts that produced them.
 
-        This is the only place `bo.py` touches `fitted.samples`, and it does not look inside: what
-        a cell's sites mean is `gp.py`'s business, and every later analysis re-reads them from here.
+        This is the only place the run directory touches `fitted.samples`, and it does not look
+        inside: what a cell's sites mean is `sagp.gp`'s business, and every later analysis
+        re-reads them from here.
         Attempt 0's whole `Diagnostics` rides along as `a0_<field>` scalars (ruling R43), because
         the draws in this file are the *retained* attempt's and the row's unprefixed diagnostics
         are that attempt's too: without these, a refit's trigger is nowhere on disk. A MAP

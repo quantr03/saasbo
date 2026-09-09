@@ -85,13 +85,25 @@ and `--overwrite`.
 `sagp` is the thesis's 2 x 2 of Gaussian-process surrogates for high-dimensional Bayesian
 optimization -- {additive, product} kernel structure x {amplitude, lengthscale} sparsity prior --
 run on the vendored SAASBO code path so that a difference in regret or in identification is
-attributable to the parameterization and to nothing else. `sagp/gp.py` owns the kernels, the four
-NumPyro models, NUTS inference with diagnostics, prediction, the posterior readouts and the
-offline identification runner `identify()`; `sagp/bo.py` owns the optimization loop, the
-acquisition, the references, logging/checkpointing and the CLI. They meet at one interface --
-`fit(X, y, key, cell) -> FittedGP` and `FittedGP.posterior(X_test) -> (mean, var)` of shape
-`(S, n_test)` per retained sample -- so `bo.py` never learns how a cell is parameterized and
-`gp.py` never sees a budget or an acquisition.
+attributable to the parameterization and to nothing else. `sagp` is a five-module library and
+`experiments` is the study code built on it:
+
+| module | owns |
+|---|---|
+| `sagp/gp.py` | the four cells: kernels, prior constants, NumPyro models, `NUTSConfig`, `FittedGP` (prediction), `fit`, `standardize` |
+| `sagp/diagnostics.py` | the convergence verdict on a NUTS attempt |
+| `sagp/bo.py` | the loop: seeding, LogEI, the copied reference optimizer, `run_bo` |
+| `sagp/references.py` | the study's two MAP references and the Sobol proposer |
+| `sagp/readouts.py` | posterior readouts from a `FittedGP`'s retained draws |
+| `experiments/identify.py` | SQ1's offline identification runner |
+| `experiments/runlog.py` | one run directory: config, provenance, checkpointing, resume |
+| `experiments/run_bo.py` | SQ2/SQ3 entry point and CLI |
+
+Nothing under `sagp/` imports `experiments`, and `sagp.gp`/`sagp.diagnostics` never import
+`sagp.bo`/`sagp.references`/`sagp.readouts`, so a cell's parameterization and the loop's
+acquisition and budget stay on opposite sides of `fit(X, y, key, cell) -> FittedGP` and
+`FittedGP.posterior(X_test) -> (mean, var)` of shape `(S, n_test)` per retained sample.
+`python -m experiments.run_bo --help` is the entry point.
 
 **The four cells and the three references** are the seven values `--cell` accepts:
 

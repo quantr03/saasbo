@@ -1,4 +1,4 @@
-"""Tests for sagp.gp's posterior readouts: Sobol indices, shares and the two active rules.
+"""Tests for sagp.readouts' posterior readouts: Sobol indices, shares and the two active rules.
 
 The thesis's primary identification readout is the first-order Sobol index of the posterior mean
 under the reference measure, and it is the one number the four cells are compared on, so it has to

@@ -38,6 +38,10 @@ The thesis needs the four surrogate cells to differ in nothing but the kernel/pr
 
 ## 1. Module layout
 
+> Superseded on 2026-09-09 by `docs/superpowers/plans/2026-09-09-sagp-core-split.md`: `gp.py`/`bo.py`
+> were split into `sagp/{gp,diagnostics,bo,references,readouts}.py` and
+> `experiments/{identify,runlog,run_bo}.py`; the CLI is `python -m experiments.run_bo`.
+
 ```
 sagp/
   __init__.py     enable_x64, platform cpu; lazy exports fit, FittedGP, identify, run_bo

@@ -3,13 +3,15 @@
 `sagp.gp` implements the four model cells (additive/product structure x amplitude/lengthscale
 prior; see the plan), NUTS inference and prediction, following the vendored
 `saasgp.py`/`saasbo.py` reference exactly except where the plan calls for a change.
-`sagp.readouts` holds the posterior readouts and is reached as the submodule it is, like
-`sagp.gp` itself: callers write `from sagp.readouts import readouts`. `sagp.bo` runs the
-Bayesian-optimization loop against any cell through `gp.py`'s FittedGP/posterior interface
-alone: `bo.py` must not know how a cell is parameterized, and `gp.py` must not know about
-acquisition or budgets, so importing one must not pull in the other. `fit`, `FittedGP` and
-`run_bo` are re-exported here from `sagp.gp` and `sagp.bo`, lazily via `__getattr__` (PEP 562)
-rather than eagerly -- matching `synthobj/__init__.py` -- so `import sagp` imports no submodule.
+`sagp.diagnostics` is the convergence verdict `sagp.gp.fit` calls once per attempt. `sagp.bo`
+runs the Bayesian-optimization loop against any cell through `FittedGP`/`posterior` alone, never
+learning how a cell is parameterized; `sagp.references` and `sagp.readouts` sit beside it, the
+study's two MAP references/Sobol proposer and its posterior readouts respectively. `sagp.gp` and
+`sagp.diagnostics` are the bottom of this stack and import none of the other three. `sagp.readouts`
+is reached as the submodule it is: callers write `from sagp.readouts import readouts`. `fit`,
+`FittedGP` and `run_bo` are re-exported here from `sagp.gp` and `sagp.bo`, lazily via
+`__getattr__` (PEP 562) rather than eagerly -- matching `synthobj/__init__.py` -- so `import sagp`
+imports no submodule.
 
 `numpyro.set_platform`/`set_host_device_count`/`enable_x64` run here, at package import, before
 any of this package's code creates a JAX array: every later task depends on float64 and the cpu
