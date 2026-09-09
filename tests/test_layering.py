@@ -18,10 +18,18 @@ _SAGP_FILES = sorted((_ROOT / "sagp").glob("*.py"))
 _EXPERIMENT_FILES = sorted((_ROOT / "experiments").glob("*.py"))
 assert _SAGP_FILES and _EXPERIMENT_FILES, "no modules to check: the globs found nothing"
 
-# `gp.py` and `diagnostics.py` are the bottom of the library: `bo.py`, `references.py` and the
-# readouts module are layered above them and must never be imported back down.
-_CORE_FILES = [_ROOT / "sagp" / "gp.py", _ROOT / "sagp" / "diagnostics.py"]
-_ABOVE_CORE = ("sagp.bo", "sagp.references", "sagp.readouts")
+# D4 written out as a table: what each module under `sagp/` may import from the package. `gp.py`
+# and `diagnostics.py` are the bottom of the library, so nothing above them may be imported back
+# down; the three modules above the core reach `gp` and never each other. A module missing from
+# this table is a decision that has not been made, so the test says so rather than passing.
+_ALLOWED_SAGP_IMPORTS: dict[str, set[str]] = {
+    "gp": {"sagp.diagnostics"},
+    "diagnostics": set(),
+    "references": {"sagp.gp"},
+    "readouts": {"sagp.gp"},
+    "bo": {"sagp.gp"},
+    "__init__": {"sagp.gp", "sagp.bo"},  # the lazy imports inside `__getattr__` count
+}
 
 
 def _imported_modules(source: str) -> set[str]:
@@ -33,6 +41,16 @@ def _imported_modules(source: str) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             modules.add(node.module)
             modules |= {f"{node.module}.{alias.name}" for alias in node.names}
+    return modules
+
+
+def _sagp_module_imports(source: str) -> set[str]:
+    """Every `sagp` submodule a file imports, as `sagp.<module>`; the bare package is not one."""
+    modules: set[str] = set()
+    for name in _imported_modules(source):
+        parts = name.split(".")
+        if parts[0] == "sagp" and len(parts) > 1:
+            modules.add(f"sagp.{parts[1]}")
     return modules
 
 
@@ -85,9 +103,15 @@ def test_the_study_uses_only_public_library_names(path: Path):
     assert _private_sagp_uses("import sagp.gp as gp\ngp._chunk_size(x)\n") == ["gp._chunk_size"]
 
 
-@pytest.mark.parametrize("path", _CORE_FILES, ids=lambda p: p.name)
-def test_the_core_never_imports_the_modules_above_it(path: Path):
-    """Rule (c): the core modules import none of `sagp.bo`, `sagp.references`, `sagp.readouts`."""
-    assert _imported_modules(path.read_text()).isdisjoint(_ABOVE_CORE)
-    assert not _imported_modules("from sagp import bo").isdisjoint(_ABOVE_CORE)
-    assert not _imported_modules("import sagp.readouts").isdisjoint(_ABOVE_CORE)
+@pytest.mark.parametrize("path", _SAGP_FILES, ids=lambda p: p.name)
+def test_each_library_module_imports_only_what_d4_allows(path: Path):
+    """Rule (c): every `sagp` import a module makes is in that module's row of the D4 table."""
+    assert path.stem in _ALLOWED_SAGP_IMPORTS, f"{path.name} has no row in the D4 table"
+    assert _sagp_module_imports(path.read_text()) <= _ALLOWED_SAGP_IMPORTS[path.stem]
+    # The table forbids sideways edges as well as downward ones: `bo` may reach `gp` and nothing
+    # else, so a proposer taken from `references` is a violation even though it is not the core.
+    sideways = _sagp_module_imports("from sagp.references import propose_sobol")
+    assert sideways - _ALLOWED_SAGP_IMPORTS["bo"] == {"sagp.references"}
+    # The alias forms the checker has to see through, both of which the core must not contain.
+    assert _sagp_module_imports("from sagp import bo") == {"sagp.bo"}
+    assert _sagp_module_imports("import sagp.readouts as r") == {"sagp.readouts"}

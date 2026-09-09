@@ -67,7 +67,6 @@ def _hand_made_gp() -> FittedGP:
     )
 
 
-
 # --- the acquisition ---
 
 

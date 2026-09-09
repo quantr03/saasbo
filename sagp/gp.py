@@ -344,7 +344,8 @@ def model_product_amplitude(
 class Cell:
     """One of the four surrogates: everything inference, prediction and the readouts need of it.
 
-    One `Cell` per surrogate lets `fit`, `posterior` and `identify` be written once, branch-free.
+    One `Cell` per surrogate lets `fit`, `posterior` and `experiments.identify` be written once,
+    branch-free.
     """
 
     structure: str  # "additive" or "product"
@@ -666,9 +667,10 @@ def _run_nuts(
     """
     if nuts.num_chains != 1:
         raise ValueError(
-            f"num_chains must be 1; got {nuts.num_chains}. The plan pins one chain per fit, and "
-            "`_diagnose` pools with group_by_chain=False, so more chains would be flattened into "
-            "one and their split-R-hat would compare the halves of the concatenation."
+            f"num_chains must be 1; got {nuts.num_chains}. One chain per fit is the reference's "
+            "setting, and diagnose pools with group_by_chain=False, so more chains would be "
+            "flattened into one and their split-R-hat would compare the halves of the "
+            "concatenation."
         )
     start = time.perf_counter()
     kernel = NUTS(model, max_tree_depth=nuts.max_tree_depth)
@@ -705,6 +707,12 @@ def fit(
     `fold_in(key, 2)` (`sagp.bo._fit_with_retry`). That refit is a *fresh* chain with twice the
     warm-up, giving "ok", "refit" or "excluded" -- whose draws still come back, because the loop
     has to keep querying.
+
+    `alpha` None takes the cell's calibrated default: `ALPHA_LENGTHSCALE` on the rho scale, or
+    `ALPHA_AMPLITUDE` on the a^2 scale. `fixed_noise` None learns `kernel_noise ~ LogNormal(0, 10)`
+    while a positive value fixes the observation variance at it; 0.0 is rejected. `nuts` is the
+    sampler budget (`NUTSConfig()`), `thresholds` the gate each attempt is judged against
+    (`DiagThresholds()`), and `ell_prior` reaches the amplitude cells only.
     """
     if fixed_noise is not None and fixed_noise == 0.0:
         raise ValueError(

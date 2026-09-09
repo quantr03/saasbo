@@ -103,7 +103,8 @@ Nothing under `sagp/` imports `experiments`, and `sagp.gp`/`sagp.diagnostics` ne
 `sagp.bo`/`sagp.references`/`sagp.readouts`, so a cell's parameterization and the loop's
 acquisition and budget stay on opposite sides of `fit(X, y, key, cell) -> FittedGP` and
 `FittedGP.posterior(X_test) -> (mean, var)` of shape `(S, n_test)` per retained sample.
-`python -m experiments.run_bo --help` is the entry point.
+`python -m experiments.run_bo --help` is the entry point. `python -m sagp.bo` is no longer an
+entry point and exits non-zero.
 
 **The four cells and the three references** are the seven values `--cell` accepts:
 

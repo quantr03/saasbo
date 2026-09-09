@@ -310,7 +310,13 @@ def run_bo(
     and hands itself to `on_iteration`. The adapters: `surrogate(X, z, key) -> FittedGP` is the
     fit, `None` being the model-free method, which costs no fit call and reports a NaN
     `fit_wall_s`, and `propose(fitted, y_target, rngs, t) -> (x, acq_value)` chooses the next
-    point. `state` is a resume: iterating starts at `len(state.X)`.
+    point. `state` is a resume: iterating starts at `len(state.X)` and `n_init` is ignored.
+
+    `z` is `standardize(state.y)`'s first return: the standardized *and negated* targets (the loop
+    maximizes `objective`; the vendored code path minimizes `z`), and `y_target = min(z)`. `rngs`
+    is `iteration_rngs(seed, t)`, an `IterRNG`. `log(str)` takes the two exception-policy messages
+    (the fit raised; the retry raised) and defaults to `print`; `on_iteration(Iteration)` runs after
+    each append, `Iteration.state` being the very arrays this function goes on to return.
     """
     D = objective.D
     if state is None:
@@ -376,3 +382,7 @@ def run_bo(
             )
 
     return state
+
+
+if __name__ == "__main__":
+    raise SystemExit("sagp.bo has no command line; run python -m experiments.run_bo instead")

@@ -4,9 +4,6 @@ Exercises the `Diagnostics` verdict `fit` returns: its fields are finite and wel
 three per-group extremes (`native`, `ell`, `global`) partition the pooled `r_hat_max`/`n_eff_min`
 exactly, and `_POSITIVE_SAMPLED_SITES` is exactly the union of every cell's positive sampled sites.
 """
-from sagp.diagnostics import DiagThresholds, Diagnostics, _POSITIVE_SAMPLED_SITES
-from sagp.gp import CELLS, ELL_PRIOR, NUTSConfig, fit
-
 from functools import partial
 
 import jax
@@ -14,6 +11,9 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 from numpyro import handlers
+
+from sagp.diagnostics import Diagnostics, _POSITIVE_SAMPLED_SITES
+from sagp.gp import CELLS, ELL_PRIOR, NUTSConfig, fit
 
 
 def _data(n: int, D: int, seed: int) -> tuple[np.ndarray, np.ndarray]:

@@ -30,9 +30,7 @@ from functools import partial
 
 import jax
 import numpy as np
-import numpyro.distributions as dist
 import pytest
-from numpyro import handlers
 
 import saasgp
 import sagp.gp

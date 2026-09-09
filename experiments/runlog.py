@@ -1,11 +1,12 @@
 """experiments.runlog: one run's directory -- its configuration, its provenance, its files.
 
-`RunLogger` owns every file a run writes and the order they are written in: the samples and the
-checkpoint first, then the diagnostics, then the `iterations.csv` row that describes them, so a
-complete row is always backed by the artifacts it names and a killed run can be resumed from the
-last one. `manifest.json` is the run's provenance -- the resolved `RunConfig` and its hash, the git
-commit and its cleanliness, the package versions, the digests of the vendored reference files and
-the objective's ground-truth labels -- written once at creation and appended to on every resume.
+`RunLogger` owns every file a run writes and the order they are written in: the checkpoint first
+(atomically), then `coords.csv`, then `samples/t{t:03d}.npz`, and the `iterations.csv` row that
+describes them last, so a complete row is always backed by the artifacts it names and a killed run
+can be resumed from the last one. `manifest.json` is the run's provenance -- the resolved
+`RunConfig` and its hash, the git commit and its cleanliness, the package versions, the digests of
+the vendored reference files and the objective's ground-truth labels -- written once at creation
+and appended to on every resume.
 `RunLogger.record` is the shape all of that takes to the loop: one `sagp.bo.Iteration` in, one
 iteration's worth of files out, which is what `experiments.run_bo.run` hands `run_bo` as its
 `on_iteration`. `experiments.run_bo` drives all of it; nothing in `sagp/` may import this module.
@@ -208,7 +209,7 @@ _ROW_FIELDS: tuple[str, ...] = (
 )
 # The numbers of the retained attempt's `Diagnostics` that the row carries (its `wall_s`,
 # `passed` and `reason` are already in `fit_wall_s`, `status` and `reason`): the six pooled ones
-# and the six per-group ones the trigger is attributed with (`gp._DIAG_GROUPS`).
+# and the six per-group ones the trigger is attributed with (`diagnostics._DIAG_GROUPS`).
 _DIAG_FIELDS: tuple[str, ...] = (
     "r_hat_max", "r_hat_median", "frac_r_hat_below_1_05", "n_eff_min", "divergences",
     "num_steps_mean",

@@ -187,7 +187,9 @@ def _sobol_qmc(fitted: FittedGP, n: int = 2048, seed: int = 0) -> tuple[np.ndarr
     -- does not factor over coordinates under nu, so its index is estimated over one scrambled
     Sobol set in 2D dimensions, on the sample-averaged posterior mean.
     `test_qmc_matches_exact_on_product_amplitude` pins the accuracy against a cell whose exact
-    indices are known; coordinates outside `active` are skipped. Returns (S_hat (D,), V).
+    indices are known; coordinates outside `active` are skipped. Returns (S_hat (D,), V), where `V`
+    is Saltelli's denominator: the variance of the sample-averaged posterior mean over the A and B
+    points together. That is not the quadrature `Var_nu(m)` the exact routes return.
     """
     D = fitted.X_train.shape[1]
     points = qmc.Sobol(2 * D, scramble=True, seed=seed).random(n)

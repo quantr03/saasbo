@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import jax.numpy as jnp
 import numpy as np
+from jax import Array
 from numpyro.diagnostics import summary
 
 

@@ -1,12 +1,12 @@
 """Tests for `python -m experiments.run_bo`: the study's entry point, as SLURM will run it.
 
-Three of these go through `subprocess` rather than through `main(argv)`, because what they check
+Four of these go through `subprocess` rather than through `main(argv)`, because what they check
 is exactly what an in-process call cannot: that `python -m experiments.run_bo` resolves to a
 module with a `__main__` guard, that its exit code reaches the shell (a SLURM array's only signal
-that a task failed), and that a real 15-iteration run leaves the seven artifacts of the plan's
-run directory on disk. They are the expensive ones -- each pays JAX's import -- so everything
-that does not need a process (the argument errors, `--objective-dir`'s stem) calls `main`
-directly instead.
+that a task failed), that a real 15-iteration run leaves the seven artifacts of the plan's run
+directory on disk, and that the pre-split `python -m sagp.bo` no longer resolves to anything that
+runs. They are the expensive ones -- each pays JAX's import -- so everything that does not need a
+process (the argument errors, `--objective-dir`'s stem) calls `main` directly instead.
 
 `--dry-run` gets the closest reading: it is the flag a person uses to check a command line before
 committing 16 hours of cluster time to it, so the test parses its JSON rather than grepping it,
@@ -88,6 +88,23 @@ def test_a_run_writes_every_artifact_of_the_run_directory(tmp_path, repo_root):
     assert sorted(p.name for p in (run_dir / "samples").glob("t*.npz")) == [
         f"t{t:03d}.npz" for t in range(5, 15)
     ]
+
+
+def test_the_pre_split_module_path_exits_non_zero_and_writes_nothing(tmp_path, repo_root):
+    # `python -m sagp.bo ...` was the entry point before the split. A `.sbatch` still on the
+    # cluster with the old module path must fail loudly: without the tombstone the module runs its
+    # imports, exits 0, and a 160-task array reports success having written no run at all.
+    out = tmp_path / "runs"
+    done = subprocess.run(
+        [
+            sys.executable, "-m", "sagp.bo",
+            "--family", "aligned3", "--seed", "0", "--cell", "sobol", "--out", str(out),
+        ],
+        cwd=repo_root, capture_output=True, text=True, timeout=240,
+    )
+    assert done.returncode != 0
+    assert "experiments.run_bo" in done.stderr
+    assert not out.exists()
 
 
 # --- what does not need a process ---
