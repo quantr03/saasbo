@@ -40,7 +40,7 @@ def rbf_kernel(X, Z, var, inv_length_sq, noise, include_noise):
 def matern_kernel(X, Z, var, inv_length_sq, noise, include_noise):
     deltaXsq = jnp.square(X[:, None, :] - Z) * inv_length_sq  # N_X N_Z P
     dsq = jnp.sum(deltaXsq, axis=-1)  # N_X N_Z
-    exponent = root_five * jnp.sqrt(jnp.clip(dsq, a_min=1.0e-12))
+    exponent = root_five * jnp.sqrt(jnp.clip(dsq, 1.0e-12))  # JAX 0.10.0 removed the a_min keyword; positional min is identical
     poly = 1.0 + exponent + five_thirds * dsq
     k = var * poly * jnp.exp(-exponent)
     if include_noise:
