@@ -15,12 +15,15 @@ imports no submodule.
 
 `numpyro.set_platform`/`set_host_device_count`/`enable_x64` run here, at package import, before
 any of this package's code creates a JAX array: every later task depends on float64 and the cpu
-platform being set before the first array exists, not after.
+platform being set before the first array exists, not after. Torch's default dtype and thread
+count are set here for the same reason numpyro's are.
 """
+import os
 from typing import Any
 
 import jax
 import numpyro
+import torch
 
 numpyro.set_platform("cpu")
 numpyro.set_host_device_count(1)
@@ -28,6 +31,11 @@ numpyro.enable_x64()
 # Belt-and-suspenders: this is what numpyro.enable_x64() does internally, but a test process may
 # have imported jax -- and so fixed its dtype defaults -- before this package is ever imported.
 jax.config.update("jax_enable_x64", True)
+# Every torch factory call in sagp must produce float64 to match the JAX side, and an array task
+# on SLURM must not oversubscribe its one core.
+torch.set_default_dtype(torch.float64)
+if "OMP_NUM_THREADS" in os.environ:
+    torch.set_num_threads(int(os.environ["OMP_NUM_THREADS"]))
 
 _GP_API = ("fit", "FittedGP")
 _BO_API = ("run_bo",)

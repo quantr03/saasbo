@@ -3,3 +3,7 @@ jaxlib==0.10.2
 numpyro==0.21.0
 scipy==1.17.1
 numpy==2.4.6
+torch==2.14.0
+gpytorch==1.15.2
+linear_operator==0.6.1
+botorch==0.18.1

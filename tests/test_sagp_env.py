@@ -1,11 +1,12 @@
 """Environment tests for the sagp package.
 
-Task 0 makes no behavioral claims about sagp beyond three things: the pins in
-requirements-sagp.txt match what's actually installed (a), the vendored saasgp/saasbo/util still
-import and saasgp.matern_kernel still computes a sane kernel now that saasgp.py's one jnp.clip
-call is patched for JAX 0.10 (b), and importing sagp enables float64 process-wide and the
-vendored SAASGP still fits and predicts end to end on the pinned stack (c). saasbo and util are
-imported only to prove they still do; nothing else here calls them.
+Task 0 makes no behavioral claims about sagp beyond four things: the pins in
+requirements-sagp.txt match what's actually installed, jax and torch alike (a), the vendored
+saasgp/saasbo/util still import and saasgp.matern_kernel still computes a sane kernel now that
+saasgp.py's one jnp.clip call is patched for JAX 0.10 (b), the vendored SAASGP still fits and
+predicts end to end on the pinned stack (c), and importing sagp enables float64 process-wide on
+both jax and torch (d). saasbo and util are imported only to prove they still do; nothing else
+here calls them.
 
 `import sagp` comes first, before anything else in this module creates a JAX array, so its
 numpyro.enable_x64()/jax.config.update side effect is in force before test (c) creates one --
@@ -15,12 +16,16 @@ from pathlib import Path
 
 import sagp
 
+import botorch
+import gpytorch
 import jax
 import jax.numpy as jnp
 import jaxlib
+import linear_operator
 import numpy as np
 import numpyro
 import scipy
+import torch
 
 import saasbo
 import saasgp
@@ -46,6 +51,15 @@ def test_pinned_versions_match_installed_stack(repo_root: Path) -> None:
     assert numpyro.__version__ == pins["numpyro"]
     assert scipy.__version__ == pins["scipy"]
     assert np.__version__ == pins["numpy"]
+    assert torch.__version__ == pins["torch"]
+    assert gpytorch.__version__ == pins["gpytorch"]
+    assert linear_operator.__version__ == pins["linear_operator"]
+    assert botorch.__version__ == pins["botorch"]
+
+
+def test_import_sagp_sets_torch_float64_default() -> None:
+    assert torch.get_default_dtype() is torch.float64
+    assert torch.ones(1).dtype is torch.float64
 
 
 def test_vendored_reference_imports_and_matern_kernel_diagonal_is_sane() -> None:
