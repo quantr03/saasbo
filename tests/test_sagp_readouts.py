@@ -99,7 +99,7 @@ def test_exact_additive_matches_brute_force(prior):
     # The additive closed form claims two things the brute force can refute: that the components
     # are nu-orthogonal (so the indices sum to one) and that each cell's weight/normalization pair
     # is the one its kernel actually uses -- a normalized kbar scaled by a_sq_i, or an
-    # unnormalized k~ scaled by kernel_var.
+    # unnormalized k~ scaled by outputscale.
     D, n = 2, 3
     rng = np.random.default_rng(21)
     rho = np.array([[3.0, 0.4], [1.2, 2.5]])
@@ -221,7 +221,7 @@ def test_shares_and_active_rules():
 
 
 def test_degenerate_noise_gives_nan_shares():
-    # `kernel_noise ~ LogNormal(0, 10)` is unbounded, so a draw from a fit that failed its
+    # `noise ~ 1e-4 + Gamma(0.9, 10)` is unbounded, so a draw from a fit that failed its
     # diagnostics can carry sigma^2 >= 1: no signal is left for a_sq_i to be a share of, and the
     # 1 - sigma^2 correction would hand back a *negative* share. Such a draw reads NaN and is
     # dropped from the active count -- p_active[0] is 3/3, not the 3/4 counting it as inactive.
@@ -382,13 +382,13 @@ _SOBOL_WARNING = "The balance properties of Sobol' points require n to be a powe
 
 
 def _identification_data(family: str, D: int, n: int, seed: int):
-    """The SQ1 design of plan §2's `identify`: Sobol X, observed y, standardized and negated."""
+    """The SQ1 design of plan §2's `identify`: Sobol X, observed y, standardized."""
     objective = make_family(family, seed, D=D)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=_SOBOL_WARNING)
         X = qmc.Sobol(D, scramble=True, seed=seed).random(n)
     y = objective.observe(X, noise_rng(seed, run=0))
-    return objective, jnp.asarray(X), jnp.asarray(-(y - y.mean()) / y.std())
+    return objective, jnp.asarray(X), jnp.asarray((y - y.mean()) / y.std())
 
 
 def _assert_recovers_shares(D: int, n: int, nuts: NUTSConfig) -> None:

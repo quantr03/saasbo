@@ -66,9 +66,10 @@ def component_means(fitted: FittedGP, x_grid: ArrayLike) -> Array:
     """Additive cells only: per-component posterior means at `x_grid`, (S, D, G).
 
     m_{s,i}(t) = w_{s,i} * sum_n kbar_i(t, X[n, i]) alpha_{sn}, (w, kbar) the cell's own pair
-    (`_centered_parts`). The additive kernel being sum_i w_i kbar_i(x_i, z_i), these sum to the
-    posterior mean exactly: at a point whose coordinates all equal t they reproduce
-    `posterior(...)[0]`. One grid serves every coordinate.
+    (`_centered_parts`). The additive kernel being sum_i w_i kbar_i(x_i, z_i), the posterior mean is
+    `fitted.means()[s]` plus these summed: at a point whose coordinates all equal t,
+    `means()[s] + sum_i m_{s,i}(t)` reproduces `posterior(...)[0]`. One grid serves every
+    coordinate.
     """
     x_grid = jnp.asarray(x_grid, dtype=jnp.float64)
     X = fitted.columns(fitted.X_train)
