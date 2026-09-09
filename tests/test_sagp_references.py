@@ -1,4 +1,4 @@
-"""Tests for sagp.gp's MAP references: DSP-by-MAP and the oracle restricted to S.
+"""Tests for sagp.references: DSP-by-MAP and the oracle restricted to S.
 
 The BO study has two references that are not one of the four NUTS-fitted cells but that the loop
 must not be able to tell apart from one: Hvarfner et al. 2024's "vanilla BO" -- an ARD Matern-5/2
@@ -13,12 +13,13 @@ Neither of those catches a *mistranscribed* prior, though: the fit would still b
 lengthscales would still come out short on S under the wrong constants. Since the whole claim of
 this reference is that it is Hvarfner et al.'s model and not something nearby, the constants are
 pinned directly -- against their arithmetic, and against a from-scratch recomputation of the whole
-objective in numpy/scipy that shares no line of code with `sagp.gp`.
+objective in numpy/scipy that shares no line of code with `sagp.references`.
 
 `sagp.gp` is imported first, before this module creates any JAX array, so `sagp/__init__.py`'s
 enable_x64 is in force for every array below.
 """
 import sagp.gp as gp
+import sagp.references as references
 
 import math
 import warnings
@@ -58,7 +59,7 @@ def test_dsp_map_posterior_has_one_sample():
     # cell's is at S = 1, and a usable predictive variance at points that are not in the design.
     _, X, z = _data()
 
-    fitted = gp.fit_map(X, z)
+    fitted = references.fit_map(X, z)
     mean, var = fitted.posterior(_test_points())
 
     assert fitted.cell == "dsp_map"
@@ -75,7 +76,7 @@ def test_map_lengthscales_are_shorter_on_the_active_set():
     # -- three active coordinates out of ten -- it has to.
     objective, X, z = _data()
 
-    fitted = gp.fit_map(X, z)
+    fitted = references.fit_map(X, z)
 
     ell = np.asarray(fitted.samples["kernel_inv_length_sq"][0]) ** -0.5
     S = list(objective.labels.S)
@@ -89,7 +90,7 @@ def test_oracle_fits_the_active_coordinates_only():
     # answers full-D test points, while its parameters are only as wide as S.
     objective, X, z = _data()
 
-    oracle = gp.fit_map(X, z, active=np.array(objective.labels.S))
+    oracle = references.fit_map(X, z, active=np.array(objective.labels.S))
     mean, var = oracle.posterior(_test_points())
 
     assert oracle.cell == "oracle_S"
@@ -106,7 +107,7 @@ def test_map_objective_falls_from_the_prior_mode():
     # distinguishes "fitted" from "returned the initial values".
     _, X, z = _data()
 
-    fitted = gp.fit_map(X, z)
+    fitted = references.fit_map(X, z)
 
     assert fitted.map_result["nit"] > 0
     assert fitted.map_result["fun"] < fitted.map_result["fun0"]
@@ -117,7 +118,7 @@ def test_fit_map_is_deterministic():
     # reproducible from the seed alone, and re-fitting the same data has to give the same GP.
     _, X, z = _data()
 
-    first, second = gp.fit_map(X, z), gp.fit_map(X, z)
+    first, second = references.fit_map(X, z), references.fit_map(X, z)
 
     for site, draws in first.samples.items():
         assert np.array_equal(np.asarray(draws), np.asarray(second.samples[site]))
@@ -130,23 +131,23 @@ def test_prior_constants_are_hvarfners():
     # The transcription from BoTorch (`get_covar_module_with_dim_scaled_prior` and
     # `get_gaussian_likelihood_with_lognormal_prior`), which nothing else here would catch: every
     # test above passes just as well under a prior that is merely prior-shaped.
-    assert gp._ELL_FLOOR == 0.025
-    assert gp._ELL_PRIOR_SCALE == pytest.approx(math.sqrt(3.0))
-    assert gp._ell_prior_loc(10) == pytest.approx(math.sqrt(2.0) + math.log(10.0) / 2.0)
-    assert gp._ell_prior_loc(3) == pytest.approx(math.sqrt(2.0) + math.log(3.0) / 2.0)
-    assert gp._NOISE_FLOOR == 1.0e-4
-    assert gp._NOISE_PRIOR_LOC == -4.0
-    assert gp._NOISE_PRIOR_SCALE == 1.0
+    assert references._ELL_FLOOR == 0.025
+    assert references._ELL_PRIOR_SCALE == pytest.approx(math.sqrt(3.0))
+    assert references._ell_prior_loc(10) == pytest.approx(math.sqrt(2.0) + math.log(10.0) / 2.0)
+    assert references._ell_prior_loc(3) == pytest.approx(math.sqrt(2.0) + math.log(3.0) / 2.0)
+    assert references._NOISE_FLOOR == 1.0e-4
+    assert references._NOISE_PRIOR_LOC == -4.0
+    assert references._NOISE_PRIOR_SCALE == 1.0
 
 
 @pytest.mark.parametrize("D_eff", [D, 3])
 def test_start_point_is_the_two_prior_modes(D_eff):
     # BoTorch's initial values are the priors' modes exp(loc - scale^2); L-BFGS-B walks in u, so
     # what has to be the mode is the *constrained* start, not `u0` itself.
-    u0 = gp._dsp_start(D_eff)
+    u0 = references._dsp_start(D_eff)
 
-    ell0 = gp._ELL_FLOOR + np.exp(u0[:D_eff])
-    noise0 = gp._NOISE_FLOOR + np.exp(u0[D_eff])
+    ell0 = references._ELL_FLOOR + np.exp(u0[:D_eff])
+    noise0 = references._NOISE_FLOOR + np.exp(u0[D_eff])
     assert u0.shape == (D_eff + 1,)
     assert ell0 == pytest.approx(math.exp(math.sqrt(2.0) + math.log(D_eff) / 2.0 - 3.0), rel=1e-12)
     assert noise0 == pytest.approx(math.exp(-5.0), rel=1e-12)
@@ -155,7 +156,7 @@ def test_start_point_is_the_two_prior_modes(D_eff):
 @pytest.mark.parametrize("D_eff", [D, 3])
 def test_objective_matches_a_from_scratch_recomputation(D_eff):
     # The check the rest of the file cannot make: the objective, written again from the paper's
-    # description in numpy and scipy, sharing no line with `sagp.gp` -- explicit ARD Matern-5/2 at
+    # description in numpy and scipy, sharing no line with `sagp.references` -- explicit ARD Matern-5/2 at
     # unit variance, `scipy.stats.multivariate_normal` for the marginal likelihood and
     # `scipy.stats.lognorm` for the two priors, on the constrained values with no Jacobian. Run at
     # both widths the study uses: the full design and the oracle's |S| = 3.
@@ -164,7 +165,7 @@ def test_objective_matches_a_from_scratch_recomputation(D_eff):
     X, y = rng.random((n, D_eff)), rng.standard_normal(n)
     u = 0.3 * rng.standard_normal(D_eff + 1)
 
-    value = float(gp._dsp_neg_log_joint(u, X, y, D_eff))
+    value = float(references._dsp_neg_log_joint(u, X, y, D_eff))
 
     ell = 0.025 + np.exp(u[:D_eff])
     noise = 1.0e-4 + np.exp(u[D_eff])
@@ -216,8 +217,8 @@ def test_a_failed_optimization_is_read_off_the_optimizers_message(
         value, _ = fun(u0)
         return OptimizeResult(x=u0, fun=value, nit=0, success=False, message=message)
 
-    monkeypatch.setattr(gp, "minimize", stub)
-    fitted = gp.fit_map(X, z)
+    monkeypatch.setattr(references, "minimize", stub)
+    fitted = references.fit_map(X, z)
 
     assert fitted.status == status
     assert fitted.status_reason == reason
