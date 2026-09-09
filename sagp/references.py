@@ -4,6 +4,9 @@ The dimension-scaled-prior (DSP) reference is Hvarfner et al. 2024's "vanilla BO
 Matern-5/2 fit by MAP to the full design -- and the oracle is the identical fit restricted to the
 objective's true active coordinates. Both predict through `FittedGP` with a single retained
 "sample", exactly like a cell at S = 1, so the BO loop cannot tell either reference from a cell.
+The study's third reference is not a surrogate at all -- the Sobol search fits nothing -- and so
+reaches the loop as a proposer instead: `propose_sobol` is here for the same reason, that a
+reference is a thing the loop is *given* rather than a branch inside it.
 """
 from __future__ import annotations
 
@@ -204,3 +207,24 @@ def fit_map(
         "fun0": fun0,
     }
     return fitted
+
+
+# --- the Sobol search ---
+
+
+def propose_sobol(
+    fitted: FittedGP | None,
+    y_target: float,
+    rngs: object,
+    t: int,
+    *,
+    sequence: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Row `t` of a fixed sequence: the quasi-random search reference, as a `run_bo` proposer.
+
+    The third reference fits nothing, so `fitted` is `None` and there is no acquisition to report
+    a value for. `sequence` is the run's own scrambled Sobol sequence, whose first `n_init` rows
+    are the shared initial design (`bo.initial_design`), which is what makes this a *continuation*
+    of that design rather than a second, unrelated draw.
+    """
+    return np.asarray(sequence[t], dtype=float), float("nan")

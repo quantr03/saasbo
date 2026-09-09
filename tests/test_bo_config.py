@@ -10,7 +10,7 @@ What a run directory has to be able to prove, and what these tests check it prov
   every flag set away from its default at once, compared to one hand-written `RunConfig`, so a
   flag that reaches nothing fails too.
 - that every method started from the same points. `initial_design` takes no method, so the two
-  end-to-end runs here are the check that `run_bo` really calls it before the method matters.
+  end-to-end runs here are the check that `run` really calls it before the method matters.
 - that the manifest describes the run rather than the reader's environment: it round-trips into
   the `RunConfig` the run used, its `reference_sha256` matches a *fresh* `hashlib.sha256` of the
   vendored files (not `runlog`'s own helper agreeing with itself), and a resume neither rewrites
@@ -34,7 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from experiments import run_bo as run_bo_module
-from experiments.run_bo import METHODS, resolve_config, run_bo
+from experiments.run_bo import METHODS, resolve_config, run
 from experiments.runlog import RunConfig, config_hash
 from sagp.bo import initial_design
 from sagp.diagnostics import DiagThresholds
@@ -122,10 +122,10 @@ def test_every_run_starts_from_the_shared_initial_design(tmp_path):
     design = initial_design(5, _N_INIT, _SEED)
     # One method that fits nothing and the two MAP references, whose fits are milliseconds. The
     # remaining four would each buy a NUTS run and no new information: `initial_design` takes
-    # (D, n_init, seed) and no method, and `run_bo` calls it once, before `cfg.method` has been
+    # (D, n_init, seed) and no method, and the loop calls it once, before `cfg.method` has been
     # used for anything at all.
     for method in ("sobol", "dsp_map", "oracle_S"):
-        run_dir = run_bo(
+        run_dir = run(
             _objective(), method, seed=_SEED, T=_T, n_init=_N_INIT,
             out_dir=tmp_path / method, **_LOOP_KW,
         )
@@ -138,7 +138,7 @@ def test_every_run_starts_from_the_shared_initial_design(tmp_path):
 
 
 def _manifest_run(out_dir: Path) -> Path:
-    return run_bo(
+    return run(
         _objective(), "dsp_map", seed=_SEED, T=_T, n_init=_N_INIT, out_dir=out_dir, **_LOOP_KW
     )
 
@@ -202,7 +202,7 @@ def test_the_manifest_records_the_code_the_environment_and_the_problem(tmp_path,
 
 
 def test_a_resume_records_itself_and_warns_about_a_version_that_moved(tmp_path):
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "dsp_map", seed=_SEED, T=7, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
     )
     path = run_dir / "manifest.json"
@@ -211,7 +211,7 @@ def test_a_resume_records_itself_and_warns_about_a_version_that_moved(tmp_path):
     path.write_text(json.dumps(started))
 
     # T is outside `config_hash` precisely so a run killed by a wall clock can be resumed longer.
-    run_bo(
+    run(
         _objective(), "dsp_map", seed=_SEED, T=9, n_init=_N_INIT, out_dir=tmp_path,
         resume=True, **_LOOP_KW,
     )
@@ -239,7 +239,7 @@ def test_a_resume_records_itself_and_warns_about_a_version_that_moved(tmp_path):
 
 
 def test_the_environment_lock_lists_the_installed_distributions(tmp_path):
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "dsp_map", seed=_SEED, T=7, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
     )
     lock = run_dir / "environment.lock.txt"
@@ -251,7 +251,7 @@ def test_the_environment_lock_lists_the_installed_distributions(tmp_path):
     # It describes the environment the run *started* in, so a resume must leave it alone; the
     # sentinel is what a rewrite would destroy, which comparing two identical writes would not.
     lock.write_text("sentinel\n")
-    run_bo(
+    run(
         _objective(), "dsp_map", seed=_SEED, T=9, n_init=_N_INIT, out_dir=tmp_path,
         resume=True, **_LOOP_KW,
     )

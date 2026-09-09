@@ -43,13 +43,13 @@ from scipy.stats import qmc
 
 import saasbo
 import saasgp
-from experiments.run_bo import run_bo
+from experiments.run_bo import run
 from sagp.bo import iteration_rngs
 from sagp.diagnostics import DiagThresholds
 from synthobj.families import make_family
 
 # The run seed, shared by both sides: `SeededSAASGP` and the two shims read it to rebuild the very
-# streams `run_bo` used, so it is a module constant rather than an argument threaded through them.
+# streams `run` used, so it is a module constant rather than an argument threaded through them.
 _SEED = 3
 _D = 5
 _T = 25
@@ -79,7 +79,7 @@ class SeededSAASGP(saasgp.SAASGP):
 
 @pytest.mark.slow
 def test_our_loop_reproduces_the_reference_trajectory(tmp_path, monkeypatch):
-    """`run_bo` and `run_saasbo` choose the same 25 points and observe the same 25 values.
+    """Our loop and `run_saasbo` choose the same 25 points and observe the same 25 values.
 
     See this module's docstring for what the three patches are and why they are the only three.
     Our run goes first, unpatched; the reference follows inside a `monkeypatch.context()`, since
@@ -87,7 +87,7 @@ def test_our_loop_reproduces_the_reference_trajectory(tmp_path, monkeypatch):
     """
     objective = make_family("aligned3", 0, D=_D)
 
-    run_dir = run_bo(
+    run_dir = run(
         objective,
         "product/lengthscale",
         seed=_SEED,

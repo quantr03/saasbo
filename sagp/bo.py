@@ -3,17 +3,20 @@
 `saasbo.run_saasbo` is one loop hard-wired to one surrogate. The thesis compares seven methods
 (the four cells, a Sobol search, and the two MAP references) whose regret differences must be
 attributable to the surrogate alone, so the loop around them has to be *literally* the same code:
-this module is that loop, and it reaches `sagp.gp` only through `fit`, `fit_map`,
-`FittedGP.posterior`, `readouts`, `standardize` and the two config dataclasses. It never asks how
-a cell is parameterized -- a per-method branch here would be exactly the confound the design is
-built to avoid -- and `gp.py` in turn never sees a budget or an acquisition.
+this module is that loop, and every difference between the methods reaches it as an argument --
+`surrogate` and `propose`, with `on_iteration` for whoever wants to watch. It reaches `sagp.gp`
+only through `standardize` and `FittedGP.posterior` and never asks how a cell is parameterized --
+a per-method branch here would be exactly the confound the design is built to avoid -- and `gp.py`
+in turn never sees a budget or an acquisition. Which method a run takes, where it writes and how
+it is resumed are `experiments.run_bo`'s and `experiments.runlog`'s; nothing here knows about
+either.
 
 What is new relative to the reference driver is bookkeeping, not method: every random draw of
 iteration `t` is a pure function of `(seed, t)` (`iteration_rngs`), so a killed run resumes
-bit-identically from its checkpoint and paired runs across methods share the same design and the
-same observation noise; every iteration appends one row of the plan's schema, the per-coordinate
-readouts and the retained samples; and a fit that raises is retried once and then replaced by a
-random query rather than being allowed to end the run.
+bit-identically from its `state` and paired runs across methods share the same design and the
+same observation noise; every iteration is handed whole to `on_iteration`, which is where a run
+directory's row, readouts and retained samples get written; and a fit that raises is retried once
+and then replaced by a random query rather than being allowed to end the run.
 
 The acquisition is LogEI (Ament et al. 2023) combined over the retained samples by log-mean-exp,
 which is the exact log of the reference's sample-averaged EI: the argmax is unchanged in exact
@@ -32,6 +35,8 @@ invocation, resumable, with its whole provenance written into the run directory'
 from __future__ import annotations
 
 import math
+import time
+import traceback
 import warnings
 from collections.abc import Callable
 from typing import NamedTuple
@@ -47,7 +52,7 @@ from scipy.optimize import fmin_l_bfgs_b
 from scipy.stats import qmc
 
 import saasbo
-from sagp.gp import FittedGP
+from sagp.gp import FittedGP, standardize
 from synthobj.families import noise_rng
 
 
@@ -244,3 +249,214 @@ def optimize_ei(
             x_best, y_best = x.copy(), fx
 
     return x_best, y_best
+
+
+# --- the loop ---
+
+
+def propose_ei(
+    fitted: FittedGP,
+    y_target: float,
+    rngs: IterRNG,
+    t: int,
+    *,
+    acq: Callable[..., Array] = log_ei,
+    num_init: int = 5000,
+    num_restarts_ei: int = 5,
+) -> tuple[np.ndarray, float]:
+    """`optimize_ei` driven by iteration `t`'s streams: the loop's default proposer.
+
+    `t` is unused here -- the acquisition's randomness is already in `rngs` -- and is part of the
+    proposer protocol for the proposers that walk a sequence instead of optimizing, above all
+    `references.propose_sobol`.
+    """
+    x, value = optimize_ei(
+        fitted,
+        y_target,
+        rngs.sobol_seed,
+        rngs.jitter_rng,
+        num_restarts_ei=num_restarts_ei,
+        num_init=num_init,
+        acq=acq,
+    )
+    return np.asarray(x, dtype=float), float(value)
+
+
+class BOState(NamedTuple):
+    """Every point evaluated so far: the design, its observations, and the noise-free values.
+
+    The whole of what an iteration depends on besides `(seed, t)`, which is what makes it both the
+    loop's running state and the thing a checkpoint has to hold: `run_bo(..., state=...)` resumes
+    from one and cannot tell it from the state its own earlier iterations would have built.
+    """
+
+    X: np.ndarray  # (t, D), the design in the unit cube
+    y: np.ndarray  # (t,), the observations the loop optimizes against -- noisy unless `noiseless`
+    f: np.ndarray  # (t,), the objective's own noise-free values, which the regret is taken on
+
+
+class Iteration(NamedTuple):
+    """What one iteration produced, handed whole to `on_iteration` after the append.
+
+    Everything a run's row needs and nothing derived from it: the loop reports, and what a row
+    should say about an iteration is the observer's business (`experiments.runlog.RunLogger`).
+    `state` is the arrays *after* this point was appended -- the very objects `run_bo` returns --
+    so an observer's `state.y.max()` is the incumbent including this iteration.
+    """
+
+    t: int
+    x: np.ndarray  # the point chosen at t
+    y: float  # its observation, and
+    f: float  # the objective's noise-free value there
+    state: BOState
+    fitted: FittedGP | None  # None for a model-free method, and for a fit that raised twice
+    acq_value: float  # in the acquisition's own units; NaN when nothing was optimized
+    fit_wall_s: float
+    acq_wall_s: float
+    fit_calls: int
+    status: str  # the fit's "ok"/"refit"/"excluded", or "excluded" for a fit that raised twice
+    reason: str
+    y_mean: float  # the standardization this iteration fitted under (`gp.standardize`)
+    y_std: float
+
+
+def _fit_with_retry(
+    t: int,
+    surrogate: Callable[..., FittedGP] | None,
+    X: np.ndarray,
+    z: np.ndarray,
+    rngs: IterRNG,
+    log: Callable[[str], None],
+) -> tuple[FittedGP | None, int, float, str | None]:
+    """Fit, retrying once on an exception; returns (fitted, fit_calls, wall_s, failure reason).
+
+    A fit whose *diagnostics* failed is not a failure here -- `fit` returns it with
+    `status="excluded"` and the loop queries with it anyway, because a study that stopped at every
+    bad chain would report a survivorship-biased regret. An *exception* out of JAX or NumPyro is
+    different: it leaves no surrogate at all, so it is logged with its traceback, retried once on
+    a key disjoint from both of `fit`'s own (`fold_in(key, 2)`; `fit`'s refit uses 1), and if that
+    raises too the caller falls back to a random query. The run continues either way. A `None`
+    surrogate is the model-free method: no call, no clock, and nothing that could fail.
+    """
+    if surrogate is None:
+        return None, 0, float("nan"), None
+    start = time.perf_counter()
+    try:
+        fitted = surrogate(X, z, rngs.key)
+        return fitted, 1, time.perf_counter() - start, None
+    except Exception:
+        log(f"t={t}: the fit raised; retrying once\n{traceback.format_exc()}")
+    try:
+        fitted = surrogate(X, z, jax.random.fold_in(rngs.key, 2))
+        return fitted, 2, time.perf_counter() - start, None
+    except Exception as error:
+        log(f"t={t}: the retry raised; querying at random\n{traceback.format_exc()}")
+        return None, 2, time.perf_counter() - start, f"exception: {type(error).__name__}: {error}"
+
+
+def _observe(
+    objective: object, x: np.ndarray, noiseless: bool, rngs: IterRNG
+) -> float:
+    """One observation of the objective at `x`: noisy through `rngs.noise_rng`, or `f(x)` itself."""
+    if noiseless:
+        return float(objective(x))
+    return float(objective.observe(x[None, :], rngs.noise_rng)[0])
+
+
+def run_bo(
+    objective: object,
+    surrogate: Callable[..., FittedGP] | None,
+    seed: int,
+    *,
+    T: int = 200,
+    n_init: int = 20,
+    propose: Callable[..., tuple[np.ndarray, float]] = propose_ei,
+    noiseless: bool = False,
+    state: BOState | None = None,
+    on_iteration: Callable[[Iteration], None] | None = None,
+    log: Callable[[str], None] = print,
+) -> BOState:
+    """Run `T` evaluations of `objective` under `surrogate` and `propose`; returns the final state.
+
+    The first `n_init` points are the shared Sobol design of `seed` and are not iterations: they
+    have no fit and nothing to report but their observation. From `t = n_init` on, each iteration
+    standardizes what has been observed, fits, maximizes the acquisition, evaluates, appends, and
+    hands the whole of itself to `on_iteration` (plan section 4, steps 2-6).
+
+    The three adapters are what makes this the *same* loop for all seven methods.
+    `surrogate(X, z, key) -> FittedGP` is the fit, and `None` is the model-free method -- the Sobol
+    search -- which costs no fit call and reports a NaN `fit_wall_s`; `propose(fitted, y_target,
+    rngs, t) -> (x, acq_value)` chooses the next point, `propose_ei` by default and
+    `references.propose_sobol` for that same search; `on_iteration(Iteration)` is the observer,
+    called once per iteration after the append, and `log(str)` receives the two messages of the
+    exception policy. Nothing in here writes a file or reads a configuration.
+
+    `state` is a resume: iterating starts at `len(state.X)` and the run continues bit-identically,
+    since iteration `t` is a function of `(seed, t)` and of the points before it alone. Without one
+    the design is drawn and observed here, each of its points from the stream iteration `t` would
+    have used for it, so a resumed run and an uninterrupted one draw the same noise.
+    """
+    D = objective.D
+    if state is None:
+        X = initial_design(D, n_init, seed)
+        f = np.asarray(objective(X), dtype=float)
+        y = np.array(
+            [
+                _observe(objective, X[t], noiseless, iteration_rngs(seed, t))
+                for t in range(n_init)
+            ]
+        )
+        state = BOState(X, y, f)
+
+    for t in range(len(state.X), T):
+        z, y_mean, y_std = standardize(state.y)
+        y_target = float(np.min(z))
+        rngs = iteration_rngs(seed, t)
+
+        fitted, fit_calls, fit_wall_s, failure = _fit_with_retry(
+            t, surrogate, state.X, z, rngs, log
+        )
+        if failure is not None:
+            # Both attempts raised: query at random rather than end the run, and mark the
+            # iteration so the analysis can count these instead of reading them as ordinary ones.
+            x_next = initial_design(D, 1, rngs.fallback_seed)[0]
+            acq_value, acq_wall_s = float("nan"), float("nan")
+            status, reason = "excluded", failure
+        else:
+            start = time.perf_counter()
+            x_next, acq_value = propose(fitted, y_target, rngs, t)
+            acq_wall_s = time.perf_counter() - start
+            status, reason = ("ok", "") if fitted is None else (fitted.status, fitted.status_reason)
+
+        # A proposer is an argument, so what it returns is normalized here rather than trusted:
+        # the objective and the state below are numpy's, whatever the proposer computed in.
+        x_next = np.asarray(x_next, dtype=float)
+        f_next = float(objective(x_next))
+        y_next = _observe(objective, x_next, noiseless, rngs)
+
+        state = BOState(
+            np.vstack([state.X, x_next]),
+            np.append(state.y, y_next),
+            np.append(state.f, f_next),
+        )
+        if on_iteration is not None:
+            on_iteration(
+                Iteration(
+                    t=t,
+                    x=x_next,
+                    y=y_next,
+                    f=f_next,
+                    state=state,
+                    fitted=fitted,
+                    acq_value=acq_value,
+                    fit_wall_s=fit_wall_s,
+                    acq_wall_s=acq_wall_s,
+                    fit_calls=fit_calls,
+                    status=status,
+                    reason=reason,
+                    y_mean=y_mean,
+                    y_std=y_std,
+                )
+            )
+
+    return state

@@ -23,7 +23,7 @@ from scipy.stats import qmc
 
 import sagp.gp
 from experiments import run_bo as run_bo_module
-from experiments.run_bo import run_bo
+from experiments.run_bo import run
 from sagp.bo import initial_design, iteration_rngs
 from sagp.diagnostics import DiagThresholds, Diagnostics
 from sagp.gp import NUTSConfig
@@ -58,7 +58,7 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
 @pytest.fixture(scope="module")
 def reference_run(tmp_path_factory) -> Path:
     """One uninterrupted `dsp_map` run: the trajectory determinism and resume are compared to."""
-    return run_bo(
+    return run(
         _objective(),
         "dsp_map",
         seed=1,
@@ -75,7 +75,7 @@ def _checkpoint(run_dir: Path) -> dict[str, np.ndarray]:
 
 
 def test_two_runs_at_the_same_seed_are_bit_identical(reference_run, tmp_path):
-    again = run_bo(
+    again = run(
         _objective(), "dsp_map", seed=1, T=_T, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
     )
     first, second = _checkpoint(reference_run), _checkpoint(again)
@@ -93,11 +93,11 @@ def test_two_nuts_runs_at_the_same_seed_are_bit_identical(tmp_path):
         thresholds=DiagThresholds(float("inf"), 0.0, 10**9),
         **_LOOP_KW,
     )
-    first = run_bo(
+    first = run(
         _objective(), "product/lengthscale", seed=1, T=7, n_init=5,
         out_dir=tmp_path / "a", **kwargs,
     )
-    second = run_bo(
+    second = run(
         _objective(), "product/lengthscale", seed=1, T=7, n_init=5,
         out_dir=tmp_path / "b", **kwargs,
     )
@@ -106,8 +106,8 @@ def test_two_nuts_runs_at_the_same_seed_are_bit_identical(tmp_path):
 
 
 def test_resume_reproduces_the_uninterrupted_run(reference_run, tmp_path):
-    run_bo(_objective(), "dsp_map", seed=1, T=8, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW)
-    resumed = run_bo(
+    run(_objective(), "dsp_map", seed=1, T=8, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW)
+    resumed = run(
         _objective(), "dsp_map", seed=1, T=_T, n_init=_N_INIT, out_dir=tmp_path, resume=True,
         **_LOOP_KW,
     )
@@ -119,9 +119,9 @@ def test_resume_reproduces_the_uninterrupted_run(reference_run, tmp_path):
 
 
 def test_resume_refuses_a_changed_configuration(tmp_path):
-    run_bo(_objective(), "dsp_map", seed=1, T=6, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW)
+    run(_objective(), "dsp_map", seed=1, T=6, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW)
     with pytest.raises(ValueError, match="different configuration"):
-        run_bo(
+        run(
             _objective(), "dsp_map", seed=1, T=6, n_init=_N_INIT + 1, out_dir=tmp_path,
             resume=True, **_LOOP_KW,
         )
@@ -129,7 +129,7 @@ def test_resume_refuses_a_changed_configuration(tmp_path):
 
 def test_unknown_override_is_a_type_error(tmp_path):
     with pytest.raises(TypeError):
-        run_bo(_objective(), "dsp_map", seed=1, T=6, n_init=_N_INIT, out_dir=tmp_path, nonsense=1)
+        run(_objective(), "dsp_map", seed=1, T=6, n_init=_N_INIT, out_dir=tmp_path, nonsense=1)
 
 
 def test_rows_carry_the_schema_the_regret_and_the_sobol_schedule(reference_run):
@@ -213,7 +213,7 @@ def test_a_refit_row_carries_both_attempts_diagnostics(tmp_path, monkeypatch):
         sagp.gp, "diagnose", lambda flat, extra, thresholds, wall_s: next(remaining)
     )
 
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "product/lengthscale", seed=1, T=6, n_init=_N_INIT, out_dir=tmp_path,
         nuts=NUTSConfig(32, 32, 4), **_LOOP_KW,
     )
@@ -242,7 +242,7 @@ def test_a_refit_row_carries_both_attempts_diagnostics(tmp_path, monkeypatch):
 
 
 def test_resume_after_a_partial_write_rebuilds_the_missing_rows(tmp_path):
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "dsp_map", seed=1, T=9, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
     )
     iterations = run_dir / "iterations.csv"
@@ -250,7 +250,7 @@ def test_resume_after_a_partial_write_rebuilds_the_missing_rows(tmp_path):
     # A kill between the checkpoint and the logs: the checkpoint is at t = 8, the rows stop at 6.
     iterations.write_text("\n".join(before[:-2]) + "\n")
 
-    run_bo(
+    run(
         _objective(), "dsp_map", seed=1, T=9, n_init=_N_INIT, out_dir=tmp_path, resume=True,
         **_LOOP_KW,
     )
@@ -278,7 +278,7 @@ def test_resume_redoes_an_iteration_whose_row_was_torn_by_the_kill(tmp_path):
     # inside it; and when it lands just after a field separator, what is left on disk parses at
     # the header's full width with an empty final field -- a row the width check cannot tell from
     # a complete one. Only the missing line terminator can, and resume has to redo that iteration.
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "dsp_map", seed=1, T=9, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
     )
     iterations = run_dir / "iterations.csv"
@@ -293,7 +293,7 @@ def test_resume_redoes_an_iteration_whose_row_was_torn_by_the_kill(tmp_path):
         parsed = list(csv.reader(handle))
     assert len(parsed[-1]) == len(parsed[0]) and parsed[-1][-1] == ""  # full width, last field lost
 
-    run_bo(
+    run(
         _objective(), "dsp_map", seed=1, T=9, n_init=_N_INIT, out_dir=tmp_path, resume=True,
         **_LOOP_KW,
     )
@@ -310,7 +310,7 @@ def test_resume_rewrites_a_header_the_kill_tore(tmp_path):
     # leaves holds no complete row at all, so there is nothing to keep -- and leaving the fragment
     # alone would be worse than removing it: `append_row` writes a header only into a file that is
     # missing or empty, so every row of the resumed run would land underneath a torn first line.
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "dsp_map", seed=1, T=8, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
     )
     iterations = run_dir / "iterations.csv"
@@ -318,7 +318,7 @@ def test_resume_rewrites_a_header_the_kill_tore(tmp_path):
     with iterations.open("w", newline="") as handle:
         handle.write(header[:10])  # cut mid-field, with no line terminator
 
-    run_bo(
+    run(
         _objective(), "dsp_map", seed=1, T=8, n_init=_N_INIT, out_dir=tmp_path, resume=True,
         **_LOOP_KW,
     )
@@ -342,7 +342,7 @@ def test_a_fit_that_raises_twice_is_replaced_by_a_seeded_random_query(tmp_path, 
         raise RuntimeError("no surrogate today")
 
     monkeypatch.setattr(run_bo_module, "fit", always_raises)
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "product/lengthscale", seed=4, T=8, n_init=_N_INIT, out_dir=tmp_path,
         nuts=NUTSConfig(32, 32, 4), **_LOOP_KW,
     )
@@ -380,7 +380,7 @@ def test_a_fit_that_raises_once_is_retried_and_the_retry_is_what_the_row_reports
         return real_fit(*args, **kwargs)
 
     monkeypatch.setattr(run_bo_module, "fit", raises_first)
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "product/lengthscale", seed=4, T=6, n_init=_N_INIT, out_dir=tmp_path,
         nuts=NUTSConfig(32, 32, 4), thresholds=DiagThresholds(float("inf"), 0.0, 10**9),
         **_LOOP_KW,
@@ -400,7 +400,7 @@ def test_a_fit_that_raises_once_is_retried_and_the_retry_is_what_the_row_reports
 
 
 def test_the_sobol_reference_walks_the_seeds_own_sequence(tmp_path):
-    run_dir = run_bo(
+    run_dir = run(
         _objective(), "sobol", seed=3, T=12, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
     )
     with warnings.catch_warnings():
@@ -421,7 +421,7 @@ def test_the_sobol_reference_walks_the_seeds_own_sequence(tmp_path):
 
     # Which every reader of a run directory has to allow for, `truncate_to` included: it reads
     # `coords.csv` on each resume, and here there has never been one to read.
-    run_bo(
+    run(
         _objective(), "sobol", seed=3, T=14, n_init=_N_INIT, out_dir=tmp_path, resume=True,
         **_LOOP_KW,
     )
@@ -433,7 +433,7 @@ def test_the_sobol_reference_walks_the_seeds_own_sequence(tmp_path):
 
 def test_the_oracle_reference_fits_the_objectives_own_S_end_to_end(tmp_path):
     objective = _objective()
-    run_dir = run_bo(
+    run_dir = run(
         objective, "oracle_S", seed=3, T=12, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW
     )
 
@@ -479,7 +479,7 @@ def test_oracle_beats_sobol_on_aligned3(tmp_path):
         method: [
             float(
                 _read_rows(
-                    run_bo(objective, method, seed=seed, out_dir=tmp_path, **kwargs)
+                    run(objective, method, seed=seed, out_dir=tmp_path, **kwargs)
                     / "iterations.csv"
                 )[-1]["regret"]
             )

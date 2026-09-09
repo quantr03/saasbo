@@ -5,11 +5,11 @@ prior; see the plan), NUTS inference and prediction, following the vendored
 `saasgp.py`/`saasbo.py` reference exactly except where the plan calls for a change.
 `sagp.readouts` holds the posterior readouts and is reached as the submodule it is, like
 `sagp.gp` itself: callers write `from sagp.readouts import readouts`. `sagp.bo` runs the
-Bayesian-optimization loop against any cell through `gp.py`'s fit/FittedGP/posterior interface
+Bayesian-optimization loop against any cell through `gp.py`'s FittedGP/posterior interface
 alone: `bo.py` must not know how a cell is parameterized, and `gp.py` must not know about
-acquisition or budgets, so importing one must not pull in the other. `fit` and `FittedGP` are
-re-exported here from `sagp.gp`, lazily via `__getattr__` (PEP 562) rather than eagerly --
-matching `synthobj/__init__.py` -- so `import sagp` imports no submodule.
+acquisition or budgets, so importing one must not pull in the other. `fit`, `FittedGP` and
+`run_bo` are re-exported here from `sagp.gp` and `sagp.bo`, lazily via `__getattr__` (PEP 562)
+rather than eagerly -- matching `synthobj/__init__.py` -- so `import sagp` imports no submodule.
 
 `numpyro.set_platform`/`set_host_device_count`/`enable_x64` run here, at package import, before
 any of this package's code creates a JAX array: every later task depends on float64 and the cpu
@@ -28,7 +28,7 @@ numpyro.enable_x64()
 jax.config.update("jax_enable_x64", True)
 
 _GP_API = ("fit", "FittedGP")
-_BO_API = ()
+_BO_API = ("run_bo",)
 
 __all__ = list(_GP_API) + list(_BO_API)
 

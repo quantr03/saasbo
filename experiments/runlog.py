@@ -6,7 +6,9 @@ complete row is always backed by the artifacts it names and a killed run can be 
 last one. `manifest.json` is the run's provenance -- the resolved `RunConfig` and its hash, the git
 commit and its cleanliness, the package versions, the digests of the vendored reference files and
 the objective's ground-truth labels -- written once at creation and appended to on every resume.
-`experiments.run_bo` is what drives all of it; nothing in `sagp/` may import this module.
+`RunLogger.record` is the shape all of that takes to the loop: one `sagp.bo.Iteration` in, one
+iteration's worth of files out, which is what `experiments.run_bo.run` hands `run_bo` as its
+`on_iteration`. `experiments.run_bo` drives all of it; nothing in `sagp/` may import this module.
 """
 from __future__ import annotations
 
@@ -24,8 +26,10 @@ from pathlib import Path
 
 import numpy as np
 
+from sagp.bo import Iteration
 from sagp.diagnostics import DiagThresholds
 from sagp.gp import ELL_PRIOR, FittedGP, NUTSConfig
+from sagp.readouts import readouts
 
 
 # --- configuration ---
@@ -219,6 +223,32 @@ _ATTEMPT0_FIELDS: tuple[str, ...] = ("r_hat_max", "n_eff_min", "divergences")
 _COORD_FIELDS: tuple[str, ...] = ("t", "i", "native_median", "p_active", "sobol_hat")
 
 
+def _iteration_line(row: dict[str, object], fitted: FittedGP | None) -> str:
+    """One `log.txt` line: what happened at this iteration, in the units the row logs."""
+    parts = [
+        f"t={row['t']}",
+        f"method={row['method']}",
+        f"status={row['status']}",
+        f"fit_calls={row['fit_calls']}",
+        f"nuts_attempts={row['nuts_attempts']}",
+        f"fit_wall_s={row['fit_wall_s']:.3f}",
+        f"acq_wall_s={row['acq_wall_s']:.3f}",
+        f"acq_value={row['acq_value']:.6g}",
+        f"y={row['y']:.6g}",
+        f"best_f={row['best_f']:.6g}",
+        f"regret={row['regret']:.6g}",
+        f"sobol_computed={row['sobol_computed']}",
+    ]
+    if row["reason"]:
+        parts.append(f"reason={row['reason']!r}")
+    # The MAP references have no `attempts`; their fit's quality is the optimizer's outcome, so
+    # that dict is the only diagnostic they can report and it goes here rather than in the row.
+    map_result = getattr(fitted, "map_result", None)
+    if map_result is not None:
+        parts.append(f"map_result={map_result}")
+    return " ".join(parts)
+
+
 class RunLogger:
     """One run directory: the manifest, the checkpoint, the two CSVs, the samples and `log.txt`.
 
@@ -228,6 +258,13 @@ class RunLogger:
     rolls back, rather than leaving a duplicated or half-written row that no reader could detect.
     Within the appends the `iterations.csv` row is last (ruling R34), which makes it the run's
     completion marker: `last_logged_t` reads it as "this iteration's artifacts are all there".
+
+    Two attributes are the run's rather than the directory's and so are set by
+    `experiments.run_bo.run` after construction: `statuses`, which a resume seeds from the
+    checkpoint it continues, and `f_star`, the objective's optimum that the `regret` column is
+    taken against. `f_star` is not a constructor argument because `record` is handed to the loop
+    as a bound callback and cannot take the objective per call, and the objective is not this
+    class's to hold: `write_manifest` already takes it per call, for exactly one read.
     """
 
     def __init__(self, run_dir: Path, cfg: RunConfig) -> None:
@@ -240,7 +277,82 @@ class RunLogger:
         self.manifest = run_dir / "manifest.json"
         self.log_path = run_dir / "log.txt"
         self.row_fields = _ROW_FIELDS + tuple(f"x_{i}" for i in range(cfg.D))
+        self.statuses: list[str] = []  # one per iteration, n_init onward; the checkpoint's own
+        self.f_star: float | None = None  # the objective's optimum, set by the run that drives us
         self.samples_dir.mkdir(parents=True, exist_ok=True)
+
+    def record(self, it: Iteration) -> None:
+        """Write everything iteration `it` produced, in the order a killed run can be resumed from.
+
+        The loop's `on_iteration`, and the one place that order is stated. The checkpoint goes
+        first (plan section 4, step 6): the logs may then lag it by one iteration, which resume
+        rolls back, but they can never gain a duplicate or a torn row. The `iterations.csv` row
+        goes *last* of all (ruling R34), so that a complete row is a promise that this iteration's
+        coordinates and samples are on disk too -- a kill between the row and the samples would
+        otherwise leave a hole resume has no way to see.
+
+        Sobol indices are the expensive readout, so they are computed on a schedule and at the
+        last iteration (the row an end-of-run analysis reads); the native summaries are free and
+        always on.
+        """
+        compute_sobol = it.fitted is not None and (
+            it.t % self.cfg.sobol_every == 0 or it.t == self.cfg.T - 1
+        )
+        readout = (
+            None
+            if it.fitted is None
+            else readouts(it.fitted, compute_sobol=compute_sobol, sobol_n=self.cfg.sobol_n)
+        )
+        row = self._row(it, compute_sobol)
+        self.statuses.append(str(row["status"]))
+        self.checkpoint(it.state.X, it.state.y, it.state.f, it.t, self.statuses)
+        if readout is not None:
+            self.append_coords(it.t, readout)
+        if it.fitted is not None:
+            self.save_samples(it.t, it.fitted)
+        self.append_row(row)
+        self.log(_iteration_line(row, it.fitted))
+
+    def _row(self, it: Iteration, compute_sobol: bool) -> dict[str, object]:
+        """One iteration as the plan's row: what `iterations.csv` says about it, field for field."""
+        attempts = () if it.fitted is None else it.fitted.attempts
+        diagnostics = attempts[-1] if attempts else None
+        attempt0 = attempts[0] if attempts else None
+        return {
+            "t": it.t,
+            "method": self.cfg.method,
+            "family": self.cfg.family,
+            "seed": self.cfg.seed,
+            "y": it.y,
+            "f": it.f,
+            # What the loop sees (best_obs) and the truth it is scored on (best_f): under noise
+            # they differ, and the design brief's regret is the noise-free one, which cannot go
+            # negative.
+            "best_obs": float(it.state.y.max()),
+            "best_f": float(it.state.f.max()),
+            "regret": float(self.f_star - it.state.f.max()),
+            "acq_value": it.acq_value,
+            "fit_wall_s": it.fit_wall_s,
+            "acq_wall_s": it.acq_wall_s,
+            "fit_calls": it.fit_calls,
+            "nuts_attempts": 0 if it.fitted is None else len(it.fitted.attempts),
+            "status": it.status,
+            "reason": it.reason,
+            **{
+                field: (
+                    float("nan") if diagnostics is None else getattr(diagnostics, field)
+                )
+                for field in _DIAG_FIELDS
+            },
+            **{
+                f"a0_{field}": (float("nan") if attempt0 is None else getattr(attempt0, field))
+                for field in _ATTEMPT0_FIELDS
+            },
+            "y_mean": it.y_mean,
+            "y_std": it.y_std,
+            "sobol_computed": int(compute_sobol),
+            **{f"x_{i}": float(it.x[i]) for i in range(self.cfg.D)},
+        }
 
     def log(self, message: str) -> None:
         """Append one line to `log.txt` (timings, statuses, tracebacks): the run's narrative."""
