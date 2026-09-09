@@ -69,6 +69,7 @@ from sagp.gp import (  # noqa: E402
     fit,
     standardize,
 )
+from sagp.readouts import readouts  # noqa: E402
 from synthobj.families import make_family, noise_rng  # noqa: E402
 
 DEFAULT_OUT = REPO_ROOT / "docs" / "superpowers" / "plans" / "2026-09-09-botorch-saasbo-pilot.md"
@@ -359,12 +360,13 @@ def _print_fit_row(row: dict[str, object]) -> None:
         f"  wall={row['wall_s']:.1f}s status={row['status']}"
         f" r_hat_max={row['r_hat_max']:.3f} n_eff_min={row['n_eff_min']:.1f}"
         f" div={row['divergences']} steps={row['num_steps_mean']:.1f}"
-        + (f" acq={row['acq_s']:.1f}s" if "acq_s" in row else ""),
+        + (f" acq={row['acq_s']:.1f}s" if "acq_s" in row else "")
+        + (f" readout={row['readout_s']:.1f}s" if "readout_s" in row else ""),
         flush=True,
     )
 
 
-_FIT_COLUMNS = ("cell", "n", "run", "wall_s", "status", "r_hat_max", "n_eff_min", "divergences", "num_steps_mean", "acq_s")
+_FIT_COLUMNS = ("cell", "n", "run", "wall_s", "status", "r_hat_max", "n_eff_min", "divergences", "num_steps_mean", "acq_s", "readout_s")
 
 
 def _fit_body(
@@ -420,7 +422,10 @@ def _fit_body(
         f"maximized by `optimize_acqf` at {RAW_SAMPLES} raw Sobol candidates plus as many RAASP\n"
         f"perturbations, {NUM_RESTARTS} L-BFGS-B restarts one at a time, seeded from\n"
         "`iteration_rngs(0, 0)`; the first run of a pair pays JAX compilation for the fit and torch\n"
-        "compilation for the acquisition, the second pays neither.\n\n"
+        "compilation for the acquisition, the second pays neither.\n"
+        "`readout_s` times one `readouts(fitted, compute_sobol=True)` call against the same fit --\n"
+        "the full identification readout, Sobol estimator included, which the study computes every\n"
+        "25 iterations and which is therefore a per-run cost of its own.\n\n"
         f"This stage fits {planned}; a pair missing from the table below was not reached before the\n"
         "run ended.\n\n"
         + table
@@ -465,6 +470,11 @@ def stage_fit(out: Path, small: bool, once: bool) -> dict[str, dict[CellKey, flo
                 num_restarts=NUM_RESTARTS,
             )
             row["acq_s"] = time.perf_counter() - start
+            # The readout the study runs every 25 iterations, priced against the same fit: its
+            # QMC estimator is thousands of `posterior` calls and is not free at D = 100.
+            start = time.perf_counter()
+            readouts(row["fitted"], compute_sobol=True)
+            row["readout_s"] = time.perf_counter() - start
             _print_fit_row(row)
             pair.append(row)
             rows.append(row)

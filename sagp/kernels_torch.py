@@ -176,8 +176,8 @@ class CenteredAdditiveLengthscaleKernel(_CenteredKernel):
     """k(x, z) = sum_i kbar_i(x_i, z_i); `sagp.gp.kernel_additive_lengthscale` without its variance.
 
     Deliberately *not* normalized: sparsity is rho_i -> 0, which drives v(ell_i) and the component
-    to zero, so dividing v out would undo the shrinkage. The cell's `kernel_var` is the outputscale
-    of the `ScaleKernel` this is wrapped in, not a parameter here.
+    to zero, so dividing v out would undo the shrinkage. The cell's `outputscale` site is the
+    outputscale of the `ScaleKernel` this is wrapped in, not a parameter here.
     """
 
     normalize = False

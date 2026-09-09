@@ -104,7 +104,9 @@ def test_two_nuts_runs_at_the_same_seed_are_bit_identical(tmp_path):
     assert np.array_equal(_checkpoint(first)["X"], _checkpoint(second)["X"])
     # One NUTS run per fit now, whatever the gate makes of it: `attempts` has length 1 and the
     # status is the verdict on that one chain.
-    for row in _read_rows(first / "iterations.csv"):
+    rows = _read_rows(first / "iterations.csv")
+    assert len(rows) == 2  # T = 7 off n_init = 5, so the loop below is not vacuous
+    for row in rows:
         assert int(row["nuts_attempts"]) == 1
         assert row["status"] in ("ok", "excluded")
 
@@ -190,6 +192,8 @@ def test_samples_npz_carries_the_schema_version_and_botorch_site_names(tmp_path)
     cell = CELLS[("product", "lengthscale")]
     run_dir = run(
         _objective(), "product/lengthscale", seed=1, T=6, n_init=_N_INIT, out_dir=tmp_path,
+        # A gate that can never fail: this test is about the npz schema, not the gate, and a
+        # 16/16/4 chain is short enough that a real gate would make `status == "ok"` a coin toss.
         nuts=NUTSConfig(16, 16, 4), thresholds=DiagThresholds(float("inf"), 0.0, 10**9),
         **_LOOP_KW,
     )
@@ -426,6 +430,17 @@ def test_the_oracle_reference_fits_the_objectives_own_S_end_to_end(tmp_path):
 
 
 @pytest.mark.slow
+# The only two warnings this run raises that the short loop tests above do not, both of them a
+# retry the code already handles: the escalating jitter ladder `psd_safe_cholesky` climbs inside a
+# `fit_gpytorch_mll` restart, which `_fit_mll` runs under `cholesky_max_tries(9)` and abandons for
+# Adam only once every restart has failed; and the failed `gen_candidates_scipy` restart that
+# `optimize_acqf`'s seeded `retry_on_optimization_warning` runs again from fresh initial
+# conditions. Neither changes a result -- both are the attempt that was discarded -- and this is
+# the whole filter: nothing else is silenced.
+@pytest.mark.filterwarnings(
+    "ignore:A not p.d., added jitter:gpytorch.utils.warnings.NumericalWarning"
+)
+@pytest.mark.filterwarnings("ignore:Optimization failed in `gen_candidates_scipy`:RuntimeWarning")
 def test_oracle_beats_sobol_on_aligned3(tmp_path):
     """The oracle reference beats a Sobol search: the loop optimizes, it does not merely run.
 

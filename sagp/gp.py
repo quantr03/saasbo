@@ -588,6 +588,21 @@ class CellGP(SaasFullyBayesianSingleTaskGP):
 _MAP_REFERENCES: frozenset[str] = frozenset({"dsp_map", "oracle_S"})
 
 
+def _check_cell(cell: CellKey | str) -> bool:
+    """True when `cell` names a MAP reference, False for a `CellKey`; raises on anything else.
+
+    Without it an unknown cell name would be served the lengthscale cells' kernel silently.
+    """
+    if isinstance(cell, tuple):
+        return False
+    if cell not in _MAP_REFERENCES:
+        raise ValueError(
+            f"unknown cell {cell!r}: expected a CellKey in CELLS or one of "
+            f"{sorted(_MAP_REFERENCES)}"
+        )
+    return True
+
+
 def _load_draws(model: CellGP, samples: dict[str, ArrayLike]) -> None:
     """Load retained draws into `model` and leave it ready to predict.
 
@@ -667,9 +682,7 @@ class FittedGP:
         Xt = torch.as_tensor(np.array(X, dtype=np.float64))
         yt = torch.as_tensor(np.array(y, dtype=np.float64))[:, None]
         yvar = None if fixed_noise is None else torch.full_like(yt, fixed_noise)
-        if isinstance(cell, tuple):
-            model = CellGP(Xt, yt, yvar, cell=CELLS[cell])
-        elif cell in _MAP_REFERENCES:
+        if _check_cell(cell):
             filter_features = (
                 None
                 if active is None
@@ -680,10 +693,7 @@ class FittedGP:
                 input_transform=filter_features,
             )
         else:
-            raise ValueError(
-                f"unknown cell {cell!r}: expected a CellKey in CELLS or one of "
-                f"{sorted(_MAP_REFERENCES)}"
-            )
+            model = CellGP(Xt, yt, yvar, cell=CELLS[cell])
         _load_draws(model, samples)
         return cls(
             cell=cell, X_train=X, Y_train=y, samples=samples, fixed_noise=fixed_noise,
@@ -692,18 +702,8 @@ class FittedGP:
         )
 
     def _is_map_reference(self) -> bool:
-        """True when `cell` names one of the MAP references; raises on any other string.
-
-        Without it an unknown cell name would be served the lengthscale cells' kernel silently.
-        """
-        if isinstance(self.cell, tuple):
-            return False
-        if self.cell not in _MAP_REFERENCES:
-            raise ValueError(
-                f"unknown cell {self.cell!r}: expected a CellKey in CELLS or one of "
-                f"{sorted(_MAP_REFERENCES)}"
-            )
-        return True
+        """True when `cell` names one of the MAP references; raises on any other string."""
+        return _check_cell(self.cell)
 
     def param_sites(self) -> tuple[str, ...]:
         """This cell's kernel parameters, in the order the readouts pass them around."""
@@ -816,9 +816,10 @@ def fit(
     """
     if fixed_noise is not None and not fixed_noise >= MIN_INFERRED_NOISE_LEVEL:
         raise ValueError(
-            f"fixed_noise={fixed_noise!r} is below BoTorch's floor 1e-4: train_Yvar is clamped "
-            "there before the sampler sees it, so the fit would run at 1e-4 while reporting the "
-            "smaller value. Pass fixed_noise=None to learn the noise, or a variance >= 1e-4."
+            f"fixed_noise={fixed_noise!r} is below BoTorch's floor {MIN_INFERRED_NOISE_LEVEL}: "
+            "train_Yvar is clamped there before the sampler sees it, so the fit would run at "
+            f"{MIN_INFERRED_NOISE_LEVEL} while reporting the smaller value. Pass fixed_noise=None "
+            f"to learn the noise, or a variance >= {MIN_INFERRED_NOISE_LEVEL}."
         )
     cell = CELLS[cell] if not isinstance(cell, Cell) else cell
     Xt = torch.as_tensor(np.array(X, dtype=np.float64))

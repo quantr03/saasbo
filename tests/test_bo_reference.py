@@ -82,7 +82,9 @@ def _botorch_loop(objective, seed, T, n_init, nuts):
             seed=rngs.nuts_seed,
         )
         acq = LogExpectedImprovement(model=gp, best_f=float(z.max()))
-        bounds = torch.stack([torch.zeros(D), torch.ones(D)])
+        bounds = torch.stack(
+            [torch.zeros(D, dtype=torch.float64), torch.ones(D, dtype=torch.float64)]
+        )
         options = {
             "batch_limit": 1, "maxiter": 200, "sample_around_best": True,
             "sample_around_best_sigma": 1e-3, "seed": rngs.sobol_seed,

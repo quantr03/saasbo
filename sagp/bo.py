@@ -146,7 +146,7 @@ class Iteration(NamedTuple):
     fit_wall_s: float
     acq_wall_s: float
     fit_calls: int
-    status: str  # the fit's "ok"/"refit"/"excluded", or "excluded" for either fallback
+    status: str  # the fit's "ok"/"excluded", or "excluded" for either fallback
     reason: str
     y_mean: float  # the standardization this iteration fitted under (`gp.standardize`)
     y_std: float

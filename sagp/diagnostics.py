@@ -29,12 +29,13 @@ class DiagThresholds:
 
 @dataclass(frozen=True)
 class Diagnostics:
-    """One attempt's convergence summary, on its un-thinned draws; `passed` is the refit trigger.
+    """One attempt's convergence summary, on its un-thinned draws.
 
-    Only `r_hat_max`, `n_eff_min` and `divergences` gate; the rest is recorded for reporting. The
-    six per-group fields split those same per-site statistics three ways (`_DIAG_GROUPS`) so a
-    trigger can be *attributed* rather than only counted, and read NaN for a group this cell has
-    no site in. `reason` names each failed criterion and is "" exactly when `passed`.
+    `passed` decides `status`: ok or excluded. Only `r_hat_max`, `n_eff_min` and `divergences`
+    gate; the rest is recorded for reporting. The six per-group fields split those same per-site
+    statistics three ways (`_DIAG_GROUPS`) so a trigger can be *attributed* rather than only
+    counted, and read NaN for a group this cell has no site in. `reason` names each failed
+    criterion and is "" exactly when `passed`.
     """
 
     r_hat_max: float

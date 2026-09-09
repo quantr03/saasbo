@@ -170,8 +170,10 @@ def fit_map(X: ArrayLike, y: ArrayLike, *, active: ArrayLike | None = None) -> F
     model.eval()
     # The MLL is only defined in train mode, where the model reverts to its untransformed training
     # inputs and `forward` applies the input transform itself; `eval` again leaves it ready to
-    # predict, which is the state `FittedGP` requires.
-    with torch.no_grad():
+    # predict, which is the state `FittedGP` requires. The read-back runs under the same
+    # `cholesky_max_tries(9)` `_fit_mll` fitted under, so it cannot fail a factorization the fit
+    # itself survived.
+    with torch.no_grad(), gpytorch.settings.cholesky_max_tries(9):
         model.train()
         mll_value = float(mll(model(*model.train_inputs), model.train_targets))
         model.eval()

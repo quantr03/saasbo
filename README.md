@@ -137,10 +137,13 @@ entry point and exits non-zero.
 - **The acquisition maximizer is `optimize_acqf`** at Papenmeier et al. (2025)'s numbers: 5
   restarts optimized one at a time (`batch_limit = 1`, because batching makes L-BFGS-B descend on
   the restarts' sum and so changes the iterates, not only the speed), started from 512 raw Sobol
-  candidates plus 512 RAASP candidates -- sigma = 1e-3 perturbations of the design's top 5 %,
-  each perturbing a random coordinate subset with probability `min(20/D, 1)` -- and refined by
-  L-BFGS-B for at most 200 iterations. Seeding is the only change: the Sobol scramble and the
-  RAASP draws come from `(seed, t)`, where the reference draws them from global state.
+  candidates plus 512 RAASP candidates, all drawn from the design's top 5 % and refined by
+  L-BFGS-B for at most 200 iterations. BoTorch splits those 512 in half: 256 are truncated-normal
+  perturbations at sigma = 1e-3 of *every* coordinate, and 256 perturb each coordinate with
+  probability `min(20/D, 1)` -- so at D = 100 a subset candidate moves about 20 of them. Below
+  D = 20 the split is skipped entirely and all 512 perturb every coordinate. Seeding is the only
+  change: the Sobol scramble and the RAASP draws come from `(seed, t)`, where the reference draws
+  them from global state.
 - **Priors are BoTorch's SAAS priors**, so the four cells differ in their kernel/prior block and
   in nothing else: constant mean `N(0, 1)`; outputscale `Gamma(2, 0.15)` in the lengthscale cells
   (the amplitude cells carry none -- it would be unidentifiable against `tausq`); noise

@@ -27,12 +27,16 @@ from sagp.gp import (
 )
 
 import botorch.settings
+import gpytorch.settings
 import jax.numpy as jnp
 import numpy as np
 import pytest
 import torch
 from botorch.fit import fit_fully_bayesian_model_nuts
-from botorch.models.fully_bayesian import SaasFullyBayesianSingleTaskGP
+from botorch.models.fully_bayesian import (
+    MIN_INFERRED_NOISE_LEVEL,
+    SaasFullyBayesianSingleTaskGP,
+)
 
 import sagp.gp
 
@@ -182,7 +186,7 @@ def test_fixed_noise_below_the_floor_is_rejected(fixed_noise):
     # a different model than the record says and 0.0 would silently become 1e-4.
     X, y = _data(n=8, D=2, seed=4)
 
-    with pytest.raises(ValueError, match="1e-4"):
+    with pytest.raises(ValueError, match=str(MIN_INFERRED_NOISE_LEVEL)):
         fit(
             X, y, 0, ("product", "lengthscale"),
             fixed_noise=fixed_noise,
@@ -258,7 +262,9 @@ def _assert_posterior_is_the_models(fitted, X_test) -> None:
     """`FittedGP.posterior` is the GPyTorch posterior reshaped, in both noise conventions."""
     for observation_noise in (False, True):
         mean, var = fitted.posterior(X_test, observation_noise=observation_noise)
-        with torch.no_grad():
+        # `cholesky_max_tries(9)` because `FittedGP.posterior` factorizes under it: a different
+        # number of tries is a different jitter, and this comparison is exact.
+        with torch.no_grad(), gpytorch.settings.cholesky_max_tries(9):
             post = fitted.model.posterior(
                 torch.as_tensor(X_test)[:, None, :], observation_noise=observation_noise
             )
@@ -288,6 +294,48 @@ def test_posterior_matches_botorch_on_the_same_model():
         k_star = kernel(jnp.asarray(X_test), jnp.asarray(X), ours.params(s))
         rebuilt = means[s] + k_star @ alphas[s]
         assert np.max(np.abs(np.asarray(rebuilt) - np.asarray(mean[s]))) < 1.0e-8
+
+
+def test_posterior_equals_a_stock_botorch_model_loaded_with_the_same_draws():
+    """The reference cell's prediction is `SaasFullyBayesianSingleTaskGP`'s, to the bit.
+
+    `test_posterior_matches_botorch_on_the_same_model` pins `FittedGP.posterior` against the model
+    `fit` built, which leaves the model itself unpinned: a `CellGP` that assembled the reference
+    cell slightly differently -- another likelihood, another mean, a lengthscale loaded into the
+    wrong place -- would agree with itself and nobody would notice. Here BoTorch's own class is
+    handed our draws and asked the same question.
+    """
+    X, y = _data(n=20, D=4, seed=13)
+    X_test = np.random.default_rng(14).random((6, 4))
+    fitted = fit(
+        X, y, 3, ("product", "lengthscale"), nuts=NUTSConfig(64, 64, 4), thresholds=NEVER_FAILS
+    )
+
+    with botorch.settings.validate_input_scaling(False):
+        stock = SaasFullyBayesianSingleTaskGP(torch.as_tensor(X), torch.as_tensor(y)[:, None])
+    stock.load_mcmc_samples(
+        {
+            # `np.array`, not `np.asarray`: a jnp array is read-only, and torch warns on wrapping
+            # one without copying.
+            site: torch.as_tensor(np.array(draws))
+            for site, draws in fitted.samples.items()
+            if site in ("mean", "outputscale", "noise", "lengthscale")
+        }
+    )
+    stock.eval()
+
+    for observation_noise in (False, True):
+        mean, var = fitted.posterior(X_test, observation_noise=observation_noise)
+        with torch.no_grad(), gpytorch.settings.cholesky_max_tries(9):
+            post = stock.posterior(
+                torch.as_tensor(X_test)[:, None, :], observation_noise=observation_noise
+            )
+        assert np.array_equal(
+            np.asarray(mean), post.mean.reshape(X_test.shape[0], -1).T.numpy()
+        )
+        assert np.array_equal(
+            np.asarray(var), post.variance.reshape(X_test.shape[0], -1).T.numpy()
+        )
 
 
 @pytest.mark.parametrize(
@@ -332,6 +380,16 @@ def test_all_cells_fit_and_predict(cell_key, fixed_noise):
         site for site in CELLS[cell_key].sites if fixed_noise is None or site != "noise"
     )
     assert tuple(fitted.samples) == expected
+    # Every site's shape per draw: the global block is scalar, the sparsity block per-coordinate.
+    # A site that silently came back one draw wide, or D-wide where it should be scalar, would
+    # load into the model without complaint and change every readout that reads it.
+    per_site = {
+        "outputscale": (), "mean": (), "noise": (), "kernel_tausq": (),
+        "_kernel_inv_length_sq": (D,), "kernel_inv_length_sq": (D,), "lengthscale": (D,),
+        "_a_sq": (D,), "a_sq": (D,), "kernel_ell": (D,),
+    }
+    for site in expected:
+        assert fitted.samples[site].shape == (S,) + per_site[site]
     mean, var = fitted.posterior(X_test)
     assert mean.shape == var.shape == (S, n_test)
     assert np.all(np.isfinite(np.asarray(mean))) and np.all(np.asarray(var) > 0.0)

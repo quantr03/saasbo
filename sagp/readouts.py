@@ -18,9 +18,13 @@ from scipy.stats import qmc, spearmanr
 from sagp.gp import ACTIVE_EPS, CELLS, GL_NODES, GL_WEIGHTS, RHO_EPS, FittedGP, kbar_all
 
 
-# Points per `FittedGP.posterior` call inside the QMC estimator: at 200 training points in D = 100,
-# 512 x (n + Q) x D_used stays under `_CHUNK_THRESHOLD`, so a block is a single `posterior` call.
-_QMC_CHUNK: int = 512
+# Points per `FittedGP.posterior` call inside the QMC estimator. The Saltelli points are
+# independent -- each is its own batch entry in `FittedGP.posterior` -- so a chunk is an exact
+# partition and the block size changes no number, only what one call costs. It is small because
+# GPyTorch expands the training inputs over the test batch: a 512-row call recomputes the
+# train-side quadrature 512 times, measured at 5.3 GB peak / 130 s for additive/amplitude at
+# n = 200, D = 100, S = 16, against 1.0 GB / 9.8 s at 64.
+_QMC_CHUNK: int = 64
 
 
 def shares_from_amplitudes(a_sq: ArrayLike, noise: ArrayLike) -> Array:

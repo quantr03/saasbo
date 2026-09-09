@@ -114,6 +114,9 @@ _VERSIONED: tuple[str, ...] = (
 # `prob_perturb` are `sample_around_best`'s own -- the top 5 % of the design the RAASP candidates
 # are perturbed from, and the probability each coordinate is perturbed with -- and
 # `cholesky_max_tries` is Papenmeier's 9 against GPyTorch's default 3.
+# `sample_around_best_subset_sigma` is deliberately absent: BoTorch 0.18.1 accepts the option but
+# never uses it -- `sample_points_around_best` passes `sigma`, not `subset_sigma`, to the subset
+# perturbation.
 _ACQUISITION_CONSTANTS: dict[str, object] = {
     "acquisition": "LogExpectedImprovement",
     "q": 1,

@@ -61,9 +61,9 @@ def test_identify_returns_every_key_at_the_right_shape():
     assert out["n"] == 25
     assert out["D"] == D
     assert out["alpha"] == gp.CELLS[("additive", "amplitude")].alpha_default
-    assert out["status"] in {"ok", "refit", "excluded"}
+    assert out["status"] in {"ok", "excluded"}
     assert isinstance(out["status_reason"], str)
-    assert out["nuts_attempts"] in {1, 2}
+    assert out["nuts_attempts"] == 1
 
     # Every Diagnostics field of the attempt whose draws were retained, prefixed diag_.
     for field in (
