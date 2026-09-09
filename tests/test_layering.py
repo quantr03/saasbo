@@ -23,7 +23,7 @@ assert _SAGP_FILES and _EXPERIMENT_FILES, "no modules to check: the globs found 
 # down; the three modules above the core reach `gp` and never each other. A module missing from
 # this table is a decision that has not been made, so the test says so rather than passing.
 _ALLOWED_SAGP_IMPORTS: dict[str, set[str]] = {
-    "gp": {"sagp.diagnostics"},
+    "gp": {"sagp.diagnostics", "sagp.kernels_torch"},
     "diagnostics": set(),
     "kernels_torch": set(),  # torch only, so `gp` can import it without a cycle
     "references": {"sagp.gp"},

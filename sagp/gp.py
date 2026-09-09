@@ -15,11 +15,24 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import partial
 
+import botorch.settings
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
+import torch
+from botorch.models.fully_bayesian import (
+    MIN_INFERRED_NOISE_LEVEL,
+    PyroModel,
+    SaasFullyBayesianSingleTaskGP,
+    SaasPyroModel,
+    reshape_and_detach,
+)
+from gpytorch.constraints import GreaterThan
+from gpytorch.kernels import Kernel, ScaleKernel
+from gpytorch.likelihoods import FixedNoiseGaussianLikelihood, GaussianLikelihood, Likelihood
+from gpytorch.means import Mean
 from jax import Array, jit, vmap
 from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 from jax.typing import ArrayLike
@@ -29,6 +42,11 @@ from scipy.optimize import brentq
 
 import saasgp
 from sagp.diagnostics import DiagThresholds, Diagnostics, diagnose
+from sagp.kernels_torch import (
+    CenteredAdditiveAmplitudeKernel,
+    CenteredAdditiveLengthscaleKernel,
+    CenteredProductAmplitudeKernel,
+)
 from util import chunk_vmap
 
 # (structure in {"additive", "product"}, sparsity prior in {"amplitude", "lengthscale"}).
@@ -232,6 +250,219 @@ ALPHA_AMPLITUDE: float = ALPHA_LENGTHSCALE * ACTIVE_EPS / RHO_EPS
 ELL_PRIOR: tuple[float, float] = (0.0, 1.5)
 
 
+class ProductLengthscalePyroModel(SaasPyroModel):
+    """SAASBO itself: BoTorch's `SaasPyroModel`, whose `sample` is inherited untouched.
+
+    Two changes only. `alpha` is an attribute rather than `sample_lengthscale`'s default, because
+    the study sets it per fit; and postprocessing keeps `kernel_tausq` and `_kernel_inv_length_sq`,
+    which BoTorch deletes and the diagnostics and the sparsity readouts both read.
+    """
+
+    alpha: float = ALPHA_LENGTHSCALE
+
+    def sample_inv_length_sq(self, dim: int) -> tuple[Array, Array]:
+        """The SAAS block: rho_i = tausq * lam_i, tausq ~ HC(alpha), lam_i ~ HC(1) -> (rho, ell).
+
+        BoTorch's sites, names and order, so a trace of this model is a trace of `SaasPyroModel`.
+        The lengthscale cells' kernels take rho and BoTorch's GPyTorch modules take ell, so both
+        are returned rather than either being recovered from the other.
+        """
+        tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(jnp.array(self.alpha)))
+        inv_length_sq = numpyro.sample("_kernel_inv_length_sq", dist.HalfCauchy(jnp.ones(dim)))
+        inv_length_sq = numpyro.deterministic("kernel_inv_length_sq", tausq * inv_length_sq)
+        lengthscale = numpyro.deterministic("lengthscale", 1.0 / jnp.sqrt(inv_length_sq))
+        return inv_length_sq, lengthscale
+
+    def sample_lengthscale(self, dim: int, alpha: float | None = None) -> Array:
+        """What the inherited `sample` calls; `alpha` is `self.alpha`, the argument is ignored.
+
+        The argument is kept because BoTorch's signature has it and a caller may pass it by name.
+        """
+        return self.sample_inv_length_sq(dim)[1]
+
+    def postprocess_mcmc_samples(self, mcmc_samples: dict[str, Array]) -> dict[str, torch.Tensor]:
+        """BoTorch's postprocessing without its two deletions: every site survives, as torch.
+
+        `lengthscale` is recomputed from the retained draws exactly as BoTorch computes it, so the
+        kernel this loads is the kernel NUTS sampled.
+        """
+        inv_length_sq = (
+            jnp.expand_dims(mcmc_samples["kernel_tausq"], axis=-1)
+            * mcmc_samples["_kernel_inv_length_sq"]
+        )
+        mcmc_samples["lengthscale"] = 1.0 / jnp.sqrt(inv_length_sq)
+        return {
+            site: torch.tensor(
+                np.asarray(draws), dtype=self.train_X.dtype, device=self.train_X.device
+            )
+            for site, draws in mcmc_samples.items()
+        }
+
+
+class AdditiveLengthscalePyroModel(ProductLengthscalePyroModel):
+    """Additive structure under the SAAS prior: the same sites in the same order, other kernel."""
+
+    def sample(self) -> None:
+        """`MaternPyroModel.sample`'s body with `kernel_additive_lengthscale` in place of ARD."""
+        outputscale = self.sample_outputscale(
+            concentration=self._outputscale_prior_concentration,
+            rate=self._outputscale_prior_rate,
+        )
+        mean = self.sample_mean()
+        noise = self.sample_noise()
+        inv_length_sq, _ = self.sample_inv_length_sq(dim=self.ard_num_dims)
+        X = self.train_X_jax
+        K_noiseless = kernel_additive_lengthscale(
+            X, X, {"kernel_var": outputscale, "kernel_inv_length_sq": inv_length_sq}, 0.0, False
+        )
+        self.sample_observations(mean=mean, K_noiseless=K_noiseless, noise=noise)
+
+    def load_mcmc_samples(
+        self, mcmc_samples: dict[str, torch.Tensor]
+    ) -> tuple[Mean, Kernel, Likelihood, None]:
+        """The retained draws as a batched GPyTorch model: (mean, covariance, likelihood, None).
+
+        The trailing `None` is BoTorch's input-warping transform, which no cell here uses.
+        """
+        tkwargs = {"device": self.train_X.device, "dtype": self.train_X.dtype}
+        batch_shape = torch.Size([len(mcmc_samples["mean"])])
+        mean_module = self._build_mean_module(
+            mcmc_samples=mcmc_samples, batch_shape=batch_shape, **tkwargs
+        )
+        covar_module = ScaleKernel(
+            CenteredAdditiveLengthscaleKernel(
+                ard_num_dims=self.ard_num_dims, batch_shape=batch_shape
+            ),
+            batch_shape=batch_shape,
+        ).to(**tkwargs)
+        covar_module.outputscale = reshape_and_detach(
+            target=covar_module.outputscale, new_value=mcmc_samples["outputscale"]
+        )
+        covar_module.base_kernel.lengthscale = reshape_and_detach(
+            target=covar_module.base_kernel.lengthscale, new_value=mcmc_samples["lengthscale"]
+        )
+        likelihood = _likelihood_from_samples(self, mcmc_samples, batch_shape, **tkwargs)
+        return mean_module, covar_module, likelihood, None
+
+
+class AdditiveAmplitudePyroModel(PyroModel):
+    """Additive structure with the sparsity on the amplitudes: a_sq_i = tausq * lam_i.
+
+    The lengthscale cells' half-Cauchy scale mixture applied to the components' variances, at
+    `alpha = ALPHA_AMPLITUDE` for the same prior-predictive active count. Components being
+    normalized, ell gets a LogNormal prior of its own, and there is no outputscale: it would be
+    unidentifiable against tausq. The mean and noise priors are BoTorch's, so the four cells differ
+    in nothing but their kernel/prior block.
+    """
+
+    alpha: float = ALPHA_AMPLITUDE
+    ell_prior: tuple[float, float] = ELL_PRIOR
+    _jax_kernel = staticmethod(kernel_additive_amplitude)
+    _torch_kernel = CenteredAdditiveAmplitudeKernel
+
+    def sample_amplitudes(self, dim: int) -> Array:
+        """a_sq_i = tausq * lam_i, tausq ~ HC(alpha), lam_i ~ HC(1); the deterministic (dim,)."""
+        tausq = numpyro.sample("kernel_tausq", dist.HalfCauchy(jnp.array(self.alpha)))
+        a_sq = numpyro.sample("_a_sq", dist.HalfCauchy(jnp.ones(dim)))
+        return numpyro.deterministic("a_sq", tausq * a_sq)
+
+    def sample_ell(self, dim: int) -> Array:
+        """ell_i ~ LogNormal(ell_prior), the amplitude cells' only lengthscale prior; (dim,)."""
+        return numpyro.sample(
+            "kernel_ell",
+            dist.LogNormal(jnp.full(dim, self.ell_prior[0]), self.ell_prior[1]),
+        )
+
+    def sample(self) -> None:
+        """Sites in order: mean, noise (when it is learned), the amplitudes, ell, then Y."""
+        mean = self.sample_mean()
+        noise = self.sample_noise()
+        a_sq = self.sample_amplitudes(dim=self.ard_num_dims)
+        ell = self.sample_ell(dim=self.ard_num_dims)
+        X = self.train_X_jax
+        K_noiseless = self._jax_kernel(X, X, {"a_sq": a_sq, "kernel_ell": ell}, 0.0, False)
+        self.sample_observations(mean=mean, K_noiseless=K_noiseless, noise=noise)
+
+    def postprocess_mcmc_samples(self, mcmc_samples: dict[str, Array]) -> dict[str, torch.Tensor]:
+        """Every site as torch: nothing dropped, and `a_sq` is a draw rather than recomputed."""
+        return {
+            site: torch.tensor(
+                np.asarray(draws), dtype=self.train_X.dtype, device=self.train_X.device
+            )
+            for site, draws in mcmc_samples.items()
+        }
+
+    def get_dummy_mcmc_samples(self, num_mcmc_samples: int, **tkwargs) -> dict[str, torch.Tensor]:
+        """Ones with the keys and shapes `load_mcmc_samples` reads; BoTorch loads a state dict."""
+        mcmc_samples = {
+            "mean": torch.ones(num_mcmc_samples, **tkwargs),
+            "a_sq": torch.ones(num_mcmc_samples, self.ard_num_dims, **tkwargs),
+            "kernel_ell": torch.ones(num_mcmc_samples, self.ard_num_dims, **tkwargs),
+        }
+        return self._common_dummy_samples(mcmc_samples, num_mcmc_samples, **tkwargs)
+
+    def load_mcmc_samples(
+        self, mcmc_samples: dict[str, torch.Tensor]
+    ) -> tuple[Mean, Kernel, Likelihood, None]:
+        """The retained draws as a batched GPyTorch model: (mean, covariance, likelihood, None).
+
+        The amplitudes are the kernel's own parameter, so there is no `ScaleKernel` to wrap it in.
+        """
+        tkwargs = {"device": self.train_X.device, "dtype": self.train_X.dtype}
+        batch_shape = torch.Size([len(mcmc_samples["mean"])])
+        mean_module = self._build_mean_module(
+            mcmc_samples=mcmc_samples, batch_shape=batch_shape, **tkwargs
+        )
+        covar_module = self._torch_kernel(
+            ard_num_dims=self.ard_num_dims, batch_shape=batch_shape
+        ).to(**tkwargs)
+        covar_module.a_sq = reshape_and_detach(
+            target=covar_module.a_sq, new_value=mcmc_samples["a_sq"]
+        )
+        covar_module.lengthscale = reshape_and_detach(
+            target=covar_module.lengthscale, new_value=mcmc_samples["kernel_ell"]
+        )
+        likelihood = _likelihood_from_samples(self, mcmc_samples, batch_shape, **tkwargs)
+        return mean_module, covar_module, likelihood, None
+
+
+class ProductAmplitudePyroModel(AdditiveAmplitudePyroModel):
+    """Product structure with amplitude sparsity: `AdditiveAmplitudePyroModel`'s other kernel."""
+
+    _jax_kernel = staticmethod(kernel_product_amplitude)
+    _torch_kernel = CenteredProductAmplitudeKernel
+
+
+def _likelihood_from_samples(
+    pyro_model: PyroModel,
+    mcmc_samples: dict[str, torch.Tensor],
+    batch_shape: torch.Size,
+    **tkwargs,
+) -> Likelihood:
+    """BoTorch's likelihood block (`fully_bayesian.py:553-569`), shared by the cells written here.
+
+    A fixed `train_Yvar` expanded to (S, n), else a learned noise floored at
+    `MIN_INFERRED_NOISE_LEVEL` -- the floor `sample_noise` already added to the sampled value.
+    """
+    if pyro_model.train_Yvar is not None:
+        return FixedNoiseGaussianLikelihood(
+            # Reshape to shape ``num_mcmc_samples x N``
+            noise=pyro_model.train_Yvar.squeeze(-1).expand(
+                batch_shape[0], len(pyro_model.train_Yvar)
+            ),
+            batch_shape=batch_shape,
+        ).to(**tkwargs)
+    likelihood = GaussianLikelihood(
+        batch_shape=batch_shape,
+        noise_constraint=GreaterThan(MIN_INFERRED_NOISE_LEVEL),
+    ).to(**tkwargs)
+    likelihood.noise_covar.noise = reshape_and_detach(
+        target=likelihood.noise_covar.noise,
+        new_value=mcmc_samples["noise"].clamp_min(MIN_INFERRED_NOISE_LEVEL),
+    )
+    return likelihood
+
+
 def model_product_lengthscale(
     X: Array, Y: Array, *, alpha: float, fixed_noise: float | None
 ) -> None:
@@ -351,6 +582,7 @@ class Cell:
     structure: str  # "additive" or "product"
     prior: str  # "amplitude" or "lengthscale"
     model: Callable[..., None]  # bind alpha/fixed_noise (and ell_prior) before handing to NUTS
+    pyro_model: type[PyroModel]  # the same cell for BoTorch; `CellGP` instantiates it per fit
     kernel: Callable[..., Array]  # (X, Z, params, noise, include_noise) -> (n, m)
     kernel_diag: Callable[..., Array]  # (X, params) -> (n,), without noise or jitter
     native_site: str  # the site the cell's own sparsity lives on: what its active rule thresholds
@@ -372,6 +604,7 @@ CELLS: dict[CellKey, Cell] = {
             structure="additive",
             prior="amplitude",
             model=model_additive_amplitude,
+            pyro_model=AdditiveAmplitudePyroModel,
             kernel=kernel_additive_amplitude,
             kernel_diag=_diag_additive_amplitude,
             native_site="a_sq",
@@ -382,6 +615,7 @@ CELLS: dict[CellKey, Cell] = {
             structure="additive",
             prior="lengthscale",
             model=model_additive_lengthscale,
+            pyro_model=AdditiveLengthscalePyroModel,
             kernel=kernel_additive_lengthscale,
             kernel_diag=_diag_additive_lengthscale,
             native_site="kernel_inv_length_sq",
@@ -398,6 +632,7 @@ CELLS: dict[CellKey, Cell] = {
             structure="product",
             prior="amplitude",
             model=model_product_amplitude,
+            pyro_model=ProductAmplitudePyroModel,
             kernel=kernel_product_amplitude,
             kernel_diag=_diag_product_amplitude,
             native_site="a_sq",
@@ -408,6 +643,7 @@ CELLS: dict[CellKey, Cell] = {
             structure="product",
             prior="lengthscale",
             model=model_product_lengthscale,
+            pyro_model=ProductLengthscalePyroModel,
             kernel=kernel_product_lengthscale,
             kernel_diag=_diag_product_lengthscale,
             native_site="kernel_inv_length_sq",
@@ -456,6 +692,39 @@ class NUTSConfig:
                 f"NUTSConfig: num_samples {self.num_samples} is not a multiple of thinning "
                 f"{self.thinning}, so the retained count would not be num_samples // thinning"
             )
+
+
+class CellGP(SaasFullyBayesianSingleTaskGP):
+    """BoTorch's SAAS GP with a cell's `PyroModel` bound per instance.
+
+    `SaasFullyBayesianSingleTaskGP` reads the `PyroModel` to build off a class attribute, so a
+    subclass per cell would be four of them; setting that attribute on the instance, before
+    `__init__` reads it, lets this one class serve all four. Input-scaling validation is off
+    because the study standardizes with ddof 0 while BoTorch's check uses ddof 1, which would warn
+    on every fit with n < 52.
+    """
+
+    def __init__(
+        self,
+        train_X: torch.Tensor,
+        train_Y: torch.Tensor,
+        train_Yvar: torch.Tensor | None = None,
+        *,
+        cell: Cell,
+        alpha: float | None = None,
+        ell_prior: tuple[float, float] = ELL_PRIOR,
+    ) -> None:
+        """(n, D) inputs in [0,1]^D and (n, 1) targets already standardized and negated.
+
+        `train_Yvar` None learns the noise. `alpha` None takes the cell's calibrated default, and
+        `ell_prior` reaches the amplitude cells only.
+        """
+        self._pyro_model_class = cell.pyro_model
+        with botorch.settings.validate_input_scaling(False):
+            super().__init__(train_X=train_X, train_Y=train_Y, train_Yvar=train_Yvar)
+        self.cell = cell
+        self.pyro_model.alpha = cell.alpha_default if alpha is None else alpha
+        self.pyro_model.ell_prior = ell_prior
 
 
 # Row-chunking policy for `FittedGP.posterior`, identical for every cell -- a per-cell rule would
