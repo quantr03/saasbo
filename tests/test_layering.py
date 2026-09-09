@@ -1,10 +1,13 @@
-"""Layering tests: the import rules that keep `sagp` a library and `experiments` its study.
+"""Layering tests: the import rules that keep `sagp` a library, `experiments` its study, and
+`synthobj` a torch-free description of the objectives.
 
-The split is only worth having if the dependency edges run one way and only through public names,
-which is a property of the source, not of any run -- so it is checked with `ast` over every file
-rather than by importing anything. Each test also feeds its checker a deliberately violating
-source string, so a checker that quietly stopped looking would fail here instead of passing
-vacuously over a tree that happens to be clean.
+Rules (a)-(c) run one way through the `sagp`/`experiments` split; rule (d) is the edge that keeps
+`synthobj` off the torch stack, so `import synthobj` works on a machine with neither torch nor
+botorch installed and only `synthobj/botorch_adapter.py` -- the module nobody imports at package
+import -- may name them. All four are properties of the source, not of any run, so they are
+checked with `ast` over every file rather than by importing anything. Each test also feeds its
+checker a deliberately violating source string, so a checker that quietly stopped looking would
+fail here instead of passing vacuously over a tree that happens to be clean.
 """
 from __future__ import annotations
 
@@ -16,7 +19,16 @@ import pytest
 _ROOT = Path(__file__).resolve().parent.parent
 _SAGP_FILES = sorted((_ROOT / "sagp").glob("*.py"))
 _EXPERIMENT_FILES = sorted((_ROOT / "experiments").glob("*.py"))
-assert _SAGP_FILES and _EXPERIMENT_FILES, "no modules to check: the globs found nothing"
+# Every `synthobj` module but the adapter, which is the one allowed to reach the torch stack.
+_SYNTHOBJ_FILES = [
+    path for path in sorted((_ROOT / "synthobj").glob("*.py")) if path.name != "botorch_adapter.py"
+]
+assert _SAGP_FILES and _EXPERIMENT_FILES and _SYNTHOBJ_FILES, (
+    "no modules to check: the globs found nothing"
+)
+
+# The four distributions rule (d) forbids, by the first dotted component of the imported name.
+_TORCH_STACK: frozenset[str] = frozenset({"torch", "botorch", "gpytorch", "linear_operator"})
 
 # D4 written out as a table: what each module under `sagp/` may import from the package. `gp.py`
 # and `diagnostics.py` are the bottom of the library, so nothing above them may be imported back
@@ -58,6 +70,11 @@ def _sagp_module_imports(source: str) -> set[str]:
 def _experiments_imports(source: str) -> list[str]:
     """Every `experiments` module a file imports, in any form."""
     return sorted(m for m in _imported_modules(source) if m.split(".")[0] == "experiments")
+
+
+def _torch_stack_imports(source: str) -> list[str]:
+    """Every torch-stack module a file imports, in any form."""
+    return sorted(m for m in _imported_modules(source) if m.split(".")[0] in _TORCH_STACK)
 
 
 def _private_sagp_uses(source: str) -> list[str]:
@@ -116,3 +133,19 @@ def test_each_library_module_imports_only_what_d4_allows(path: Path):
     # The alias forms the checker has to see through, both of which the core must not contain.
     assert _sagp_module_imports("from sagp import bo") == {"sagp.bo"}
     assert _sagp_module_imports("import sagp.readouts as r") == {"sagp.readouts"}
+
+
+@pytest.mark.parametrize("path", _SYNTHOBJ_FILES, ids=lambda p: p.name)
+def test_the_objectives_never_import_the_torch_stack(path: Path):
+    """Rule (d): no module under `synthobj/` but `botorch_adapter.py` names torch or its stack."""
+    assert _torch_stack_imports(path.read_text()) == []
+    violating = (
+        "import torch\n"
+        "from botorch.models import SingleTaskGP\n"
+        "import gpytorch.settings\n"
+        "from linear_operator.utils.errors import NotPSDError\n"
+    )
+    assert _torch_stack_imports(violating) == [
+        "botorch.models", "botorch.models.SingleTaskGP", "gpytorch.settings",
+        "linear_operator.utils.errors", "linear_operator.utils.errors.NotPSDError", "torch",
+    ]

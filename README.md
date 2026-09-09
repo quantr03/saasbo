@@ -84,25 +84,29 @@ and `--overwrite`.
 
 `sagp` is the thesis's 2 x 2 of Gaussian-process surrogates for high-dimensional Bayesian
 optimization -- {additive, product} kernel structure x {amplitude, lengthscale} sparsity prior --
-run on the vendored SAASBO code path so that a difference in regret or in identification is
-attributable to the parameterization and to nothing else. `sagp` is a five-module library and
+run on BoTorch 0.18.1's SAASBO (`SaasFullyBayesianSingleTaskGP`, NumPyro NUTS through a copy of
+`fit_fully_bayesian_model_nuts`'s sampler lines, `LogExpectedImprovement`, `optimize_acqf`) under
+Papenmeier et al. (2025)'s loop protocol, so that a difference in regret or in identification is
+attributable to the parameterization and to nothing else. `sagp` is a six-module library and
 `experiments` is the study code built on it:
 
 | module | owns |
 |---|---|
-| `sagp/gp.py` | the four cells: kernels, prior constants, NumPyro models, `NUTSConfig`, `FittedGP` (prediction), `fit`, `standardize` |
+| `sagp/gp.py` | the four cells as BoTorch `PyroModel`s, `CellGP`, `NUTSConfig`, `FittedGP`, `fit`, `standardize`; the JAX kernels are the log density |
+| `sagp/kernels_torch.py` | the three centered kernels in torch, batched over draws, for prediction and the acquisition's gradients |
 | `sagp/diagnostics.py` | the convergence verdict on a NUTS attempt |
-| `sagp/bo.py` | the loop: seeding, LogEI, the copied reference optimizer, `run_bo` |
-| `sagp/references.py` | the study's two MAP references and the Sobol proposer |
+| `sagp/bo.py` | the loop: seeding, BoTorch's LogEI and `optimize_acqf`, `run_bo` |
+| `sagp/references.py` | Papenmeier's `dsp` model at the MAP and the oracle behind `FilterFeatures`; the Sobol proposer |
 | `sagp/readouts.py` | posterior readouts from a `FittedGP`'s retained draws |
 | `experiments/identify.py` | SQ1's offline identification runner |
 | `experiments/runlog.py` | one run directory: config, provenance, checkpointing, resume |
 | `experiments/run_bo.py` | SQ2/SQ3 entry point and CLI |
 
-Nothing under `sagp/` imports `experiments`, and `sagp.gp`/`sagp.diagnostics` never import
-`sagp.bo`/`sagp.references`/`sagp.readouts`, so a cell's parameterization and the loop's
-acquisition and budget stay on opposite sides of `fit(X, y, key, cell) -> FittedGP` and
-`FittedGP.posterior(X_test) -> (mean, var)` of shape `(S, n_test)` per retained sample.
+Nothing under `sagp/` imports `experiments`, and `sagp.gp`/`sagp.diagnostics`/`sagp.kernels_torch`
+are the bottom of the stack -- they never import `sagp.bo`/`sagp.references`/`sagp.readouts` -- so
+a cell's parameterization and the loop's acquisition and budget stay on opposite sides of
+`fit(X, y, seed, cell) -> FittedGP` and `FittedGP.posterior(X_test) -> (mean, var)` of shape
+`(S, n_test)` per retained sample.
 `python -m experiments.run_bo --help` is the entry point. `python -m sagp.bo` is no longer an
 entry point and exits non-zero.
 
@@ -113,26 +117,44 @@ entry point and exits non-zero.
 | `additive/amplitude` | a normalized centered Matern-5/2 component per coordinate, summed; sparsity on the components' variances `a_i^2` |
 | `additive/lengthscale` | the same additive structure under the reference's SAAS prior on `rho_i = 1/ell_i^2` |
 | `product/amplitude` | the centered components multiplied, `prod_i (1 + a_i^2 kbar_i)`; sparsity on `a_i^2` |
-| `product/lengthscale` | **SAASBO itself**: the vendored `saasgp.matern_kernel` and `SAASGP.model` copied site for site |
+| `product/lengthscale` | **SAASBO itself**: BoTorch's `SaasPyroModel` with `sample()` inherited untouched |
 | `sobol` | a scrambled Sobol search, no model at all |
-| `dsp_map` | Hvarfner et al.'s "vanilla BO" ARD Matern-5/2 at the MAP, with the dimension-scaled lengthscale prior |
-| `oracle_S` | the same MAP fit restricted to the objective's true active coordinates |
+| `dsp_map` | Papenmeier et al. 2025's `dsp` model: an ARD Matern-5/2 in a `ScaleKernel` with `Gamma(2, 0.15)`, `LogNormal(sqrt(2) + log(D)/2, sqrt(3))` lengthscales started at the prior mode and `Gamma(1.1, 0.05)` noise, fitted by `fit_gpytorch_mll` with his Adam fallback |
+| `oracle_S` | the same model behind a `FilterFeatures` transform on the objective's true active coordinates |
 
-**Settings, which supersede `Design-brief.md` section 2** (out of date on three points):
+**Settings, which supersede `Design-brief.md` section 2**:
 
 - **Budget 512 / 256 / 16** -- 512 warm-up, 256 samples, thinning 16, so 16 retained draws --
-  with `max_tree_depth = 6`, one chain, and a **fresh chain per fit with no warm start**. Not the
-  brief's 128 + 128 / 8, which survives only as the preregistered fallback (see the cost note
-  below), applied identically to all four cells if it is ever taken.
-- **LogEI is the acquisition** (decided 2026-09-07): Ament et al. 2023's numerically stable
-  per-sample log EI, combined over the 16 retained samples by log-mean-exp -- the exact log of the
-  reference's sample-averaged EI, so the argmax is unchanged in exact arithmetic and only the
-  underflow behaviour differs. `--acq ei` runs the vendored `saasbo.ei` itself and exists solely
-  for the reference-reproduction test.
-- **The acquisition optimizer is the reference's**, not BoTorch's: 5000 scrambled-Sobol
-  candidates, the incumbent jittered by 1e-3, the best 5 refined by L-BFGS-B with `maxfun=100`.
-  Seeding is the only change -- the candidate scramble and the jitter come from `(seed, t)`, where
-  the reference draws them from global state.
+  with `max_tree_depth = 6`, one chain, a **dense mass matrix** (BoTorch's scheme) and a **fresh
+  chain per fit with no warm start**. Not the brief's 128 + 128 / 8, which survives only as the
+  preregistered fallback (see the cost note below), applied identically to all four cells if it is
+  ever taken. **One NUTS run per fit**: a fit whose chain fails the gate (split-R-hat `<= 1.1` and
+  ESS `>= 16` over every sampled site, `mean` included, and at most 5 divergences) is marked
+  `excluded` and its draws are still used.
+- **LogEI is the acquisition** (decided 2026-09-07): BoTorch's analytic `LogExpectedImprovement`
+  -- Ament et al. 2023's numerically stable log EI -- on the noise-free posterior, averaged over
+  the 16 retained draws by log-mean-exp. That average is the exact log of the sample-averaged EI,
+  so the argmax is unchanged in exact arithmetic and only the underflow behaviour differs.
+- **The acquisition maximizer is `optimize_acqf`** at Papenmeier et al. (2025)'s numbers: 5
+  restarts optimized one at a time (`batch_limit = 1`, because batching makes L-BFGS-B descend on
+  the restarts' sum and so changes the iterates, not only the speed), started from 512 raw Sobol
+  candidates plus 512 RAASP candidates -- sigma = 1e-3 perturbations of the design's top 5 %,
+  each perturbing a random coordinate subset with probability `min(20/D, 1)` -- and refined by
+  L-BFGS-B for at most 200 iterations. Seeding is the only change: the Sobol scramble and the
+  RAASP draws come from `(seed, t)`, where the reference draws them from global state.
+- **Priors are BoTorch's SAAS priors**, so the four cells differ in their kernel/prior block and
+  in nothing else: constant mean `N(0, 1)`; outputscale `Gamma(2, 0.15)` in the lengthscale cells
+  (the amplitude cells carry none -- it would be unidentifiable against `tausq`); noise
+  `1e-4 + Gamma(0.9, 10)`, or a fixed value, which must be at least 1e-4 because BoTorch clamps
+  `train_Yvar` there before the sampler sees it; the half-Cauchy scale mixture at `alpha = 0.1` on
+  `rho` or `0.0131` on `a^2`; and, in the amplitude cells only, `kernel_ell ~ LogNormal(0, 1.5)`.
+- **Standardization is `(y - mean) / std` with ddof 0**, recomputed every iteration, and the
+  incumbent handed to LogEI is `best_f = max z`. Papenmeier's code uses torch's ddof 1: the
+  difference is a recorded deviation rather than an oversight, because the readouts' share mapping
+  assumes the targets have unit sample variance exactly. The model is therefore built with
+  BoTorch's input-scaling check off, which reads ddof 1 and would warn on every fit with n < 52.
+- **Everything runs in float64**, torch and JAX alike, fixed at package import; BoTorch as shipped
+  runs its NUTS in float32.
 - **alpha = 0.0131** on the amplitude cells' `a^2` scale (`ALPHA_AMPLITUDE`), against the
   reference's 0.1 on the `rho` scale. The one-line rule: both priors are the same half-Cauchy
   scale mixture, so the prior-predictive active count depends on `(alpha, cutoff)` only through
@@ -158,7 +180,7 @@ Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 
 | file | contents |
 |---|---|
-| `iterations.csv` | one row per iteration: `y`, `f`, `best_obs`, `best_f`, `regret`, the acquisition value, wall times, `status`, the fit's diagnostics, `y_mean`/`y_std`, and the query point |
+| `iterations.csv` | one row per iteration: `y`, `f`, `best_obs`, `best_f`, `regret`, the acquisition value (a log EI, so it is negative whenever the improvement is small), wall times, `status`, the fit's diagnostics, `y_mean`/`y_std`, and the query point |
 | `coords.csv` | long format, `t, i, native_median, p_active, sobol_hat` -- the per-coordinate readouts (absent for `sobol` runs, which fit no model) |
 | `samples/t{t:03d}.npz` | that iteration's retained posterior draws (16 for a cell, 1 for a MAP reference), keyed by BoTorch's own site names, plus its `status`, `nuts_attempts` and `schema_version` (2) |
 | `manifest.json` | the resolved `RunConfig` and its hash, the git commit, package versions (torch, gpytorch and botorch among them), thread environment, `acquisition_constants` -- the maximizer's whole operating point -- the objective's labels, and a `resumed` entry per resume |
@@ -214,8 +236,10 @@ that is exactly the case the next submission exists to continue. A run already a
 resume in its manifest and exits 0 without fitting anything, so an over-long chain costs a few
 seconds per task and nothing else.
 
-`OMP_NUM_THREADS=1` matters: an array task gets one core, and letting XLA try to spread one fit
-over cores it does not have makes the whole node slower, not faster. On a laptop, run under
+`OMP_NUM_THREADS=1` matters: an array task gets one core, and letting torch or XLA try to spread
+one fit over cores it does not have makes the whole node slower, not faster. It governs both --
+`sagp/__init__.py` reads it into `torch.set_num_threads`, and the resulting `torch_num_threads` is
+recorded in `manifest.json` beside the XLA flags. On a laptop, run under
 `caffeinate -di` -- a sleeping Mac does not advance `perf_counter`, so a suspended run reports
 timings that are wrong rather than merely late.
 
@@ -229,8 +253,8 @@ removed the `a_min` keyword; it is numerically identical, it is the only edit to
 files, and `tests/test_sagp_env.py` guards it.
 
 **Cost.** One gradient of the log-joint at n = 200, D = 100, and what it implies for a fit (768
-NUTS iterations x 40-63 leapfrog steps) and for a `T = 200` run (`62 x t_fit`, before diagnostic
-refits and the acquisition), measured 2026-09-07 on an M3 laptop:
+NUTS iterations x 40-63 leapfrog steps) and for a `T = 200` run (`62 x t_fit`, before the
+acquisition), measured 2026-09-07 on an M3 laptop:
 
 | `--cell` | per gradient | one fit at n = 200 | one T = 200 run |
 |---|---|---|---|
@@ -245,15 +269,19 @@ core-time.** The pilot's cost stage gives, per `T = 200` run: product/lengthscal
 additive/amplitude 12.2, additive/lengthscale 205 and product/amplitude 140 core-hours (the
 last three are lower bounds). The measured additive/amplitude fit at n = 100 took 20.7 min
 against the formula's 3.3 min. Realistic additive/amplitude cost is therefore 60-75 core-hours
-per run, and the unfused cells several hundred. Refit rates
-(`docs/superpowers/plans/2026-09-07-sagp-pilot.md`): the reference cell 0.30 at n = 100,
-additive/amplitude 0.00 at n = 50.
+per run, and the unfused cells several hundred. Those core-hours still carry the old scheme's
+`(1 + 1.67 r)` diagnostic-refit factor, which no longer exists: the gate labels a fit and never
+reruns it, so a run costs `62 x t_fit + 180 x t_acq`.
 
 The reference cell is affordable and the three centered cells are 15-55x more expensive per
 gradient: each evaluates one exponential per (pair, coordinate) rather than one per pair, and two
 of them additionally materialize an `(n, n, D)` tensor that XLA declines to fuse. The consequence
 is that the full study grid does not fit the planned compute at 512 / 256 / 16, and the choice
 between the preregistered `--nuts 128,128,8` fallback, a kernel-level optimization of the centered
-cells, a smaller grid and more cores is still open. Reproduce the numbers with
-`scripts/pilot_sagp.py --stage grad`; the full pilot is
+cells, a smaller grid and more cores is still open. `t_acq` is now `optimize_acqf`'s rather than
+the 5000-candidate reference optimizer's: 1024 candidates scored through the torch kernels, then
+five L-BFGS-B restarts of at most 200 iterations, every step of which differentiates that same
+kernel. Reproduce the gradient numbers with `scripts/pilot_sagp.py --stage grad`; the 2026-09-09
+pilot (`docs/superpowers/plans/2026-09-09-botorch-saasbo-pilot.md`) re-measures fit and
+acquisition under BoTorch's scheme, and the 2026-09-07 pilot it supersedes is
 `docs/superpowers/plans/2026-09-07-sagp-pilot.md`.

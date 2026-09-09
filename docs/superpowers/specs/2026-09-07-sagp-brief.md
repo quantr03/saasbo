@@ -1,5 +1,7 @@
 # sagp brief (verbatim, 2026-09-07)
 
+> Superseded on 2026-09-09 for inference, acquisition and the references by `2026-09-09-botorch-saasbo-brief.md`: the SAASBO reference implementation is BoTorch's, not the vendored code.
+
 You are planning (not yet implementing) the model and optimization code for a master's thesis on sparse additive GPs for high-dimensional Bayesian optimization. Read this whole brief, then produce an implementation plan. Do not write the implementation until I approve the plan.
 
 ## Context
