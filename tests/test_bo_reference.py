@@ -1,143 +1,121 @@
-"""The reproduction test: `sagp.bo`'s loop *is* `saasbo.run_saasbo`, once both are given the
-same random numbers.
+"""The migration's central pin: `run_bo` *is* BoTorch's SAASBO on Papenmeier et al. (2025)'s loop.
 
-Every other test in this suite pins one piece -- the sampler's draws, the posterior, the
-acquisition, the row schema -- against the vendored reference or against itself. This one pins the
-whole design at once: on the cell that is SAASBO (`product/lengthscale`), with the reference's own
-EI, the reference's fixed 1e-6 observation variance and noise-free evaluations, our loop must
-produce the reference's query points *bit for bit* over 15 fitted iterations. Nothing but seeding
-is allowed to differ, so if any of the standardization, the fit, the candidate set, the L-BFGS-B
-restarts or the bookkeeping had drifted from the reference by one ulp, the two trajectories would
-separate at the first iteration where the drift changes an argmax and never rejoin.
+Every other test in this suite pins one piece -- `fit` against `fit_fully_bayesian_model_nuts`,
+`propose_ei`'s seeding and its LogEI, the row schema, the resume. This one pins their
+*composition*: a loop written from scratch on BoTorch's public API, in under forty lines, must
+choose the same points and observe the same values as `run_bo` -- bit for bit, over fifteen fitted
+iterations. If any of the standardization, the model construction, the postprocess/thin/load
+sequence, the incumbent, the acquisition, the maximizer's two seeds or the bookkeeping had drifted
+from BoTorch's own by one ulp, the two trajectories would separate at the first iteration where
+the drift changes an argmax and never rejoin.
 
-The reference draws from global random state in exactly three places, and each is patched here so
-that it draws what `iteration_rngs(seed, t)` would have given our loop instead:
+What the two sides deliberately share is only what is not under test: the seeds
+(`sagp.bo.iteration_rngs`), the initial design (`sagp.bo.initial_design`, a scrambled Sobol
+sequence) and the standardization (`sagp.gp.standardize`, ddof 0). Those three are the run's
+definition, not its implementation -- a hand-written loop that guessed at them would be pinning
+nothing. What the hand-written side shares with `sagp` is nothing else: no `sagp` model, no
+`sagp` acquisition, no `sagp` optimizer call, no `run_bo`. It builds a stock
+`SaasFullyBayesianSingleTaskGP`, fits it with `fit_fully_bayesian_model_nuts`, and maximizes
+`LogExpectedImprovement` with `optimize_acqf` under the protocol's options.
 
-1. `SAASGP.fit` splits `PRNGKey(0)` and hands the first half to NUTS, so *every* iteration's chain
-   runs from the same key. `SeededSAASGP` replaces that one line with `iteration_rngs(s, t).key`,
-   where `t = len(Y_train)` is the number of points already evaluated -- our loop's own index for
-   the point it is about to choose.
-2. `saasbo.optimize_ei` builds its 5000 candidates from an unseeded `qmc.Sobol(dim, scramble=True)`.
-   `SobolShim` injects `iteration_rngs(s, t).sobol_seed` when no seed is given and passes an
-   explicit one through unchanged -- which is what leaves `run_saasbo`'s *initial design*
-   (`qmc.Sobol(len(lb), scramble=True, seed=seed)`) alone, since that one is already seeded and is
-   already `sagp.bo.initial_design`.
-3. `saasbo.optimize_ei` jitters the incumbent with `np.random.randn(1, dim)`. The replacement
-   draws from `iteration_rngs(s, t).jitter_rng` and then advances the counter, because within one
-   `optimize_ei` the Sobol call comes first and the jitter second: the counter therefore starts at
-   `n_init` and moves once per iteration, after the jitter.
+Two settings are reduced from the study's, and neither weakens the pin:
 
-`saasbo.qmc` is `scipy.stats.qmc` and `saasbo.np` is `numpy`, so patches 2 and 3 are global for as
-long as they are installed. They are installed inside a `monkeypatch.context()` around the
-reference call alone, after our own run has finished, so that `sagp.bo`'s Sobol calls are the real
-ones.
+* `NUTSConfig(128, 64, 4)` rather than the production 512/256/16. The claim here is that the two
+  loops are the same computation, and a computation that agrees to the bit at one sampler budget
+  agrees at every other -- both sides run the same NUTS on the same seed either way. Equivalence
+  *at* 512/256/16 is what `test_sagp_inference.py` pins, on every invocation of the suite; this
+  test buys fifteen fitted iterations for the price of two minutes instead of half an hour.
+* `thresholds=NEVER_FAILS`, so the gate always reports "ok". The gate is a label, not a branch:
+  `run_bo` queries with an excluded fit exactly as it queries with a passing one (only an
+  *exception* out of the fit changes what is queried), so the trajectory is the same either way.
+  Silencing it keeps this test about the loop rather than about whether a 64-draw chain converged.
 """
 from __future__ import annotations
 
-import types
+from sagp.bo import initial_design, iteration_rngs, propose_ei, run_bo
+from sagp.diagnostics import DiagThresholds
+from sagp.gp import NUTSConfig, fit, standardize
 
-import jax
+import botorch.settings
+import gpytorch.settings
 import numpy as np
 import pytest
-from scipy.stats import qmc
+import torch
+from botorch.acquisition.analytic import LogExpectedImprovement
+from botorch.fit import fit_fully_bayesian_model_nuts
+from botorch.models.fully_bayesian import SaasFullyBayesianSingleTaskGP
+from botorch.optim import optimize_acqf
 
-import saasbo
-import saasgp
-from experiments.run_bo import run
-from sagp.bo import iteration_rngs
-from sagp.diagnostics import DiagThresholds
 from synthobj.families import make_family
 
-# The run seed, shared by both sides: `SeededSAASGP` and the two shims read it to rebuild the very
-# streams `run` used, so it is a module constant rather than an argument threaded through them.
 _SEED = 3
 _D = 5
-_T = 25
-_N_INIT = 10
-# The reference has no refit path, so ours must not take one either: thresholds nothing can fail.
-_NEVER_FAILS = DiagThresholds(float("inf"), 0.0, 10**9)
+_N_INIT = 5
+_T = 20  # fifteen fitted iterations
+# A reduced sampler budget; see this module's docstring for why the pin does not depend on it.
+_NUTS = NUTSConfig(num_warmup=128, num_samples=64, thinning=4)
+# Diagnostics nothing can fail, so every fit reports "ok" on both sides.
+_NEVER_FAILS = DiagThresholds(r_hat_max=float("inf"), n_eff_min=0.0, max_divergences=10**9)
 
 
-class SeededSAASGP(saasgp.SAASGP):
-    """`SAASGP` whose `fit` takes its HMC key from `iteration_rngs` rather than from `PRNGKey(0)`.
+def _botorch_loop(objective, seed, T, n_init, nuts):
+    """SAASBO on Papenmeier's protocol, written directly on BoTorch's public API.
 
-    `SAASGP.fit`'s body verbatim but for the key line. `rng_key_predict` is set to a fixed key
-    instead of the discarded half of the reference's split: `SAASGP.predict` accepts an `rng_key`
-    and never uses it, so no number in the run depends on it. `verbose` is not forced here --
-    `run_saasbo` already constructs the class with `verbose=False`.
+    Shares `initial_design`, `iteration_rngs` and `standardize` with `sagp`; nothing else. The
+    `optimize_acqf` options and the two seeds around it are the protocol's, documented in
+    `sagp.bo.propose_ei`. Returns the design and its observations.
     """
-
-    def fit(self, X_train, Y_train, seed=0):
-        self.X_train, self.Y_train = X_train.copy(), Y_train.copy()
-        self.rng_key_hmc = iteration_rngs(_SEED, len(Y_train)).key
-        self.rng_key_predict = jax.random.PRNGKey(0)
-        self.chain_samples, self.flat_samples, self.summary = self.run_inference(
-            self.rng_key_hmc, X_train, Y_train
+    D = objective.D
+    X = initial_design(D, n_init, seed)
+    y = np.array([
+        float(objective.observe(X[t][None, :], iteration_rngs(seed, t).noise_rng)[0])
+        for t in range(n_init)
+    ])
+    for t in range(n_init, T):
+        z, _, _ = standardize(y)
+        rngs = iteration_rngs(seed, t)
+        with botorch.settings.validate_input_scaling(False):
+            gp = SaasFullyBayesianSingleTaskGP(torch.as_tensor(X), torch.as_tensor(z)[:, None])
+        fit_fully_bayesian_model_nuts(
+            gp, max_tree_depth=nuts.max_tree_depth, warmup_steps=nuts.num_warmup,
+            num_samples=nuts.num_samples, thinning=nuts.thinning, disable_progbar=True,
+            seed=rngs.nuts_seed,
         )
-        return self
+        acq = LogExpectedImprovement(model=gp, best_f=float(z.max()))
+        bounds = torch.stack([torch.zeros(D), torch.ones(D)])
+        options = {
+            "batch_limit": 1, "maxiter": 200, "sample_around_best": True,
+            "sample_around_best_sigma": 1e-3, "seed": rngs.sobol_seed,
+        }
+        with torch.random.fork_rng(), gpytorch.settings.cholesky_max_tries(9):
+            torch.manual_seed(rngs.torch_seed)
+            x, _ = optimize_acqf(
+                acq, bounds=bounds, q=1, num_restarts=5, raw_samples=512, options=options
+            )
+        x = x.detach().numpy()[0]
+        X = np.vstack([X, x])
+        y = np.append(y, float(objective.observe(x[None, :], rngs.noise_rng)[0]))
+    return X, y
 
 
 @pytest.mark.slow
-def test_our_loop_reproduces_the_reference_trajectory(tmp_path, monkeypatch):
-    """Our loop and `run_saasbo` choose the same 25 points and observe the same 25 values.
+def test_run_bo_reproduces_a_hand_written_botorch_loop():
+    """`run_bo` and `_botorch_loop` choose the same 20 points and observe the same 20 values.
 
-    See this module's docstring for what the three patches are and why they are the only three.
-    Our run goes first, unpatched; the reference follows inside a `monkeypatch.context()`, since
-    patching `qmc.Sobol` reaches `sagp.bo`'s own candidate sets too.
+    On the cell that *is* SAASBO (`product/lengthscale`), which is BoTorch's `SaasPyroModel` with
+    its two postprocessing deletions undone. `np.array_equal`, never `allclose`: an approximate
+    agreement would mean the two loops are running different computations that have not yet
+    diverged, which is the thing this test exists to rule out.
     """
     objective = make_family("aligned3", 0, D=_D)
+    ref_X, ref_y = _botorch_loop(objective, _SEED, _T, _N_INIT, _NUTS)
 
-    run_dir = run(
-        objective,
-        "product/lengthscale",
-        seed=_SEED,
-        T=_T,
-        n_init=_N_INIT,
-        out_dir=tmp_path,
-        acq="ei",
-        fixed_noise=1.0e-6,
-        noiseless=True,
-        thresholds=_NEVER_FAILS,
-    )
-    with np.load(run_dir / "checkpoint.npz") as data:
-        X_ours, y_ours = data["X"], data["y"]
-
-    counter = types.SimpleNamespace(t=_N_INIT)
-    real_sobol = qmc.Sobol
-
-    def SobolShim(dim, scramble=True, seed=None, **kwargs):
-        return real_sobol(
-            dim,
-            scramble=scramble,
-            seed=seed if seed is not None else int(iteration_rngs(_SEED, counter.t).sobol_seed),
-            **kwargs,
+    def surrogate(X, z, seed):
+        return fit(
+            X, z, seed, cell=("product", "lengthscale"), nuts=_NUTS, thresholds=_NEVER_FAILS
         )
 
-    def randn(*shape):
-        draw = iteration_rngs(_SEED, counter.t).jitter_rng.standard_normal(shape)
-        counter.t += 1
-        return draw
+    ours = run_bo(objective, surrogate, _SEED, T=_T, n_init=_N_INIT, propose=propose_ei)
 
-    with monkeypatch.context() as patched:
-        patched.setattr(saasbo, "SAASGP", SeededSAASGP)
-        patched.setattr(saasbo.qmc, "Sobol", SobolShim)
-        patched.setattr(saasbo.np.random, "randn", randn)
-        X_ref, Y_ref = saasbo.run_saasbo(
-            lambda x: -objective(x),
-            np.zeros(_D),
-            np.ones(_D),
-            max_evals=_T,
-            num_init_evals=_N_INIT,
-            seed=_SEED,
-            kernel="matern",
-        )
-
-    # One jitter draw per fitted iteration and none from the initial design. Checked first because
-    # it localizes the failure: a counter that never moved, or moved twice, would leave every fit
-    # on the right key and every candidate set on the wrong one, which looks like a drifted argmax.
-    assert counter.t == _T
-
-    # `run_saasbo` minimizes -f and reports its query points in the original box, which is the unit
-    # box here (`lb + (ub - lb) * X` with lb = 0 and ub = 1 is exact), so the two compare directly.
-    assert np.array_equal(X_ours, X_ref)
-    assert np.allclose(y_ours, -Y_ref, rtol=0.0, atol=1.0e-12)
+    assert np.array_equal(ours.X, ref_X)
+    assert np.array_equal(ours.y, ref_y)
