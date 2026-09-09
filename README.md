@@ -198,39 +198,21 @@ and the seeds are identical but the floating-point results may differ at the ulp
 why every resume records its own `env` (machine, processor, thread settings) in `manifest.json`.
 
 On SLURM, one array task per `(family, seed, method)`; re-submitting the same array resumes every
-run in it. Two arrays, because the four cells and the three references have different budgets:
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=sagp-cells --array=0-159 --cpus-per-task=1 --mem=8G --time=16:00:00
-REPO=/path/to/saasbo                       # this checkout
-FAMILIES=(aligned3 aligned10 decoupled interaction_g0.25)
-CELLS=(additive/amplitude additive/lengthscale product/amplitude product/lengthscale)
-i=$SLURM_ARRAY_TASK_ID; seed=$((i % 10)); c=$(( (i / 10) % 4 )); f=$(( i / 40 ))
-export OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-cd $REPO && /opt/anaconda3/envs/saasbo/bin/python -m experiments.run_bo --family ${FAMILIES[$f]} --seed $seed \
-    --cell ${CELLS[$c]} --T 200 --out runs/   # re-submitting the same array resumes
-```
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=sagp-refs --array=0-119 --cpus-per-task=1 --mem=8G --time=2:00:00
-REPO=/path/to/saasbo
-FAMILIES=(aligned3 aligned10 decoupled interaction_g0.25)
-REFS=(sobol dsp_map oracle_S)
-i=$SLURM_ARRAY_TASK_ID; seed=$((i % 10)); r=$(( (i / 10) % 3 )); f=$(( i / 30 ))
-export OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-cd $REPO && /opt/anaconda3/envs/saasbo/bin/python -m experiments.run_bo --family ${FAMILIES[$f]} --seed $seed \
-    --cell ${REFS[$r]} --T 200 --out runs/
-```
+run in it. Five arrays, because the four cells and the three references have different budgets:
+one `slurm/sagp_<cell>.sbatch` per cell (40 tasks, one core and 8 GB each, `--time` sized to that
+cell's cost) and `slurm/sagp_refs.sbatch` (120 tasks, 2 h). All index `(family, seed)` from
+`$SLURM_ARRAY_TASK_ID`, share the objective grid through `--objective-dir data/objectives`, and
+read `REPO`, `OUT`, `T` (and, for the cells, `NUTS`) from the environment, so a smoke run is
+`sbatch --export=ALL,OUT=runs_smoke/,T=22 --array=0 slurm/sagp_refs.sbatch`. On Aalto's Triton,
+`REPO_URL=<remote> bash slurm/setup_triton.sh` on a login node makes the checkout under `$WRKDIR`,
+the `saasbo` conda environment, the objective grid and a dry run, once.
 
 `--time` is a **checkpoint interval, not a deadline**: a task the wall clock kills has written a
 checkpoint after every completed iteration, and re-submitting the same array picks each run up
 where it stopped. Chain the resubmissions rather than watching for them:
 
 ```bash
-jobid=$(sbatch --parsable sagp_cells.sbatch)
-for _ in 1 2 3; do jobid=$(sbatch --parsable --dependency=afterany:$jobid sagp_cells.sbatch); done
+bash slurm/submit_chain.sh slurm/sagp_product-lengthscale.sbatch 3    # the array, then three afterany re-submissions
 ```
 
 `afterany` rather than `afterok` on purpose -- a task killed at the wall clock exits non-zero, and
