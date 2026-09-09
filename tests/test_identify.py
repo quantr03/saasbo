@@ -1,24 +1,24 @@
-"""Tests for sagp.gp's offline identification runner (SQ1): `identify` and `standardize`.
+"""Tests for experiments.identify, the study's offline identification runner (SQ1).
 
-`identify` is Tasks 1-5's only consumer inside this module: one Sobol design, one fit, one
-`readouts` call and one `manipulation_checks` call, flattened into a single record with no
-acquisition loop involved. What is pinned here is therefore not any one readout's correctness --
-that is `test_sagp_readouts.py`'s job -- but that the record itself is complete (every key the
-brief lists, at the right shape), that the whole pipeline is reproducible from `(objective, cell,
-n, seed)` alone, and that `sagp.gp` still does not pull in `sagp.bo` merely by defining `identify`.
+`identify` is one Sobol design, one fit, one `readouts` call and one `manipulation_checks` call,
+flattened into a single record with no acquisition loop involved. What is pinned here is therefore
+not any one readout's correctness -- that is `test_sagp_readouts.py`'s job -- but that the record
+itself is complete (every key the brief lists, at the right shape), that the whole pipeline is
+reproducible from `(objective, cell, n, seed)` alone, and that neither `sagp.gp` nor
+`experiments.identify` pulls in `sagp.bo`.
 
 `sagp.gp` is imported first, before this module creates any JAX array, so `sagp/__init__.py`'s
 enable_x64 is in force for every array below.
 """
 import sagp.gp as gp
-from sagp.gp import NUTSConfig, identify, standardize
+from experiments.identify import identify
+from sagp.gp import NUTSConfig
 
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from synthobj.families import make_family
 
@@ -127,28 +127,16 @@ def test_identify_records_the_alpha_fit_actually_used():
 
 
 def test_identify_does_not_import_sagp_bo(repo_root: Path):
-    # `bo.py` (Task 8) will import `standardize` from this module; this is the guard that the
-    # reverse never happens -- `gp.py` must stay usable without ever loading `bo.py`.
+    # `bo.py` imports `standardize` from `sagp.gp`; this is the guard that the reverse never
+    # happens -- `gp.py` must stay usable without ever loading `bo.py`, and the study module that
+    # builds on it must stay clear of the loop too.
     subprocess.run(
-        [sys.executable, "-c", "import sys, sagp.gp; assert 'sagp.bo' not in sys.modules"],
+        [
+            sys.executable,
+            "-c",
+            "import sys, sagp.gp, experiments.identify; assert 'sagp.bo' not in sys.modules",
+        ],
         check=True,
         cwd=repo_root,
         timeout=120,
     )
-
-
-# --- standardize ---
-
-
-def test_standardize_zero_mean_unit_std_and_sign_flip():
-    rng = np.random.default_rng(7)
-    y = rng.normal(loc=3.0, scale=2.0, size=50)
-
-    z, mean, std = standardize(y)
-
-    assert z.mean() == pytest.approx(0.0, abs=1e-12)
-    assert z.std() == pytest.approx(1.0)
-    assert z.argmax() == y.argmin()  # the sign flip: standardize maximizes what y minimizes
-    assert mean == pytest.approx(y.mean())
-    assert std == pytest.approx(y.std())
-    assert type(mean) is float and type(std) is float

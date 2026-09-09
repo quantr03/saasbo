@@ -23,6 +23,7 @@ from sagp.gp import (
     KERNELS,
     NUTSConfig,
     fit,
+    standardize,
 )
 
 from functools import partial
@@ -366,3 +367,20 @@ def test_fit_rejects_fixed_noise_zero():
             fixed_noise=0.0,
             nuts=NUTSConfig(2, 2, 1),  # never reached: the check fires before any sampling
         )
+
+
+# --- standardize ---
+
+
+def test_standardize_zero_mean_unit_std_and_sign_flip():
+    rng = np.random.default_rng(7)
+    y = rng.normal(loc=3.0, scale=2.0, size=50)
+
+    z, mean, std = standardize(y)
+
+    assert z.mean() == pytest.approx(0.0, abs=1e-12)
+    assert z.std() == pytest.approx(1.0)
+    assert z.argmax() == y.argmin()  # the sign flip: standardize maximizes what y minimizes
+    assert mean == pytest.approx(y.mean())
+    assert std == pytest.approx(y.std())
+    assert type(mean) is float and type(std) is float
