@@ -216,7 +216,7 @@ def test_refit_and_excluded_paths(monkeypatch):
     mcmc_calls = _spy_on_mcmc(monkeypatch)
     keys = _spy_on_run_nuts(monkeypatch)
 
-    monkeypatch.setattr(sagp.gp, "_diagnose", _stub_diagnose([False, True]))
+    monkeypatch.setattr(sagp.gp, "diagnose", _stub_diagnose([False, True]))
     refit = fit(X, y, key=key, cell=("product", "lengthscale"), nuts=nuts)
 
     assert refit.status == "refit"
@@ -230,7 +230,7 @@ def test_refit_and_excluded_paths(monkeypatch):
     assert np.array_equal(np.asarray(keys[1]), np.asarray(jax.random.fold_in(key, 1)))
     assert refit.samples["kernel_inv_length_sq"].shape == (8, 3)
 
-    monkeypatch.setattr(sagp.gp, "_diagnose", _stub_diagnose([False, False]))
+    monkeypatch.setattr(sagp.gp, "diagnose", _stub_diagnose([False, False]))
     excluded = fit(X, y, key=key, cell=("product", "lengthscale"), nuts=nuts)
 
     assert excluded.status == "excluded"

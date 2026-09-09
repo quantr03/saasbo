@@ -40,7 +40,7 @@ from scipy.optimize import brentq, minimize
 from scipy.stats import qmc, spearmanr
 
 import saasgp
-from sagp.diagnostics import DiagThresholds, Diagnostics, _diagnose
+from sagp.diagnostics import DiagThresholds, Diagnostics, diagnose
 from synthobj.families import noise_rng
 from synthobj.kernel import GL_NODES as _GL_NODES_NUMPY
 from synthobj.kernel import GL_WEIGHTS as _GL_WEIGHTS_NUMPY
@@ -858,7 +858,7 @@ def fit(
     model = partial(cell.model, **hyperparameters)
 
     flat, extra, wall_s = _run_nuts(model, X, y, key, nuts)
-    attempts = [_diagnose(flat, extra, thresholds, wall_s)]
+    attempts = [diagnose(flat, extra, thresholds, wall_s)]
 
     if not attempts[-1].passed:
         flat, extra, wall_s = _run_nuts(
@@ -868,7 +868,7 @@ def fit(
             jax.random.fold_in(key, 1),
             replace(nuts, num_warmup=2 * nuts.num_warmup),
         )
-        attempts.append(_diagnose(flat, extra, thresholds, wall_s))
+        attempts.append(diagnose(flat, extra, thresholds, wall_s))
 
     if not attempts[-1].passed:
         status = "excluded"

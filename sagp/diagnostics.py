@@ -103,7 +103,7 @@ def _group_extremes(
     )
 
 
-def _diagnose(
+def diagnose(
     flat_samples: dict[str, Array],
     extra: dict[str, Array],
     thresholds: DiagThresholds,

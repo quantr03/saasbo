@@ -360,7 +360,7 @@ def test_a_refit_row_carries_both_attempts_diagnostics(tmp_path, monkeypatch):
     ]
     remaining = iter(attempts)
     monkeypatch.setattr(
-        sagp.gp, "_diagnose", lambda flat, extra, thresholds, wall_s: next(remaining)
+        sagp.gp, "diagnose", lambda flat, extra, thresholds, wall_s: next(remaining)
     )
 
     run_dir = run_bo(
