@@ -47,7 +47,8 @@ from sagp.bo import (
     optimize_ei,
     run_bo,
 )
-from sagp.gp import DiagThresholds, Diagnostics, FittedGP, NUTSConfig
+from sagp.diagnostics import DiagThresholds, Diagnostics
+from sagp.gp import FittedGP, NUTSConfig
 from synthobj.families import make_family
 
 # The acquisition optimizer's cost is 5 restarts x 100 L-BFGS-B evaluations per iteration, each a

@@ -62,10 +62,10 @@ from scipy.optimize import fmin_l_bfgs_b
 from scipy.stats import qmc
 
 import saasbo
+from sagp.diagnostics import DiagThresholds
 from sagp.gp import (
     CELLS,
     ELL_PRIOR,
-    DiagThresholds,
     FittedGP,
     NUTSConfig,
     fit,

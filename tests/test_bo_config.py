@@ -35,7 +35,8 @@ import numpy as np
 
 from sagp import bo
 from sagp.bo import METHODS, RunConfig, config_hash, initial_design, resolve_config, run_bo
-from sagp.gp import DiagThresholds, NUTSConfig
+from sagp.diagnostics import DiagThresholds
+from sagp.gp import NUTSConfig
 from synthobj.families import make_family
 
 _LOOP_KW = dict(num_init_candidates=256, num_restarts_ei=1, sobol_every=5)
