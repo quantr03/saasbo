@@ -341,7 +341,7 @@ def test_alphas_are_the_weights_the_mean_contracts():
     kernel, _ = fitted._kernel()
     alphas = fitted.alphas()
     rebuilt = jnp.stack(
-        [kernel(X_test, X, fitted._params(s), 0.0, False) @ alphas[s] for s in range(S)]
+        [kernel(X_test, X, fitted.params(s), 0.0, False) @ alphas[s] for s in range(S)]
     )
 
     assert np.allclose(np.asarray(rebuilt), np.asarray(mean), rtol=0.0, atol=1.0e-12)

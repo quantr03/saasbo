@@ -18,7 +18,7 @@ from jax import Array, jit
 from jax.typing import ArrayLike
 from scipy.stats import qmc, spearmanr
 
-from sagp.gp import ACTIVE_EPS, CELLS, GL_NODES, GL_WEIGHTS, RHO_EPS, FittedGP, _kbar_all
+from sagp.gp import ACTIVE_EPS, CELLS, GL_NODES, GL_WEIGHTS, RHO_EPS, FittedGP, kbar_all
 
 
 # --- readouts ---
@@ -60,8 +60,8 @@ def _centered_parts(fitted: FittedGP, s: int) -> tuple[Array, Array, bool]:
     shrinking rho_i shrinks the component through v(ell_i) instead. Reading that off the cell in
     one place is what lets `component_means` and `_sobol_exact_additive` be written once.
     """
-    params = fitted._params(s)
-    if fitted._param_sites()[0] == "a_sq":
+    params = fitted.params(s)
+    if fitted.param_sites()[0] == "a_sq":
         return params["kernel_ell"], params["a_sq"], True
     ell = params["kernel_inv_length_sq"] ** -0.5
     return ell, params["kernel_var"] * jnp.ones_like(ell), False
@@ -75,9 +75,9 @@ def _components_at(
 
     Entry [g, i] is m_i(T[g, i]) = w_i * sum_n kbar_i(T[g, i], X[n, i]) alpha_n, coordinate i's
     term of that sample's posterior mean sum_n k(x, X_n) alpha_n. The peak is the single
-    (G, n, D) tensor `_kbar_all` hands the contraction.
+    (G, n, D) tensor `kbar_all` hands the contraction.
     """
-    return weights * jnp.einsum("gnd,n->gd", _kbar_all(T, X, ell, normalize), alpha)
+    return weights * jnp.einsum("gnd,n->gd", kbar_all(T, X, ell, normalize), alpha)
 
 
 def component_means(fitted: FittedGP, x_grid: ArrayLike) -> Array:
@@ -91,7 +91,7 @@ def component_means(fitted: FittedGP, x_grid: ArrayLike) -> Array:
     grid serves every coordinate: the reference measure is U[0,1] on each.
     """
     x_grid = jnp.asarray(x_grid, dtype=jnp.float64)
-    X = fitted._columns(fitted.X_train)
+    X = fitted.columns(fitted.X_train)
     T = jnp.tile(x_grid[:, None], (1, X.shape[1]))
     alphas = fitted.alphas()
 
@@ -125,7 +125,7 @@ def _sobol_exact_additive(fitted: FittedGP) -> tuple[np.ndarray, float]:
     Returns (S_hat (D,), Var_nu(m)); the indices sum to 1. The components are accumulated one
     sample at a time, so the peak is one (Q, n, D) tensor rather than S of them.
     """
-    X = fitted._columns(fitted.X_train)
+    X = fitted.columns(fitted.X_train)
     T = jnp.tile(GL_NODES[:, None], (1, X.shape[1]))
     alphas = fitted.alphas()
     S = alphas.shape[0]
@@ -171,7 +171,7 @@ def _sobol_exact_product_amplitude(fitted: FittedGP) -> tuple[np.ndarray, float]
     S(S+1)/2 pairs with the off-diagonal ones doubled. Returns (S_hat (D,), Var_nu(m)); unlike the
     additive cells these do *not* sum to 1, because expanding the product leaves interaction terms.
     """
-    X = fitted._columns(fitted.X_train)
+    X = fitted.columns(fitted.X_train)
     T = jnp.tile(GL_NODES[:, None], (1, X.shape[1]))
     a_sq = fitted.samples["a_sq"]
     ells = fitted.samples["kernel_ell"]
@@ -180,7 +180,7 @@ def _sobol_exact_product_amplitude(fitted: FittedGP) -> tuple[np.ndarray, float]
 
     # One (Q, n, D) tensor per sample -- 10 MB each at n = 200, D = 100 -- built once because
     # every one of the S(S+1)/2 pairs below needs two of them.
-    kbars = [_kbar_all(T, X, ells[s], True) for s in range(S)]
+    kbars = [kbar_all(T, X, ells[s], True) for s in range(S)]
 
     marginal = (
         sum(
@@ -289,7 +289,7 @@ def readouts(
 
     if is_amplitude:
         share_hat = widen(
-            np.asarray(shares_from_amplitudes(fitted.samples["a_sq"], fitted._noises()))
+            np.asarray(shares_from_amplitudes(fitted.samples["a_sq"], fitted.noises()))
         )
         # A degenerate draw's shares are NaN (see `shares_from_amplitudes`), and NaN > eps is
         # False, which would count it as *inactive* rather than omit it; lifting the comparison to

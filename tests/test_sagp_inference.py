@@ -330,7 +330,7 @@ def test_fit_with_fixed_noise():
     driver's `observation_variance`; what makes that the same model is that the site is never
     sampled, so a fit that merely fixed the *value* would still have an extra latent dimension and
     a different chain. `fixed_noise` is kept on the fitted object because prediction needs it:
-    `FittedGP._noises` has no `kernel_noise` to read.
+    `FittedGP.noises` has no `kernel_noise` to read.
     """
     X, y = _data(n=12, D=3, seed=5)
     fitted = fit(

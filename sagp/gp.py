@@ -88,7 +88,7 @@ def _quad_mean(X: Array, ell_vec: Array) -> Array:
     return jnp.sum(GL_WEIGHTS[:, None] * matern52_1d(r), axis=1)
 
 
-def _kbar_all(X: Array, Z: Array, ell_vec: Array, normalize: bool) -> Array:
+def kbar_all(X: Array, Z: Array, ell_vec: Array, normalize: bool) -> Array:
     """Per-coordinate centered Matern-5/2 kernels; X (n, D), Z (m, D), ell_vec (D,) -> (n, m, D).
 
     Entry [a, b, i] is k~_i(X[a, i], Z[b, i]) = k_i - m_i(X[a, i]) - m_i(Z[b, i]) + c_i, i.e.
@@ -108,7 +108,7 @@ def _kbar_all(X: Array, Z: Array, ell_vec: Array, normalize: bool) -> Array:
 
 
 def _kbar_diag(X: Array, ell_vec: Array, normalize: bool) -> Array:
-    """The diagonal of `_kbar_all(X, X, ell_vec, normalize)`, in O(n D Q); X (n, D) -> (n, D).
+    """The diagonal of `kbar_all(X, X, ell_vec, normalize)`, in O(n D Q); X (n, D) -> (n, D).
 
     At zero distance k_i = 1, so k~_i(x_i, x_i) = 1 - 2 m_i(x_i) + c_i.
     """
@@ -121,11 +121,11 @@ def centered_matern52_1d(x: Array, z: Array, ell: ArrayLike, normalize: bool = F
     """Centered Matern-5/2 kernel of one coordinate; x (n,), z (m,) -> (n, m).
 
     k~(x, z) = k(|x - z| / ell) - m(x) - m(z) + c, divided by v(ell) = 1 - c when `normalize`.
-    This is the D = 1 case of `_kbar_all`, and delegates to it, so the properties the tests
+    This is the D = 1 case of `kbar_all`, and delegates to it, so the properties the tests
     assert here (zero quadrature integral, unit quadrature-mean variance after normalization)
     are properties of the code the cells below actually run.
     """
-    return _kbar_all(x[:, None], z[:, None], jnp.atleast_1d(ell), normalize)[:, :, 0]
+    return kbar_all(x[:, None], z[:, None], jnp.atleast_1d(ell), normalize)[:, :, 0]
 
 
 @partial(jit, static_argnums=(4,))
@@ -138,7 +138,7 @@ def kernel_additive_amplitude(
     E_nu[kbar_i(x, x)] = 1 and a_sq_i is component i's variance under the reference measure
     whatever its lengthscale -- the property that makes an amplitude threshold well defined.
     """
-    kbar = _kbar_all(X, Z, params["kernel_ell"], True)
+    kbar = kbar_all(X, Z, params["kernel_ell"], True)
     k = jnp.sum(params["a_sq"] * kbar, axis=-1)
     if include_noise:
         k = k + (noise + 1.0e-6) * jnp.eye(X.shape[-2])
@@ -157,7 +157,7 @@ def kernel_additive_lengthscale(
     with it the component -- to zero, so dividing v out would undo the prior's shrinkage.
     """
     ell = params["kernel_inv_length_sq"] ** -0.5
-    k = params["kernel_var"] * jnp.sum(_kbar_all(X, Z, ell, False), axis=-1)
+    k = params["kernel_var"] * jnp.sum(kbar_all(X, Z, ell, False), axis=-1)
     if include_noise:
         k = k + (noise + 1.0e-6) * jnp.eye(X.shape[-2])
     return k  # N_X N_Z
@@ -173,7 +173,7 @@ def kernel_product_amplitude(
     interaction of the normalized components, so a_sq_i = 0 removes coordinate i from all of
     them at once.
     """
-    kbar = _kbar_all(X, Z, params["kernel_ell"], True)
+    kbar = kbar_all(X, Z, params["kernel_ell"], True)
     k = jnp.prod(1.0 + params["a_sq"] * kbar, axis=-1)
     if include_noise:
         k = k + (noise + 1.0e-6) * jnp.eye(X.shape[-2])
@@ -602,7 +602,7 @@ class FittedGP:
     def _is_map_reference(self) -> bool:
         """True when `cell` names one of Task 7's MAP references; raises on any other string.
 
-        Both `_kernel` and `_param_sites` fall back to the lengthscale cells' kernel and parameter
+        Both `_kernel` and `param_sites` fall back to the lengthscale cells' kernel and parameter
         names for those two, so without this check a mistyped cell name would be served the
         product/lengthscale cell silently -- a wrong surrogate reported under the wrong label.
         """
@@ -627,7 +627,7 @@ class FittedGP:
             return KERNELS[("product", "lengthscale")]
         return KERNELS[self.cell]
 
-    def _param_sites(self) -> tuple[str, ...]:
+    def param_sites(self) -> tuple[str, ...]:
         """The names of this cell's kernel parameters, in the order prediction passes them around.
 
         `util.chunk_vmap` indexes a *tuple* of arrays, so the per-sample parameters cannot travel
@@ -639,11 +639,11 @@ class FittedGP:
             return ("kernel_var", "kernel_inv_length_sq")
         return ("a_sq", "kernel_ell")
 
-    def _params(self, s: int) -> dict[str, Array]:
+    def params(self, s: int) -> dict[str, Array]:
         """Retained sample `s`'s kernel parameters, in the form its kernel and diagonal take."""
-        return {site: self.samples[site][s] for site in self._param_sites()}
+        return {site: self.samples[site][s] for site in self.param_sites()}
 
-    def _noises(self) -> Array:
+    def noises(self) -> Array:
         """(S,): the observation variance carried by each retained sample.
 
         `kernel_noise` when it was learned, else `fixed_noise` repeated. The reference splits
@@ -654,9 +654,9 @@ class FittedGP:
         """
         if "kernel_noise" in self.samples:
             return self.samples["kernel_noise"]
-        return self.fixed_noise * jnp.ones(self.samples[self._param_sites()[0]].shape[0])
+        return self.fixed_noise * jnp.ones(self.samples[self.param_sites()[0]].shape[0])
 
-    def _columns(self, X: Array) -> Array:
+    def columns(self, X: Array) -> Array:
         """`X` restricted to `active`, the coordinates Task 7's oracle reference was given.
 
         `X_train` itself stays full-D -- `saasbo.optimize_ei`'s incumbent lookup and the run log
@@ -674,15 +674,15 @@ class FittedGP:
         MAP references, 16 for a cell, and whatever a non-default `--nuts` retains.
         """
         kernel, _ = self._kernel()
-        sites = self._param_sites()
-        X = self._columns(self.X_train)
+        sites = self.param_sites()
+        X = self.columns(self.X_train)
 
         def _cholesky(*sample: Array) -> tuple[Array]:
             # `zip` stops at `sites`, so the trailing noise argument is not taken for a parameter.
             k_XX = kernel(X, X, dict(zip(sites, sample)), sample[-1], True)
             return (cho_factor(k_XX, lower=True)[0],)
 
-        vmap_args = tuple(self.samples[site] for site in sites) + (self._noises(),)
+        vmap_args = tuple(self.samples[site] for site in sites) + (self.noises(),)
         if chunk_size is None:
             chunk_size = _chunk_size(vmap_args[0].shape[0])
         self._Ls = chunk_vmap(_cholesky, vmap_args, chunk_size=chunk_size)[0]
@@ -704,7 +704,7 @@ class FittedGP:
         `X_test` arrives full-D: `active` is applied here, to it and to the training inputs alike.
         """
         kernel, diag_fn = self._kernel()
-        X, X_p = self._columns(self.X_train), self._columns(X_test)
+        X, X_p = self.columns(self.X_train), self.columns(X_test)
 
         k_pX = kernel(X_p, X, params, noise, False)
         mean = jnp.matmul(k_pX, cho_solve((L, True), self.Y_train))
@@ -730,8 +730,8 @@ class FittedGP:
         if self._Ls is None:
             self._compute_choleskys()
 
-        sites = self._param_sites()
-        vmap_args = tuple(self.samples[site] for site in sites) + (self._noises(), self._Ls)
+        sites = self.param_sites()
+        vmap_args = tuple(self.samples[site] for site in sites) + (self.noises(), self._Ls)
         chunk_size = _chunk_size(self._Ls.shape[0])
 
         def _block(X_block: Array) -> tuple[Array, Array]:

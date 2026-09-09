@@ -128,7 +128,7 @@ def fit_map(
     `active=None` is the DSP reference and fits all D coordinates; `active=S` is the oracle, which
     fits `X[:, S]` alone and is otherwise the identical procedure -- the two differ in the
     information they are given and in nothing else. Either way the returned `FittedGP` holds the
-    *full-D* design and answers full-D test points (`FittedGP._columns` applies the restriction at
+    *full-D* design and answers full-D test points (`FittedGP.columns` applies the restriction at
     every kernel evaluation), so the BO loop cannot tell either reference from a cell.
 
     The one further departure from a stock BoTorch `SingleTaskGP` is the mean function: that model

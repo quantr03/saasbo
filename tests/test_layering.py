@@ -81,8 +81,8 @@ def test_the_library_never_imports_the_study(path: Path):
 def test_the_study_uses_only_public_library_names(path: Path):
     """Rule (b): every `sagp` name `experiments/` imports or reaches for is public."""
     assert _private_sagp_uses(path.read_text()) == []
-    assert _private_sagp_uses("from sagp.gp import _kbar_all") == ["sagp.gp._kbar_all"]
-    assert _private_sagp_uses("import sagp.gp as gp\ngp._kbar_all(x)\n") == ["gp._kbar_all"]
+    assert _private_sagp_uses("from sagp.gp import _chunk_size") == ["sagp.gp._chunk_size"]
+    assert _private_sagp_uses("import sagp.gp as gp\ngp._chunk_size(x)\n") == ["gp._chunk_size"]
 
 
 @pytest.mark.parametrize("path", _CORE_FILES, ids=lambda p: p.name)
