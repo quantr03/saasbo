@@ -1,11 +1,12 @@
-"""Tests for `python -m sagp.bo`: the study's entry point, exercised the way SLURM will run it.
+"""Tests for `python -m experiments.run_bo`: the study's entry point, as SLURM will run it.
 
 Three of these go through `subprocess` rather than through `main(argv)`, because what they check
-is exactly what an in-process call cannot: that `python -m sagp.bo` resolves to a module with a
-`__main__` guard, that its exit code reaches the shell (a SLURM array's only signal that a task
-failed), and that a real 15-iteration run leaves the seven artifacts of the plan's run directory
-on disk. They are the expensive ones -- each pays JAX's import -- so everything that does not
-need a process (the argument errors, `--objective-dir`'s stem) calls `main` directly instead.
+is exactly what an in-process call cannot: that `python -m experiments.run_bo` resolves to a
+module with a `__main__` guard, that its exit code reaches the shell (a SLURM array's only signal
+that a task failed), and that a real 15-iteration run leaves the seven artifacts of the plan's
+run directory on disk. They are the expensive ones -- each pays JAX's import -- so everything
+that does not need a process (the argument errors, `--objective-dir`'s stem) calls `main`
+directly instead.
 
 `--dry-run` gets the closest reading: it is the flag a person uses to check a command line before
 committing 16 hours of cluster time to it, so the test parses its JSON rather than grepping it,
@@ -21,7 +22,7 @@ import sys
 import time
 from pathlib import Path
 
-from sagp.bo import main
+from experiments.run_bo import main
 from synthobj.families import make_family
 
 _RUN = [
@@ -34,7 +35,7 @@ _RUN = [
 
 def _run(repo_root: Path, *argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-m", "sagp.bo", *argv],
+        [sys.executable, "-m", "experiments.run_bo", *argv],
         cwd=repo_root, capture_output=True, text=True, timeout=240,
     )
 

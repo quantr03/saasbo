@@ -43,7 +43,8 @@ from scipy.stats import qmc
 
 import saasbo
 import saasgp
-from sagp.bo import iteration_rngs, run_bo
+from experiments.run_bo import run_bo
+from sagp.bo import iteration_rngs
 from sagp.diagnostics import DiagThresholds
 from synthobj.families import make_family
 

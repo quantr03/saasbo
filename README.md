@@ -131,7 +131,7 @@ acquisition, the references, logging/checkpointing and the CLI. They meet at one
 **Running it.** One `(family, seed, cell)` per invocation:
 
 ```
-python -m sagp.bo --family aligned10 --seed 3 --cell additive/amplitude --T 200 --out runs/
+python -m experiments.run_bo --family aligned10 --seed 3 --cell additive/amplitude --T 200 --out runs/
 ```
 
 `--cell` also takes `sobol | dsp_map | oracle_S`; other flags are `--D 100`, `--n-init 20`,
@@ -139,7 +139,7 @@ python -m sagp.bo --family aligned10 --seed 3 --cell additive/amplitude --T 200 
 `--nuts 512,256,16` (the fallback budget is passed here, identically for every cell),
 `--num-init-candidates 5000` and `--num-restarts-ei 5` (the reference acquisition optimizer's two
 sizes, held fixed across every method), `--objective-dir` and `--dry-run`. See
-`python -m sagp.bo --help`.
+`python -m experiments.run_bo --help`.
 
 Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 
@@ -171,7 +171,7 @@ FAMILIES=(aligned3 aligned10 decoupled interaction_g0.25)
 CELLS=(additive/amplitude additive/lengthscale product/amplitude product/lengthscale)
 i=$SLURM_ARRAY_TASK_ID; seed=$((i % 10)); c=$(( (i / 10) % 4 )); f=$(( i / 40 ))
 export OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-cd $REPO && /opt/anaconda3/envs/saasbo/bin/python -m sagp.bo --family ${FAMILIES[$f]} --seed $seed \
+cd $REPO && /opt/anaconda3/envs/saasbo/bin/python -m experiments.run_bo --family ${FAMILIES[$f]} --seed $seed \
     --cell ${CELLS[$c]} --T 200 --out runs/   # re-submitting the same array resumes
 ```
 
@@ -183,7 +183,7 @@ FAMILIES=(aligned3 aligned10 decoupled interaction_g0.25)
 REFS=(sobol dsp_map oracle_S)
 i=$SLURM_ARRAY_TASK_ID; seed=$((i % 10)); r=$(( (i / 10) % 3 )); f=$(( i / 30 ))
 export OMP_NUM_THREADS=1 XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-cd $REPO && /opt/anaconda3/envs/saasbo/bin/python -m sagp.bo --family ${FAMILIES[$f]} --seed $seed \
+cd $REPO && /opt/anaconda3/envs/saasbo/bin/python -m experiments.run_bo --family ${FAMILIES[$f]} --seed $seed \
     --cell ${REFS[$r]} --T 200 --out runs/
 ```
 

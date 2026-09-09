@@ -1,4 +1,4 @@
-"""Tests for `sagp.bo`'s configuration and provenance: `resolve_config`, the manifest, the lock.
+"""Tests for `experiments.run_bo`'s `resolve_config` and `experiments.runlog`'s manifest and lock.
 
 What a run directory has to be able to prove, and what these tests check it proves:
 
@@ -13,8 +13,8 @@ What a run directory has to be able to prove, and what these tests check it prov
   end-to-end runs here are the check that `run_bo` really calls it before the method matters.
 - that the manifest describes the run rather than the reader's environment: it round-trips into
   the `RunConfig` the run used, its `reference_sha256` matches a *fresh* `hashlib.sha256` of the
-  vendored files (not `bo`'s own helper agreeing with itself), and a resume neither rewrites what
-  it recorded at the start nor raises when the environment underneath it has moved.
+  vendored files (not `runlog`'s own helper agreeing with itself), and a resume neither rewrites
+  what it recorded at the start nor raises when the environment underneath it has moved.
 
 Runs are `dsp_map` at D = 5 with the loop tests' own reduced acquisition budget: nothing here is
 about the surrogate, only about what is written beside it.
@@ -33,8 +33,10 @@ from pathlib import Path
 
 import numpy as np
 
-from sagp import bo
-from sagp.bo import METHODS, RunConfig, config_hash, initial_design, resolve_config, run_bo
+from experiments import run_bo as run_bo_module
+from experiments.run_bo import METHODS, resolve_config, run_bo
+from experiments.runlog import RunConfig, config_hash
+from sagp.bo import initial_design
 from sagp.diagnostics import DiagThresholds
 from sagp.gp import NUTSConfig
 from synthobj.families import make_family
@@ -54,16 +56,17 @@ def _objective():
 
 
 def _parse(*argv: str):
-    return bo._build_parser().parse_args(list(argv))
+    return run_bo_module._build_parser().parse_args(list(argv))
 
 
 def _config_from_manifest(manifest: dict) -> RunConfig:
     """The `RunConfig` a manifest describes, with JSON's own lossiness undone by hand.
 
     JSON has neither tuples nor dataclasses, so exactly three fields come back in another shape.
-    Written here rather than as a `from_manifest` in `bo.py` because nothing in the study reads a
-    manifest back -- resume compares the hash and never reconstructs -- and a constructor whose
-    only caller was this test would be a claim about the format that only this test could break.
+    Written here rather than as a `from_manifest` in `runlog.py` because nothing in the study
+    reads a manifest back -- resume compares the hash and never reconstructs -- and a constructor
+    whose only caller was this test would be a claim about the format that only this test could
+    break.
     """
     fields = {f.name: manifest[f.name] for f in dataclasses.fields(RunConfig)}
     fields["nuts"] = NUTSConfig(**fields["nuts"])
