@@ -57,6 +57,8 @@ def v_of_ell(ell: ArrayLike) -> Array:
     """Average marginal variance of the centered unit-amplitude component under U[0,1].
 
     v(ell) = 1 - sum_{q,q'} w_q w_q' k(|t_q - t_q'| / ell), reproducing `synthobj.kernel.v`.
+    `ell` may be a scalar or a (D,) vector of per-coordinate lengthscales -- both live, `brentq`
+    passing a scalar and `kbar_all` a vector -- and the result has the same shape.
     """
     ell = jnp.asarray(ell)
     r = jnp.abs(GL_NODES[:, None, None] - GL_NODES[:, None]) / jnp.atleast_1d(ell)  # (Q, Q, D)
@@ -481,11 +483,13 @@ def _chunk_size(S: int) -> int:
 
 
 class FittedGP:
-    """One cell's posterior on standardized, negated targets: what `fit` returns and the loop
+    """One cell's posterior on standardized, negated targets: what `fit` returns.
 
-    The training data keeps the reference's names (`X_train`, `Y_train`) so `saasbo.optimize_ei`'s
-    incumbent lookup runs against this object unchanged. `samples` holds the retained constrained
-    draws, one entry per site of `cell.sites` present in the trace, leading dimension S.
+    The loop (`sagp.bo`) and the readouts (`sagp.readouts`) consume it, and `references.fit_map`
+    builds one for each MAP reference. The training data keeps the reference's names (`X_train`,
+    `Y_train`) so `saasbo.optimize_ei`'s incumbent lookup runs against this object unchanged;
+    `samples` holds the retained constrained draws, one entry per site of `cell.sites` present in
+    the trace, leading dimension S.
     """
 
     def __init__(
@@ -696,9 +700,11 @@ def fit(
 ) -> FittedGP:
     """NUTS fit of `cell` to (X in [0,1]^D, y already standardized and negated by the caller).
 
-    `key` is used *unchanged* by the first attempt, which is what reproduces the reference bit for
-    bit; the refit uses `fold_in(key, 1)` on a *fresh* chain with twice the warm-up, giving "ok",
-    "refit" or "excluded" -- whose draws still come back, because the loop has to keep querying.
+    Attempt 0 uses `key` *unchanged*, which is what reproduces the reference bit for bit; the
+    refit uses `fold_in(key, 1)`, disjoint from it and from the loop's exception retry, which uses
+    `fold_in(key, 2)` (`sagp.bo._fit_with_retry`). That refit is a *fresh* chain with twice the
+    warm-up, giving "ok", "refit" or "excluded" -- whose draws still come back, because the loop
+    has to keep querying.
     """
     if fixed_noise is not None and fixed_noise == 0.0:
         raise ValueError(

@@ -280,9 +280,10 @@ def manipulation_checks(readout: dict[str, object], labels: object) -> dict[str,
     *orders* the coordinates the way the objective does, and in three of the four cells the two
     quantities are not even on the same scale (rho_i is not a share). Both readouts are scored
     against both labels: `labels.s`, the variance share `sobol_hat` estimates, and `labels.g`, the
-    realized slope share a lengthscale readout can track. `amplitude_vs_realized` pairs `labels.s`
-    on the active coordinates with the median, over the usable draws, of the readout that states a
-    *variance*.
+    realized slope share a lengthscale readout can track; `spearman_native_vs_sobol` measures how
+    much the cell's own parameterization already tells you, against the parameterization-neutral
+    readout. `amplitude_vs_realized` pairs `labels.s` on the active coordinates with the median,
+    over the usable draws, of the readout that states a *variance*.
     """
     native_median = np.asarray(readout["native_median"])
     sobol_hat = np.asarray(readout["sobol_hat"])

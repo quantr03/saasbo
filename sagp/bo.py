@@ -82,7 +82,8 @@ def log1mexp(x: Array) -> Array:
     """log(1 - exp(x)) for x < 0, accurate at both ends (Machler 2012).
 
     The switch at -log 2 picks the better-conditioned branch, and each branch runs on inputs
-    *clamped into its own domain*: a NaN in the branch not taken would poison the other's gradient.
+    *clamped into its own domain* (and likewise in `log_h`): under `jnp.where` both branches are
+    computed everywhere, and a NaN in the one not taken would poison the other's gradient.
     """
     upper = jnp.maximum(x, -_LOG2)  # the naive branch never sees the tail's inputs
     lower = jnp.minimum(x, -_LOG2)  # and the tail branch never sees log1p(-1) = -inf
@@ -96,7 +97,10 @@ def log_h(z: Array) -> Array:
     h is the whole content of EI, EI(x) = std * h((y_target - mu)/std), and underflows to zero in
     float64 at about z = -37, where the reference's EI loses its gradient. The log form goes
     through `log1mexp` of the paper's erfcx Mills ratio, which keeps the mantissa lost by log
-    Phi(z) + z^2/2.
+    Phi(z) + z^2/2. As in `log1mexp`, each branch is evaluated on inputs clamped into its own
+    domain (`upper`, `lower`): under `jnp.where` both branches run everywhere, and a NaN in the one
+    not taken -- the naive branch's 0/0 far into the tail, the tail branch's `log(-z)` at z > 0 --
+    would poison the gradient of the branch that is taken.
     """
     upper = jnp.maximum(z, -1.0)
     lower = jnp.minimum(z, -1.0)
@@ -257,7 +261,9 @@ def _fit_with_retry(
     A fit whose *diagnostics* failed is not a failure here: `fit` returns it with
     `status="excluded"` and the loop queries with it anyway, since stopping at every bad chain
     would bias the regret. An *exception* leaves no surrogate: logged, then retried on
-    `fold_in(key, 2)`.
+    `fold_in(rngs.key, 2)`, disjoint from both keys `fit` uses itself (`key` for attempt 0 and
+    `fold_in(key, 1)` for its refit) -- changing either constant would make this retry rerun
+    `fit`'s refit chain.
     """
     if surrogate is None:
         return None, 0, float("nan"), None
