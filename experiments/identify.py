@@ -11,7 +11,6 @@ import time
 import warnings
 from dataclasses import asdict
 
-import jax
 import numpy as np
 from scipy.stats import qmc
 
@@ -37,8 +36,8 @@ def identify(
     both seeded from `seed` alone, so two calls at the same `(objective, cell, n, seed)` fit the
     same data and `samples` compares equal draw for draw. `qmc.Sobol`'s balance-property warning is
     suppressed the way the reference suppresses it, since a caller-chosen `n` need not be a power
-    of two. `y` is standardized and negated by `standardize` before it reaches `fit`, as every cell
-    expects; the HMC key comes from `(seed, n)` salted by `0x1D` so it can collide with neither the
+    of two. `y` is standardized by `standardize` before it reaches `fit`, as every cell expects;
+    the fit's int seed comes from `(seed, n)` salted by `0x1D` so it can collide with neither the
     design's own Sobol seed nor `synthobj`'s own streams, which are seeded independently of it.
 
     `**fit_kwargs` (`alpha`, `fixed_noise`, `nuts`, `thresholds`, `ell_prior`) reaches `fit`
@@ -60,10 +59,10 @@ def identify(
     y = objective.observe(X, noise_rng(seed, run=0))
     z, y_mean, y_std = standardize(y)
 
-    # 0x1D salts (seed, n) so this key can never collide with the design's own Sobol seed or with
+    # 0x1D salts (seed, n) so this seed can never collide with the design's own Sobol seed or with
     # synthobj's own streams (`streams`, `noise_rng`), which are seeded independently of it.
-    key = jax.random.PRNGKey(int(np.random.SeedSequence([seed, n, 0x1D]).generate_state(1)[0]))
-    fitted = fit(X, z, key, cell, **fit_kwargs)
+    fit_seed = int(np.random.SeedSequence([seed, n, 0x1D]).generate_state(1)[0])
+    fitted = fit(X, z, fit_seed, cell, **fit_kwargs)
     r = readouts(fitted, sobol_n=sobol_n)
     checks = manipulation_checks(r, objective.labels)
 

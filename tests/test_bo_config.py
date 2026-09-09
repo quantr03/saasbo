@@ -9,12 +9,15 @@ What a run directory has to be able to prove, and what these tests check it prov
   per-method default would fail; `test_every_flag_reaches_the_resolved_config` is its mirror --
   every flag set away from its default at once, compared to one hand-written `RunConfig`, so a
   flag that reaches nothing fails too.
-- that every method started from the same points. `initial_design` takes no method, so the two
-  end-to-end runs here are the check that `run` really calls it before the method matters.
+- that every method started from the same points *and* maximized the acquisition the same way.
+  `initial_design` takes no method, so the end-to-end runs here are the check that `run` really
+  calls it before the method matters, and `propose_for` is compared across all seven: the
+  maximizer is the other half of "the methods differ in `method` and in nothing else".
 - that the manifest describes the run rather than the reader's environment: it round-trips into
-  the `RunConfig` the run used, its `reference_sha256` matches a *fresh* `hashlib.sha256` of the
-  vendored files (not `runlog`'s own helper agreeing with itself), and a resume neither rewrites
-  what it recorded at the start nor raises when the environment underneath it has moved.
+  the `RunConfig` the run used, its `acquisition_constants` name the whole operating point the
+  maximizer ran at -- BoTorch's fixed choices as well as the five a flag reaches -- and a resume
+  neither rewrites what it recorded at the start nor raises when the environment underneath it
+  has moved.
 
 Runs are `dsp_map` at D = 5 with the loop tests' own reduced acquisition budget: nothing here is
 about the surrogate, only about what is written beside it.
@@ -22,7 +25,6 @@ about the surrogate, only about what is written beside it.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import importlib.metadata
 import inspect
 import json
@@ -32,16 +34,19 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pytest
+import torch
 
 from experiments import run_bo as run_bo_module
-from experiments.run_bo import METHODS, resolve_config, run
+from experiments.run_bo import METHODS, propose_for, resolve_config, run
 from experiments.runlog import RunConfig, config_hash
-from sagp.bo import initial_design
+from sagp.bo import initial_design, propose_ei
 from sagp.diagnostics import DiagThresholds
 from sagp.gp import NUTSConfig
+from sagp.references import propose_sobol
 from synthobj.families import make_family
 
-_LOOP_KW = dict(num_init_candidates=256, num_restarts_ei=1, sobol_every=5)
+_LOOP_KW = dict(raw_samples=64, num_restarts=1, sobol_every=5)
 _T = 10
 _N_INIT = 5
 # The run seed is deliberately not the objective's: the manifest records both, and a manifest that
@@ -93,10 +98,13 @@ def test_resolve_config_differs_only_in_method(tmp_path):
     # And the defaults the study is run at, spelled out: these are the numbers a SLURM array gets
     # when it passes nothing but --family, --seed, --cell and --out.
     assert (reference.T, reference.n_init, reference.D) == (200, 20, 100)
-    assert reference.acq == "logei" and reference.nuts == NUTSConfig(512, 256, 16)
+    assert reference.nuts == NUTSConfig(512, 256, 16)
     assert reference.thresholds == DiagThresholds()
     assert (reference.sobol_every, reference.sobol_n) == (25, 2048)
-    assert (reference.num_init_candidates, reference.num_restarts_ei) == (5000, 5)
+    # Papenmeier et al. (2025)'s maximizer, at the operating point every method shares.
+    assert (reference.raw_samples, reference.num_restarts) == (512, 5)
+    assert reference.sample_around_best_sigma == 1e-3
+    assert (reference.batch_limit, reference.maxiter) == (1, 200)
     assert reference.alpha is None and reference.fixed_noise is None
     assert reference.noiseless is False
 
@@ -105,20 +113,64 @@ def test_every_flag_reaches_the_resolved_config(tmp_path):
     cfg = resolve_config(_parse(
         "--family", "decoupled", "--seed", "7", "--cell", "additive/amplitude",
         "--out", str(tmp_path), "--T", "40", "--n-init", "8", "--D", "12",
-        "--acq", "ei", "--alpha", "0.25", "--fixed-noise", "0.01", "--noiseless",
+        "--alpha", "0.25", "--fixed-noise", "0.01", "--noiseless",
         "--sobol-every", "3", "--nuts", "8,16,4",
-        "--num-init-candidates", "64", "--num-restarts-ei", "2",
+        "--raw-samples", "64", "--num-restarts", "2", "--sample-around-best-sigma", "0.01",
+        "--batch-limit", "4", "--maxiter", "50",
     ))
-    # One equality rather than fifteen: a flag wired to the wrong field fails here too, and
+    # One equality rather than seventeen: a flag wired to the wrong field fails here too, and
     # `NUTSConfig(8, 16, 4)` is what pins --nuts to warmup/samples/thinning with tree depth 6.
     assert cfg == RunConfig(
         family="decoupled", seed=7, D=12, method="additive/amplitude", T=40, n_init=8,
-        acq="ei", alpha=0.25, fixed_noise=0.01, noiseless=True, nuts=NUTSConfig(8, 16, 4),
-        num_init_candidates=64, num_restarts_ei=2, sobol_every=3, out_dir=str(tmp_path),
+        alpha=0.25, fixed_noise=0.01, noiseless=True, nuts=NUTSConfig(8, 16, 4),
+        raw_samples=64, num_restarts=2, sample_around_best_sigma=0.01, batch_limit=4,
+        maxiter=50, sobol_every=3, out_dir=str(tmp_path),
     )
 
 
-def test_every_run_starts_from_the_shared_initial_design(tmp_path):
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("raw_samples", 1024),
+        ("num_restarts", 9),
+        ("sample_around_best_sigma", 1e-2),
+        ("batch_limit", 4),
+        ("maxiter", 400),
+    ],
+)
+def test_the_config_hash_moves_with_every_maximizer_setting(field, value):
+    # The five sizes are hashed like every other setting, which is what makes a run at a different
+    # operating point a different run: resume refuses it rather than splicing the two halves.
+    base = RunConfig(family="aligned10", seed=3, D=100, method="sobol", T=200, n_init=20)
+    assert getattr(base, field) != value
+    assert config_hash(dataclasses.replace(base, **{field: value})) != config_hash(base)
+
+
+def test_every_method_gets_the_same_design_and_maximizer(tmp_path):
+    """The two things a method may not choose for itself: where it starts, and how it maximizes.
+
+    `propose_for` is compared across all seven rather than run, because what has to hold is that
+    the six model-based methods hand `optimize_acqf` the *same* operating point -- a maximizer
+    budget that varied by method would be an alternative explanation for every regret difference
+    the thesis reports. `sobol` is the one exception by construction: it fits nothing, so it
+    walks the design's own sequence instead of maximizing anything.
+    """
+    base = RunConfig(
+        family="aligned3", seed=_SEED, D=5, method="sobol", T=_T, n_init=_N_INIT,
+        out_dir=str(tmp_path), **_LOOP_KW,
+    )
+    shared = dict(
+        raw_samples=64, num_restarts=1, sample_around_best_sigma=1e-3, batch_limit=1, maxiter=200
+    )
+    for method in METHODS:
+        proposer = propose_for(dataclasses.replace(base, method=method))
+        if method == "sobol":
+            assert proposer.func is propose_sobol
+            assert np.array_equal(proposer.keywords["sequence"], initial_design(5, _T, _SEED))
+            continue
+        assert proposer.func is propose_ei
+        assert proposer.keywords == shared
+
     design = initial_design(5, _N_INIT, _SEED)
     # One method that fits nothing and the two MAP references, whose fits are milliseconds. The
     # remaining four would each buy a NUTS run and no new information: `initial_design` takes
@@ -155,35 +207,43 @@ def test_the_manifest_round_trips_into_the_config_the_run_used(tmp_path):
     assert manifest["config_hash"] == config_hash(expected)
 
 
-def test_the_manifest_records_the_code_the_environment_and_the_problem(tmp_path, repo_root):
+def test_the_manifest_records_the_code_the_environment_and_the_problem(tmp_path):
     objective = _objective()
     run_dir = _manifest_run(tmp_path)
     manifest = json.loads((run_dir / "manifest.json").read_text())
-    for key in ("git", "versions", "env", "reference_sha256", "objective", "reference_constants"):
+    for key in ("git", "versions", "env", "objective", "acquisition_constants"):
         assert key in manifest
-
-    # Hashed here off disk with a fresh `hashlib.sha256`, not through `bo`'s own helper: what is
-    # under test is a claim about the vendored files, not one function agreeing with itself.
-    for name in ("saasgp.py", "saasbo.py", "util.py"):
-        digest = hashlib.sha256((repo_root / name).read_bytes()).hexdigest()
-        assert manifest["reference_sha256"][name] == digest
+    # Nothing is vendored any more, so there is no file digest to record; a manifest that still
+    # carried one would be describing a reference path this run never took.
+    assert "reference_sha256" not in manifest
 
     assert set(manifest["git"]) == {"commit", "dirty"}
     assert manifest["versions"]["python"] == platform.python_version()
     assert manifest["versions"]["numpyro"] == importlib.metadata.version("numpyro")
-    assert set(manifest["versions"]) == {"python", "jax", "jaxlib", "numpyro", "numpy", "scipy"}
+    assert manifest["versions"]["botorch"] == importlib.metadata.version("botorch")
+    assert set(manifest["versions"]) == {
+        "python", "jax", "jaxlib", "numpyro", "numpy", "scipy",
+        "torch", "gpytorch", "botorch", "linear_operator",
+    }
     assert set(manifest["env"]) == {
         "XLA_FLAGS", "OMP_NUM_THREADS", "platform", "machine", "processor", "cpu_count",
+        "torch_num_threads",
     }
     assert manifest["env"]["machine"] == platform.machine()
     assert manifest["env"]["cpu_count"] == os.cpu_count()
     assert manifest["env"]["OMP_NUM_THREADS"] == os.environ.get("OMP_NUM_THREADS")
+    # torch's own thread count, because the acquisition and the MAP references run on it: BoTorch
+    # is where this run's linear algebra happens and XLA's thread settings say nothing about it.
+    assert manifest["env"]["torch_num_threads"] == torch.get_num_threads()
 
-    # What the copied `optimize_ei` holds fixed below every flag, plus the two sizes a flag does
-    # reach: together the acquisition optimizer's whole operating point for this run.
-    assert manifest["reference_constants"] == {
-        "maxfun": 100, "jitter_sd": 1e-3, "xi": 0.0,
-        "num_init_candidates": 256, "num_restarts_ei": 1,
+    # What BoTorch holds fixed below every flag, plus the five sizes a flag does reach: together
+    # the acquisition maximizer's whole operating point for this run. `prob_perturb` is 1.0 here
+    # because BoTorch perturbs every coordinate below D = 20.
+    assert manifest["acquisition_constants"] == {
+        "acquisition": "LogExpectedImprovement", "q": 1, "sample_around_best": True,
+        "best_pct": 5.0, "cholesky_max_tries": 9, "prob_perturb": 1.0,
+        "raw_samples": 64, "num_restarts": 1, "sample_around_best_sigma": 1e-3,
+        "batch_limit": 1, "maxiter": 200,
     }
     # The objective's seed is its own, not the run's: a manifest that confused the two would
     # describe a different problem than the one the regret column was computed against.

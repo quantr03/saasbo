@@ -148,11 +148,11 @@ python -m experiments.run_bo --family aligned10 --seed 3 --cell additive/amplitu
 ```
 
 `--cell` also takes `sobol | dsp_map | oracle_S`; other flags are `--D 100`, `--n-init 20`,
-`--acq logei|ei`, `--alpha F`, `--fixed-noise F`, `--noiseless`, `--sobol-every 25`, `--no-resume`,
+`--alpha F`, `--fixed-noise F`, `--noiseless`, `--sobol-every 25`, `--no-resume`,
 `--nuts 512,256,16` (the fallback budget is passed here, identically for every cell),
-`--num-init-candidates 5000` and `--num-restarts-ei 5` (the reference acquisition optimizer's two
-sizes, held fixed across every method), `--objective-dir` and `--dry-run`. See
-`python -m experiments.run_bo --help`.
+`--raw-samples 512`, `--num-restarts 5`, `--sample-around-best-sigma 0.001`, `--batch-limit 1`
+and `--maxiter 200` (the acquisition maximizer's five sizes, held fixed across every method),
+`--objective-dir` and `--dry-run`. See `python -m experiments.run_bo --help`.
 
 Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 
@@ -160,8 +160,8 @@ Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 |---|---|
 | `iterations.csv` | one row per iteration: `y`, `f`, `best_obs`, `best_f`, `regret`, the acquisition value, wall times, `status`, the fit's diagnostics, `y_mean`/`y_std`, and the query point |
 | `coords.csv` | long format, `t, i, native_median, p_active, sobol_hat` -- the per-coordinate readouts (absent for `sobol` runs, which fit no model) |
-| `samples/t{t:03d}.npz` | that iteration's retained posterior draws (16 for a cell, 1 for a MAP reference), plus its `status` and `nuts_attempts`, and the attempt-0 diagnostics as `a0_<field>` scalars |
-| `manifest.json` | the resolved `RunConfig` and its hash, the git commit, package versions, thread environment, the vendored files' SHA-256, the objective's labels, and a `resumed` entry per resume |
+| `samples/t{t:03d}.npz` | that iteration's retained posterior draws (16 for a cell, 1 for a MAP reference), keyed by BoTorch's own site names, plus its `status`, `nuts_attempts` and `schema_version` (2) |
+| `manifest.json` | the resolved `RunConfig` and its hash, the git commit, package versions (torch, gpytorch and botorch among them), thread environment, `acquisition_constants` -- the maximizer's whole operating point -- the objective's labels, and a `resumed` entry per resume |
 | `environment.lock.txt` | every installed distribution as `name==version` |
 | `checkpoint.npz`, `log.txt` | the resume point, and the run's narrative (timings, statuses, tracebacks) |
 

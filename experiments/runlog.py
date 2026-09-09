@@ -4,9 +4,9 @@
 (atomically), then `coords.csv`, then `samples/t{t:03d}.npz`, and the `iterations.csv` row that
 describes them last, so a complete row is always backed by the artifacts it names and a killed run
 can be resumed from the last one. `manifest.json` is the run's provenance -- the resolved
-`RunConfig` and its hash, the git commit and its cleanliness, the package versions, the digests of
-the vendored reference files and the objective's ground-truth labels -- written once at creation
-and appended to on every resume.
+`RunConfig` and its hash, the git commit and its cleanliness, the package versions, the constants
+the acquisition maximizer runs under and the objective's ground-truth labels -- written once at
+creation and appended to on every resume.
 `RunLogger.record` is the shape all of that takes to the loop: one `sagp.bo.Iteration` in, one
 iteration's worth of files out, which is what `experiments.run_bo.run` hands `run_bo` as its
 `on_iteration`. `experiments.run_bo` drives all of it; nothing in `sagp/` may import this module.
@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+import torch
 
 from sagp.bo import Iteration
 from sagp.diagnostics import DiagThresholds
@@ -50,6 +51,10 @@ class RunConfig:
     depends on `(seed, t)` and the points before it, and `T` reaches the loop only through the
     end-of-run Sobol readout (`t == T - 1`), so the shortened run's last row carries a
     `sobol_hat` the longer run would have computed later.
+
+    `raw_samples` through `maxiter` are the acquisition maximizer's operating point -- Papenmeier
+    et al. (2025)'s settings for `optimize_acqf`, reaching `sagp.bo.propose_ei` unchanged -- and
+    are hashed like everything else, so a run at a different budget is a different run.
     """
 
     family: str
@@ -58,22 +63,30 @@ class RunConfig:
     method: str
     T: int
     n_init: int
-    acq: str = "logei"
     alpha: float | None = None
     fixed_noise: float | None = None
     noiseless: bool = False
     nuts: NUTSConfig = NUTSConfig()
     thresholds: DiagThresholds = DiagThresholds()
     ell_prior: tuple[float, float] = ELL_PRIOR
-    num_init_candidates: int = 5000
-    num_restarts_ei: int = 5
+    raw_samples: int = 512
+    num_restarts: int = 5
+    sample_around_best_sigma: float = 1.0e-3
+    batch_limit: int = 1
+    maxiter: int = 200
     sobol_every: int = 25
     sobol_n: int = 2048
     out_dir: str = "runs"
 
 
 def config_hash(cfg: RunConfig) -> str:
-    """sha256 over the settings, less `out_dir` and `T`: the identity resume checks against."""
+    """sha256 over the settings, less `out_dir` and `T`: the identity resume checks against.
+
+    Over the fields as they stand, so the migration to BoTorch moved every run's hash: a run
+    directory written before it cannot be resumed, and is refused rather than continued under a
+    configuration that no longer means what it did. That is the intended outcome -- its
+    iterations were computed by a different acquisition maximizer against a different model.
+    """
     fields = dataclasses.asdict(cfg)
     for excluded in ("out_dir", "T"):
         fields.pop(excluded)
@@ -90,14 +103,24 @@ def run_dir_for(out_dir: str | os.PathLike[str], cfg: RunConfig) -> Path:
 # --- provenance ---
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-# The vendored reference this module is a generalization of. The plan requires all three stay
-# byte-identical, so their hashes are what lets a later reader check that claim against a run.
-_REFERENCE_FILES: tuple[str, ...] = ("saasgp.py", "saasbo.py", "util.py")
-# The packages whose version can move a run's numbers; recorded, and compared again on resume.
-_VERSIONED: tuple[str, ...] = ("jax", "jaxlib", "numpyro", "numpy", "scipy")
-# What the copied `optimize_ei` keeps hard-coded (plan section 2): not `RunConfig` fields, because
-# no run may vary them, but written into the manifest so it states them rather than implying them.
-_REFERENCE_CONSTANTS: dict[str, float] = {"maxfun": 100, "jitter_sd": 1e-3, "xi": 0.0}
+# The packages whose version can move a run's numbers; recorded, and compared again on resume. The
+# torch half is as load-bearing as the JAX half: the chain is numpyro's, but the model, the
+# acquisition and its maximizer are BoTorch's on GPyTorch and linear_operator.
+_VERSIONED: tuple[str, ...] = (
+    "jax", "jaxlib", "numpyro", "numpy", "scipy", "torch", "gpytorch", "botorch", "linear_operator"
+)
+# What BoTorch holds fixed below every flag: not `RunConfig` fields, because no run may vary them,
+# but written into the manifest so it states them rather than implying them. `best_pct` and
+# `prob_perturb` are `sample_around_best`'s own -- the top 5 % of the design the RAASP candidates
+# are perturbed from, and the probability each coordinate is perturbed with -- and
+# `cholesky_max_tries` is Papenmeier's 9 against GPyTorch's default 3.
+_ACQUISITION_CONSTANTS: dict[str, object] = {
+    "acquisition": "LogExpectedImprovement",
+    "q": 1,
+    "sample_around_best": True,
+    "best_pct": 5.0,
+    "cholesky_max_tries": 9,
+}
 
 
 def _now() -> str:
@@ -130,7 +153,7 @@ def _git_provenance() -> dict[str, object]:
 
 
 def _versions() -> dict[str, str]:
-    """The interpreter and the five packages a run's numbers depend on, by installed version.
+    """The interpreter and the nine packages a run's numbers depend on, by installed version.
 
     `PackageNotFoundError` is caught for the same reason `_git_provenance` catches everything: a
     conda environment can carry a working `jaxlib` whose distribution metadata is not where
@@ -152,7 +175,9 @@ def _environment() -> dict[str, object]:
     across two of either (plan section 4, step 7), so a resume on a differently configured machine
     is reproducible in the sense the study needs -- same seeds, same design -- but not necessarily
     bit for bit, and these numbers are what tells a later reader which of the two they are looking
-    at. `machine` and `processor` are here because `platform.platform()` names the OS build and
+    at. `torch_num_threads` is a second such setting entirely and not a restatement of the first:
+    the chain runs on XLA, but the model, the acquisition and its maximizer run on torch.
+    `machine` and `processor` are here because `platform.platform()` names the OS build and
     not the instruction set: a cluster's nodes can share it and still differ in the vector width
     the kernels are compiled to, which is exactly the difference this block has to be able to show.
     """
@@ -163,14 +188,7 @@ def _environment() -> dict[str, object]:
         "machine": platform.machine(),
         "processor": platform.processor(),
         "cpu_count": os.cpu_count(),
-    }
-
-
-def _reference_sha256() -> dict[str, str]:
-    """sha256 of each vendored reference file, hashed off disk at the moment the run starts."""
-    return {
-        name: hashlib.sha256((_REPO_ROOT / name).read_bytes()).hexdigest()
-        for name in _REFERENCE_FILES
+        "torch_num_threads": torch.get_num_threads(),
     }
 
 
@@ -196,7 +214,8 @@ def _objective_labels(objective: object) -> dict[str, object]:
 # --- the run directory ---
 
 # The plan's row schema, less the trailing x_0 ... x_{D-1} which depend on D. `reason` is the
-# fit's own status_reason, or the exception that replaced the fit.
+# fit's own status_reason, or the exception that replaced the fit; `acq_value` is the log EI at
+# the query point, and NaN when nothing was maximized.
 _ROW_FIELDS: tuple[str, ...] = (
     "t", "method", "family", "seed", "y", "f", "best_obs", "best_f", "regret", "acq_value",
     "fit_wall_s", "acq_wall_s", "fit_calls", "nuts_attempts", "status", "reason",
@@ -204,23 +223,17 @@ _ROW_FIELDS: tuple[str, ...] = (
     "num_steps_mean",
     "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell", "n_eff_min_ell",
     "r_hat_max_global", "n_eff_min_global",
-    "a0_r_hat_max", "a0_n_eff_min", "a0_divergences",
     "y_mean", "y_std", "sobol_computed",
 )
-# The numbers of the retained attempt's `Diagnostics` that the row carries (its `wall_s`,
-# `passed` and `reason` are already in `fit_wall_s`, `status` and `reason`): the six pooled ones
-# and the six per-group ones the trigger is attributed with (`diagnostics._DIAG_GROUPS`).
+# The numbers of the fit's `Diagnostics` that the row carries (its `wall_s`, `passed` and
+# `reason` are already in `fit_wall_s`, `status` and `reason`): the six pooled ones and the six
+# per-group ones the verdict is attributed with (`diagnostics._DIAG_GROUPS`).
 _DIAG_FIELDS: tuple[str, ...] = (
     "r_hat_max", "r_hat_median", "frac_r_hat_below_1_05", "n_eff_min", "divergences",
     "num_steps_mean",
     "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell", "n_eff_min_ell",
     "r_hat_max_global", "n_eff_min_global",
 )
-# What the row keeps of *attempt 0* when a refit replaced it (ruling R43). Without these the
-# trigger is unrecoverable from `iterations.csv`: the unprefixed columns are the retained
-# attempt's, which on a refit row is the attempt that passed. `save_samples` keeps the whole
-# attempt-0 `Diagnostics` beside the draws; these three are the ones the gate reads.
-_ATTEMPT0_FIELDS: tuple[str, ...] = ("r_hat_max", "n_eff_min", "divergences")
 _COORD_FIELDS: tuple[str, ...] = ("t", "i", "native_median", "p_active", "sobol_hat")
 
 
@@ -242,11 +255,12 @@ def _iteration_line(row: dict[str, object], fitted: FittedGP | None) -> str:
     ]
     if row["reason"]:
         parts.append(f"reason={row['reason']!r}")
-    # The MAP references have no `attempts`; their fit's quality is the optimizer's outcome, so
-    # that dict is the only diagnostic they can report and it goes here rather than in the row.
+    # The MAP references have no `attempts`; their fit's quality is the optimizer's outcome -- the
+    # marginal log likelihood it reached, and which of the two fitters reached it -- so that pair
+    # is the only diagnostic they can report and it goes here rather than in the row.
     map_result = getattr(fitted, "map_result", None)
     if map_result is not None:
-        parts.append(f"map_result={map_result}")
+        parts.append(f"map_result=mll={map_result['mll']:.6g} fallback={map_result['fallback']}")
     return " ".join(parts)
 
 
@@ -318,7 +332,6 @@ class RunLogger:
         """One iteration as the plan's row: what `iterations.csv` says about it, field for field."""
         attempts = () if it.fitted is None else it.fitted.attempts
         diagnostics = attempts[-1] if attempts else None
-        attempt0 = attempts[0] if attempts else None
         return {
             "t": it.t,
             "method": self.cfg.method,
@@ -345,10 +358,6 @@ class RunLogger:
                 )
                 for field in _DIAG_FIELDS
             },
-            **{
-                f"a0_{field}": (float("nan") if attempt0 is None else getattr(attempt0, field))
-                for field in _ATTEMPT0_FIELDS
-            },
             "y_mean": it.y_mean,
             "y_std": it.y_std,
             "sobol_computed": int(compute_sobol),
@@ -365,13 +374,13 @@ class RunLogger:
 
         Every block answers one question: could this directory have been produced by a different
         experiment than the one it claims to be? The `RunConfig` fields and `config_hash` fix the
-        settings and resume compares the hash; `reference_constants` records what the copied
-        `optimize_ei` holds fixed *underneath* those settings, which no flag can reach; and the
-        rest -- the commit, the package versions, the thread environment, the vendored files'
-        hashes and the objective's own labels -- fixes the code and the problem the settings were
-        applied to. `resumed` starts empty and only `note_resume` ever adds to it: nothing here is
-        recomputed in place, since a manifest that quietly followed its environment would answer
-        that question with today's environment rather than with the run's.
+        settings and resume compares the hash; `acquisition_constants` records what BoTorch holds
+        fixed *underneath* those settings, which no flag can reach; and the rest -- the commit,
+        the package versions, the thread environment and the objective's own labels -- fixes the
+        code and the problem the settings were applied to. `resumed` starts empty and only
+        `note_resume` ever adds to it: nothing here is recomputed in place, since a manifest that
+        quietly followed its environment would answer that question with today's environment
+        rather than with the run's.
         """
         fields = dataclasses.asdict(self.cfg)
         fields["config_hash"] = config_hash(self.cfg)
@@ -379,15 +388,19 @@ class RunLogger:
         fields["git"] = _git_provenance()
         fields["versions"] = _versions()
         fields["env"] = _environment()
-        fields["reference_sha256"] = _reference_sha256()
         fields["objective"] = _objective_labels(objective)
-        # The two acquisition-optimizer sizes are `RunConfig` fields *and* belong here: this block
-        # is the optimizer's whole operating point, and splitting it across two places to avoid
-        # repeating two numbers would make it readable only next to the config it came from.
-        fields["reference_constants"] = {
-            **_REFERENCE_CONSTANTS,
-            "num_init_candidates": self.cfg.num_init_candidates,
-            "num_restarts_ei": self.cfg.num_restarts_ei,
+        # The five maximizer sizes are `RunConfig` fields *and* belong here: this block is the
+        # maximizer's whole operating point, and splitting it across two places to avoid repeating
+        # five numbers would make it readable only next to the config it came from. `prob_perturb`
+        # is derived rather than set, since BoTorch takes it from D alone.
+        fields["acquisition_constants"] = {
+            **_ACQUISITION_CONSTANTS,
+            "prob_perturb": min(20.0 / self.cfg.D, 1.0),
+            "raw_samples": self.cfg.raw_samples,
+            "num_restarts": self.cfg.num_restarts,
+            "sample_around_best_sigma": self.cfg.sample_around_best_sigma,
+            "batch_limit": self.cfg.batch_limit,
+            "maxiter": self.cfg.maxiter,
         }
         fields["resumed"] = []
         self.manifest.write_text(json.dumps(fields, indent=2, sort_keys=True, default=str) + "\n")
@@ -395,8 +408,8 @@ class RunLogger:
     def write_environment_lock(self) -> None:
         """`environment.lock.txt`: every installed distribution as `name==version`, sorted.
 
-        The manifest's `versions` names the six packages we believe can move the numbers; this
-        file names all of them, because those six are a hypothesis and this is the record that
+        The manifest's `versions` names the nine packages we believe can move the numbers; this
+        file names all of them, because those nine are a hypothesis and this is the record that
         has to outlive it. Written when the run starts and never on resume: it describes the
         environment the run's first iterations were computed in, and a resume's own environment
         is what the manifest's `resumed` entry is for.
@@ -527,24 +540,19 @@ class RunLogger:
 
         This is the only place the run directory touches `fitted.samples`, and it does not look
         inside: what a cell's sites mean is `sagp.gp`'s business, and every later analysis
-        re-reads them from here.
-        Attempt 0's whole `Diagnostics` rides along as `a0_<field>` scalars (ruling R43), because
-        the draws in this file are the *retained* attempt's and the row's unprefixed diagnostics
-        are that attempt's too: without these, a refit's trigger is nowhere on disk. A MAP
-        reference has no attempts and writes none of them.
+        re-reads them from here. The keys are therefore the retained draws under BoTorch's own
+        site names, plus `status`, `nuts_attempts` (1 for a cell, 0 for a MAP reference) and
+        `schema_version`. That version is 2, and is what tells a reader which format a file is:
+        version 1 named the sites differently and carried a second attempt's whole `Diagnostics`
+        beside the draws as `a0_<field>` scalars, neither of which a fit produces any more.
         """
         arrays = {site: np.asarray(draws) for site, draws in fitted.samples.items()}
-        attempt0 = (
-            {f"a0_{name}": value for name, value in dataclasses.asdict(fitted.attempts[0]).items()}
-            if fitted.attempts
-            else {}
-        )
         with (self.samples_dir / f"t{t:03d}.npz").open("wb") as handle:
             np.savez(
                 handle,
                 status=fitted.status,
                 nuts_attempts=len(fitted.attempts),
-                **attempt0,
+                schema_version=2,
                 **arrays,
             )
 

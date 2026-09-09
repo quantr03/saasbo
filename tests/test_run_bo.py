@@ -8,8 +8,8 @@ never exercises: an exception out of the fit costs a retry and then a seeded ran
 than the run, and the two references that are not cells -- the Sobol search and the oracle -- run
 end to end and leave the artifacts they should (the Sobol search leaves no `coords.csv` at all,
 which is legal for a method that fits nothing). Every test runs a real objective through a real
-fit -- `dsp_map`, whose MAP fit is milliseconds, with one NUTS-based run for the sampler's own
-determinism.
+fit -- `dsp_map`, whose MAP fit is milliseconds, with two NUTS-based runs for the sampler's own
+determinism and for the draws a cell writes into `samples/`.
 """
 from __future__ import annotations
 
@@ -21,19 +21,19 @@ import numpy as np
 import pytest
 from scipy.stats import qmc
 
-import sagp.gp
 from experiments import run_bo as run_bo_module
 from experiments.run_bo import run
 from sagp.bo import initial_design, iteration_rngs
-from sagp.diagnostics import DiagThresholds, Diagnostics
-from sagp.gp import NUTSConfig
+from sagp.diagnostics import DiagThresholds
+from sagp.gp import CELLS, NUTSConfig
 from synthobj.families import make_family
 
 
-# The acquisition optimizer's cost is 5 restarts x 100 L-BFGS-B evaluations per iteration, each a
-# separate jitted call; one restart off 256 candidates keeps the loop tests inside the per-test
-# time budget. It is still the same optimizer on the same seeded candidate set.
-_LOOP_KW = dict(num_init_candidates=256, num_restarts_ei=1, sobol_every=5)
+# The study's maximizer is 5 L-BFGS-B restarts off 512 raw Sobol candidates (plus as many RAASP
+# perturbations again), each restart run to `maxiter` on a fully Bayesian posterior; one restart
+# off 64 candidates keeps the loop tests inside the per-test time budget. It is still BoTorch's
+# `optimize_acqf` on the same seeded candidate set.
+_LOOP_KW = dict(raw_samples=64, num_restarts=1, sobol_every=5)
 # T = 10 rather than the study's 200: every iteration triggers a fresh JAX compilation, because
 # the training set it fits grows by a point, and five of them is what fits the suite's per-test
 # time budget. Reproducibility is a property of every iteration, not of the last one, and five
@@ -102,7 +102,11 @@ def test_two_nuts_runs_at_the_same_seed_are_bit_identical(tmp_path):
         out_dir=tmp_path / "b", **kwargs,
     )
     assert np.array_equal(_checkpoint(first)["X"], _checkpoint(second)["X"])
-    assert [row["status"] for row in _read_rows(first / "iterations.csv")] == ["ok"] * 2
+    # One NUTS run per fit now, whatever the gate makes of it: `attempts` has length 1 and the
+    # status is the verdict on that one chain.
+    for row in _read_rows(first / "iterations.csv"):
+        assert int(row["nuts_attempts"]) == 1
+        assert row["status"] in ("ok", "excluded")
 
 
 def test_resume_reproduces_the_uninterrupted_run(reference_run, tmp_path):
@@ -147,7 +151,6 @@ def test_rows_carry_the_schema_the_regret_and_the_sobol_schedule(reference_run):
         "num_steps_mean",
         "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell", "n_eff_min_ell",
         "r_hat_max_global", "n_eff_min_global",
-        "a0_r_hat_max", "a0_n_eff_min", "a0_divergences",
         "y_mean", "y_std", "sobol_computed",
         "x_0", "x_1", "x_2", "x_3", "x_4",
     ]
@@ -175,70 +178,33 @@ def test_rows_carry_the_schema_the_regret_and_the_sobol_schedule(reference_run):
         assert np.isfinite(float(row["sobol_hat"])) == (t % 5 == 0 or t == _T - 1)
 
 
-def _diagnostics(r_hat_max: float, n_eff_min: float, divergences: int, passed: bool):
-    """A `Diagnostics` whose pooled numbers are the caller's, for stubbing the gate's verdict."""
-    return Diagnostics(
-        r_hat_max=r_hat_max,
-        r_hat_median=1.0,
-        frac_r_hat_below_1_05=1.0,
-        n_eff_min=n_eff_min,
-        divergences=divergences,
-        num_steps_mean=1.0,
-        r_hat_max_native=r_hat_max,
-        n_eff_min_native=n_eff_min,
-        r_hat_max_ell=float("nan"),
-        n_eff_min_ell=float("nan"),
-        r_hat_max_global=1.0,
-        n_eff_min_global=n_eff_min,
-        wall_s=0.5,
-        passed=passed,
-        reason="" if passed else "stubbed failure",
-    )
+def test_samples_npz_carries_the_schema_version_and_botorch_site_names(tmp_path):
+    """What `samples/t*.npz` promises a later analysis: BoTorch's site names, and version 2.
 
-
-def test_a_refit_row_carries_both_attempts_diagnostics(tmp_path, monkeypatch):
-    """Ruling R43. The unprefixed columns are the *retained* attempt's, so on a refit row they are
-    the attempt that passed; without `a0_*` the trigger would be nowhere on disk at all.
-
-    The verdict decides the path, so it is stubbed rather than waited for -- no toy chain reliably
-    fails and then passes -- and the two attempts are given distinguishable numbers so that a row
-    reading attempt 1 into `a0_*`, or attempt 0 into the unprefixed columns, cannot pass.
+    The draws are keyed by the cell's `sites`, which are `SaasFullyBayesianSingleTaskGP`'s own
+    names for them, beside the fit's `status` and `nuts_attempts`. `schema_version` is what tells
+    a reader which of the two formats it has: version 1's files named the sites differently and
+    carried a second attempt's whole `Diagnostics` as `a0_*` scalars, and nothing written now may
+    be mistaken for one of those.
     """
-    attempts = [
-        _diagnostics(1.5, 4.0, 9, passed=False),
-        _diagnostics(1.01, 40.0, 0, passed=True),
-    ]
-    remaining = iter(attempts)
-    monkeypatch.setattr(
-        sagp.gp, "diagnose", lambda flat, extra, thresholds, wall_s: next(remaining)
-    )
-
+    cell = CELLS[("product", "lengthscale")]
     run_dir = run(
         _objective(), "product/lengthscale", seed=1, T=6, n_init=_N_INIT, out_dir=tmp_path,
-        nuts=NUTSConfig(32, 32, 4), **_LOOP_KW,
+        nuts=NUTSConfig(16, 16, 4), thresholds=DiagThresholds(float("inf"), 0.0, 10**9),
+        **_LOOP_KW,
     )
 
-    (row,) = _read_rows(run_dir / "iterations.csv")
-    assert row["status"] == "refit" and int(row["nuts_attempts"]) == 2
-    assert float(row["a0_r_hat_max"]) == 1.5
-    assert float(row["a0_n_eff_min"]) == 4.0
-    assert int(row["a0_divergences"]) == 9
-    assert float(row["r_hat_max"]) == 1.01
-    assert float(row["n_eff_min"]) == 40.0
-    assert int(row["divergences"]) == 0
-    # The per-group columns come off the retained attempt too, `ell` NaN because this cell has no
-    # `kernel_ell` site at all.
-    assert float(row["r_hat_max_native"]) == 1.01 and float(row["n_eff_min_global"]) == 40.0
-    assert np.isnan(float(row["r_hat_max_ell"])) and np.isnan(float(row["n_eff_min_ell"]))
-
-    # The npz keeps attempt 0 whole, `reason` included: the row's three numbers say the gate
-    # fired, and this says on which criterion.
     with np.load(run_dir / "samples" / "t005.npz") as data:
-        assert str(data["status"]) == "refit" and int(data["nuts_attempts"]) == 2
-        assert float(data["a0_r_hat_max"]) == 1.5
-        assert bool(data["a0_passed"]) is False
-        assert str(data["a0_reason"]) == "stubbed failure"
-        assert float(data["a0_wall_s"]) == 0.5
+        keys = set(data.files)
+        # Every site of the cell: `noise` among them, since this run learns the noise rather than
+        # fixing it, which is the one site a `--fixed-noise` run would not have.
+        assert set(cell.sites) <= keys
+        assert {"status", "nuts_attempts", "schema_version"} <= keys
+        assert int(data["schema_version"]) == 2
+        assert int(data["nuts_attempts"]) == 1 and str(data["status"]) == "ok"
+        assert [key for key in sorted(keys) if key.startswith("a0_")] == []
+        # 16 samples thinned by 4: one leading dimension, shared by every site.
+        assert {data[site].shape[0] for site in cell.sites} == {4}
 
 
 def test_resume_after_a_partial_write_rebuilds_the_missing_rows(tmp_path):
@@ -474,7 +440,7 @@ def test_oracle_beats_sobol_on_aligned3(tmp_path):
     is compared is the two methods against each other, at settings they share.
     """
     objective = make_family("aligned3", 0, D=20)
-    kwargs = dict(T=50, n_init=10, num_init_candidates=1000, num_restarts_ei=2)
+    kwargs = dict(T=50, n_init=10, raw_samples=256, num_restarts=2)
     final = {
         method: [
             float(

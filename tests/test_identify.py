@@ -91,7 +91,10 @@ def test_identify_returns_every_key_at_the_right_shape():
         assert isinstance(out[key], float)
     assert out["amplitude_vs_realized"].shape == (3, 2)  # aligned3 has |S| = 3
 
-    assert set(out["samples"]) == {"kernel_noise", "kernel_tausq", "_a_sq", "a_sq", "kernel_ell"}
+    # The additive/amplitude cell's `sites`, under BoTorch's own names for them.
+    assert set(out["samples"]) == {
+        "mean", "noise", "kernel_tausq", "_a_sq", "a_sq", "kernel_ell",
+    }
     s = out["samples"]["a_sq"].shape[0]
     for draws in out["samples"].values():
         assert isinstance(draws, np.ndarray)

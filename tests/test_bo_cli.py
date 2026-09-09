@@ -25,12 +25,15 @@ from pathlib import Path
 from experiments.run_bo import main
 from synthobj.families import make_family
 
-_RUN = [
+# The problem, and separately the acquisition budget: the dry-run test sets the maximizer's five
+# flags itself, and a command line that named any of them twice would say nothing about which one
+# reached the config.
+_PROBLEM = [
     "--family", "aligned3", "--D", "5", "--seed", "0", "--cell", "dsp_map", "--n-init", "5",
-    # The study's acquisition budget is 5000 candidates x 5 restarts; this is the loop tests' own
-    # reduced one, so that a real run fits in the suite's per-test time budget.
-    "--num-init-candidates", "256", "--num-restarts-ei", "1", "--sobol-every", "5",
 ]
+# The study's maximizer is 512 raw candidates x 5 restarts; this is the loop tests' own reduced
+# budget, so that a real run fits in the suite's per-test time budget.
+_RUN = [*_PROBLEM, "--raw-samples", "64", "--num-restarts", "1", "--sobol-every", "5"]
 
 
 def _run(repo_root: Path, *argv: str) -> subprocess.CompletedProcess:
@@ -42,7 +45,11 @@ def _run(repo_root: Path, *argv: str) -> subprocess.CompletedProcess:
 
 def test_dry_run_prints_the_resolved_config_and_writes_nothing(tmp_path, repo_root):
     out = tmp_path / "runs"
-    done = _run(repo_root, *_RUN, "--T", "8", "--out", str(out), "--dry-run")
+    done = _run(
+        repo_root, *_PROBLEM, "--T", "8", "--out", str(out),
+        "--raw-samples", "32", "--num-restarts", "1", "--sample-around-best-sigma", "0.01",
+        "--batch-limit", "1", "--maxiter", "50", "--dry-run",
+    )
     assert done.returncode == 0, done.stderr
 
     cfg, end = json.JSONDecoder().raw_decode(done.stdout)
@@ -50,6 +57,11 @@ def test_dry_run_prints_the_resolved_config_and_writes_nothing(tmp_path, repo_ro
     fields = (cfg["family"], cfg["seed"], cfg["D"], cfg["T"], cfg["n_init"])
     assert fields == ("aligned3", 0, 5, 8, 5)
     assert cfg["out_dir"] == str(out)
+    # The maximizer's whole operating point, since every one of the five is hashed into the run's
+    # identity: a dry run is where a person checks that before committing the cluster time.
+    assert cfg["raw_samples"] == 32 and cfg["num_restarts"] == 1
+    assert cfg["sample_around_best_sigma"] == 0.01
+    assert cfg["batch_limit"] == 1 and cfg["maxiter"] == 50
     # The objective is resolved too, so a dry run also answers "which problem is this, and what is
     # the f_star my regret column will be taken against".
     tail = done.stdout[end:]
@@ -114,7 +126,9 @@ def test_the_other_argument_errors_also_exit_2(tmp_path):
     base = ["--family", "aligned3", "--seed", "0", "--cell", "sobol"]
     out = ["--out", str(tmp_path / "runs")]
     assert main([*base, *out, "--nuts", "8,16"]) == 2
-    assert main([*base, *out, "--acq", "pi"]) == 2
+    # `--acq` chose between LogEI and the vendored reference's own EI; there is one acquisition
+    # now, so an old `.sbatch` that still passes it must fail rather than run something else.
+    assert main([*base, *out, "--acq", "logei"]) == 2
     assert main(base) == 2  # no --out
     # Which families exist is `synthobj.families`' business, so this one cannot be a `choices=`
     # rejection and is checked after parsing instead -- but it is still a bad argument.

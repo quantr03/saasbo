@@ -23,7 +23,7 @@ import numpy as np
 
 import sagp.bo
 from experiments.runlog import RunConfig, RunLogger, config_hash, run_dir_for
-from sagp.bo import ACQUISITIONS, BOState, initial_design, propose_ei
+from sagp.bo import BOState, initial_design, propose_ei
 from sagp.gp import CELLS, NUTSConfig, fit
 from sagp.references import fit_map, propose_sobol
 from synthobj.families import make_family
@@ -55,15 +55,15 @@ def surrogate_for(cfg: RunConfig, labels: object) -> Callable[..., object] | Non
     if cfg.method == "sobol":
         return None
     if cfg.method == "dsp_map":
-        return lambda X, z, key: fit_map(X, z)
+        return lambda X, z, seed: fit_map(X, z)
     if cfg.method == "oracle_S":
         active = np.asarray(labels.S)
-        return lambda X, z, key: fit_map(X, z, active=active)
+        return lambda X, z, seed: fit_map(X, z, active=active)
     cell = CELLS[tuple(cfg.method.split("/"))]
-    return lambda X, z, key: fit(
+    return lambda X, z, seed: fit(
         X,
         z,
-        key,
+        seed,
         cell=cell,
         alpha=cfg.alpha,
         fixed_noise=cfg.fixed_noise,
@@ -76,17 +76,23 @@ def surrogate_for(cfg: RunConfig, labels: object) -> Callable[..., object] | Non
 def propose_for(cfg: RunConfig) -> Callable[..., tuple[np.ndarray, float]]:
     """How this method chooses its next query: the acquisition's maximizer, or the next Sobol row.
 
-    The Sobol search continues the design's own sequence, so its first `n_init` rows *are* the
-    shared initial design: only the reference itself needs the remaining T - n_init rows, and it
-    is handed all T at once because row `t` must not depend on which iteration drew it.
+    The six model-based methods share one proposer at one operating point -- BoTorch's LogEI under
+    `optimize_acqf`, with the five maximizer sizes the config carries -- because a budget that
+    varied by method would be an alternative explanation for every regret difference the study
+    reports. The Sobol search continues the design's own sequence, so its first `n_init` rows
+    *are* the shared initial design: only the reference itself needs the remaining T - n_init
+    rows, and it is handed all T at once because row `t` must not depend on which iteration drew
+    it.
     """
     if cfg.method == "sobol":
         return partial(propose_sobol, sequence=initial_design(cfg.D, cfg.T, cfg.seed))
     return partial(
         propose_ei,
-        acq=ACQUISITIONS[cfg.acq],
-        num_init=cfg.num_init_candidates,
-        num_restarts_ei=cfg.num_restarts_ei,
+        raw_samples=cfg.raw_samples,
+        num_restarts=cfg.num_restarts,
+        sample_around_best_sigma=cfg.sample_around_best_sigma,
+        batch_limit=cfg.batch_limit,
+        maxiter=cfg.maxiter,
     )
 
 
@@ -137,8 +143,6 @@ def run(
         out_dir=str(out_dir),
         **overrides,
     )
-    if cfg.acq not in ACQUISITIONS:
-        raise ValueError(f"unknown acquisition {cfg.acq!r}: expected one of {sorted(ACQUISITIONS)}")
 
     run_dir = run_dir_for(out_dir, cfg)
     logger = RunLogger(run_dir, cfg)
@@ -240,10 +244,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--D", type=int, default=100, help="ambient dimension (default 100)")
     parser.add_argument(
-        "--acq", choices=list(ACQUISITIONS), default="logei",
-        help="LogEI, or the vendored reference's own EI (default logei)",
-    )
-    parser.add_argument(
         "--alpha", type=float, default=None,
         help="global-shrinkage scale; the cell's own prior default when unset",
     )
@@ -268,12 +268,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="NUTS warmup, samples and thinning (default 512,256,16); tree depth stays 6",
     )
     parser.add_argument(
-        "--num-init-candidates", type=int, default=5000,
-        help="candidates the acquisition optimizer scores each iteration (default 5000)",
+        "--raw-samples", type=int, default=512,
+        help="raw Sobol candidates the maximizer draws (default 512); held fixed across methods",
     )
     parser.add_argument(
-        "--num-restarts-ei", type=int, default=5,
-        help="L-BFGS-B restarts from the best of those candidates (default 5)",
+        "--num-restarts", type=int, default=5,
+        help="L-BFGS-B restarts off those candidates (default 5); held fixed across methods",
+    )
+    parser.add_argument(
+        "--sample-around-best-sigma", type=float, default=1e-3,
+        help="sigma of the RAASP perturbations (default 0.001); held fixed across methods",
+    )
+    parser.add_argument(
+        "--batch-limit", type=int, default=1,
+        help="restarts optimized at once (default 1); held fixed across methods",
+    )
+    parser.add_argument(
+        "--maxiter", type=int, default=200,
+        help="L-BFGS-B iterations per restart (default 200); held fixed across methods",
     )
     parser.add_argument(
         "--objective-dir", type=Path, default=None,
@@ -300,13 +312,15 @@ def resolve_config(args: argparse.Namespace) -> RunConfig:
         method=args.cell,
         T=args.T,
         n_init=args.n_init,
-        acq=args.acq,
         alpha=args.alpha,
         fixed_noise=args.fixed_noise,
         noiseless=args.noiseless,
         nuts=args.nuts,
-        num_init_candidates=args.num_init_candidates,
-        num_restarts_ei=args.num_restarts_ei,
+        raw_samples=args.raw_samples,
+        num_restarts=args.num_restarts,
+        sample_around_best_sigma=args.sample_around_best_sigma,
+        batch_limit=args.batch_limit,
+        maxiter=args.maxiter,
         sobol_every=args.sobol_every,
         out_dir=str(args.out),
     )
