@@ -11,9 +11,9 @@ This first section holds the kernels. All four have the reference's signature
 `(X, Z, params, noise, include_noise)` and return an (n, m) covariance matrix, so prediction can
 reach any cell through `KERNELS` without knowing how that cell is parameterized. Three of them
 are built from a Matern-5/2 component per coordinate, centered under the uniform reference
-measure U[0,1] at the same 64-node Gauss-Legendre grid `synthobj.kernel` uses (Lu et al. 2022,
-eq. 8) -- that grid is imported from `synthobj.kernel`, never recomputed, so the objectives and
-the surrogate cannot drift apart. The fourth cell *is* the reference's `saasgp.matern_kernel`.
+measure U[0,1] at a 64-node Gauss-Legendre grid (Lu et al. 2022, eq. 8) -- the same 64-node rule
+`synthobj.kernel` uses, pinned equal by test rather than imported, so the objectives and the
+surrogate cannot drift apart. The fourth cell *is* the reference's `saasgp.matern_kernel`.
 
 `sagp/__init__.py` is this module's package and therefore runs before its body, so float64 and
 the cpu platform are already in force when the arrays below are created.
@@ -34,14 +34,12 @@ import numpyro.distributions as dist
 from jax import Array, jit, vmap
 from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 from jax.typing import ArrayLike
+from numpy.polynomial.legendre import leggauss
 from numpyro.infer import MCMC, NUTS
 from scipy.optimize import brentq
 
 import saasgp
 from sagp.diagnostics import DiagThresholds, Diagnostics, diagnose
-from synthobj.kernel import GL_NODES as _GL_NODES_NUMPY
-from synthobj.kernel import GL_WEIGHTS as _GL_WEIGHTS_NUMPY
-from synthobj.objective import ACTIVE_EPS
 from util import chunk_vmap
 
 # (structure in {"additive", "product"}, sparsity prior in {"amplitude", "lengthscale"}).
@@ -50,9 +48,10 @@ CellKey = tuple[str, str]
 # --- kernels ---
 
 # 64-node Gauss-Legendre quadrature on [0,1], realizing the uniform reference measure U[0,1];
-# the very grid `synthobj.kernel` centers the synthetic objectives' components against.
-GL_NODES = jnp.asarray(_GL_NODES_NUMPY)
-GL_WEIGHTS = jnp.asarray(_GL_WEIGHTS_NUMPY)
+# defined here rather than imported from `synthobj.kernel`, so `sagp.gp` never imports the
+# objectives -- `test_gp_constants_are_bit_identical_to_synthobjs` pins the two grids equal.
+_NODES, _WEIGHTS = leggauss(64)
+GL_NODES, GL_WEIGHTS = jnp.asarray(0.5 * (_NODES + 1)), jnp.asarray(0.5 * _WEIGHTS)
 
 _ROOT_FIVE = math.sqrt(5.0)
 
@@ -238,9 +237,11 @@ def cell_kernel_diag(key: CellKey, X: Array, params: dict[str, Array]) -> Array:
 # --- cells ---
 
 # Prior calibration, plan decisions D2 and D3. `ACTIVE_EPS` -- a coordinate is active when it
-# carries more than 2 % of the variance -- is imported from `synthobj.objective` rather than
-# restated, so the objectives' labels and the surrogate's prior are calibrated against one cutoff
-# and cannot drift apart.
+# carries more than 2 % of the variance -- is restated here rather than imported from
+# `synthobj.objective`, so `sagp.gp` never imports the objectives;
+# `test_gp_constants_are_bit_identical_to_synthobjs` pins the two constants equal, so the
+# objectives' labels and the surrogate's prior stay calibrated against one cutoff.
+ACTIVE_EPS: float = 0.02
 
 # The reference SAASGP's own sparsity hyperparameter, on its rho scale.
 ALPHA_LENGTHSCALE: float = 0.1

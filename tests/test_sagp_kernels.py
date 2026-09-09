@@ -12,6 +12,7 @@ measured against.
 `sagp.gp` is imported first, before this module creates any JAX array, so `sagp/__init__.py`'s
 enable_x64 is in force for every array below.
 """
+import sagp.gp
 from sagp.gp import (
     ACTIVE_EPS,
     ALPHA_AMPLITUDE,
@@ -26,6 +27,9 @@ from sagp.gp import (
     kernel_product_lengthscale,
     v_of_ell,
 )
+
+import ast
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -292,3 +296,22 @@ def test_alpha_matches_reference_count():
     # The constants the plan quotes, pinned to the precision it quotes them at.
     assert abs(ALPHA_AMPLITUDE - 0.01312) < 2.0e-4
     assert abs(ELL_EPS - 2.5613) < 2.0e-3
+
+
+def test_gp_constants_are_bit_identical_to_synthobjs():
+    """`sagp.gp`'s own grid and cutoff reproduce `synthobj`'s, and `sagp.gp` never imports it."""
+    from synthobj import kernel
+    from synthobj.objective import ACTIVE_EPS as EPS
+
+    assert np.array_equal(np.asarray(GL_NODES), kernel.GL_NODES)
+    assert np.array_equal(np.asarray(GL_WEIGHTS), kernel.GL_WEIGHTS)
+    assert ACTIVE_EPS == EPS
+
+    tree = ast.parse(Path(sagp.gp.__file__).read_text())
+    imported = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)} | {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    assert not any(name.startswith("synthobj") for name in imported)
