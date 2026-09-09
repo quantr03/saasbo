@@ -2,10 +2,11 @@
 
 `run_bo` is the loop every method shares, differing only in its `surrogate`, `propose` and
 `on_iteration` adapters. The acquisition is BoTorch's analytic `LogExpectedImprovement`, maximized
-by `optimize_acqf` under Papenmeier et al. (2025)'s protocol: no acquisition code is vendored here
-any more, and the optimizer is BoTorch's own rather than a copy of the reference's. The loop
-maximizes, as the thesis's objectives do, so `gp.standardize` hands the fit `z = (y - mean) / std`
-with no sign flip and the incumbent the acquisition improves on is `best_f = max(z)`.
+by `optimize_acqf` under Papenmeier et al. (2025)'s protocol: no acquisition code is copied into
+this repo any more, and the optimizer is BoTorch's own rather than a copy of the reference's. The
+loop maximizes, as the thesis's objectives do, so `gp.standardize` hands the fit
+`z = (y - mean) / std` with no sign flip and the incumbent the acquisition improves on is
+`best_f = max(z)`.
 """
 from __future__ import annotations
 

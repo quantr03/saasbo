@@ -15,7 +15,6 @@ Python 3.7, NumPy, SciPy, JAX, NumPyro
 ### File structure
 
 Besides the core functionality we include:
-- a script (saasgp_demo.py) that demonstrates how to fit a GP equipped with a SAAS prior
 - a script (saasbo_demo.py) that demonstrates how to run SAASBO on the Hartmann6 function embedded in D=50 dimensions 
 - a notebook (Branin100.ipynb) that demonstrates how to run SAASBO on the Branin function embedded in D=100 dimensions
 
@@ -242,15 +241,6 @@ one fit over cores it does not have makes the whole node slower, not faster. It 
 recorded in `manifest.json` beside the XLA flags. On a laptop, run under
 `caffeinate -di` -- a sleeping Mac does not advance `perf_counter`, so a suspended run reports
 timings that are wrong rather than merely late.
-
-**Two gotchas from the vendored reference.** (1) `SAASGP.posterior` chunks its samples at 8 and
-`util.get_chunks` raises `NameError` whenever the retained count is not a multiple of 8, so never
-hand the reference class a retained count 8 does not divide (our own `FittedGP` chunks at the
-largest divisor of `S` that is at most 8 -- still 8 at the study's 16 retained draws -- and is
-unaffected at any `--nuts`). (2) `saasgp.py` carries one compatibility line --
-`jnp.clip(dsq, 1.0e-12)` where upstream wrote `jnp.clip(dsq, a_min=1.0e-12)` -- because JAX 0.10
-removed the `a_min` keyword; it is numerically identical, it is the only edit to the vendored
-files, and `tests/test_sagp_env.py` guards it.
 
 **Cost.** One gradient of the log-joint at n = 200, D = 100, and what it implies for a fit (768
 NUTS iterations x 40-63 leapfrog steps) and for a `T = 200` run (`62 x t_fit`, before the

@@ -213,8 +213,9 @@ def test_the_manifest_records_the_code_the_environment_and_the_problem(tmp_path)
     manifest = json.loads((run_dir / "manifest.json").read_text())
     for key in ("git", "versions", "env", "objective", "acquisition_constants"):
         assert key in manifest
-    # Nothing is vendored any more, so there is no file digest to record; a manifest that still
-    # carried one would be describing a reference path this run never took.
+    # Nothing is copied from a reference implementation any more, so there is no file digest to
+    # record; a manifest that still carried one would be describing a reference path this run
+    # never took.
     assert "reference_sha256" not in manifest
 
     assert set(manifest["git"]) == {"commit", "dirty"}

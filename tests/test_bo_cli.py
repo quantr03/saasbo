@@ -126,8 +126,9 @@ def test_the_other_argument_errors_also_exit_2(tmp_path):
     base = ["--family", "aligned3", "--seed", "0", "--cell", "sobol"]
     out = ["--out", str(tmp_path / "runs")]
     assert main([*base, *out, "--nuts", "8,16"]) == 2
-    # `--acq` chose between LogEI and the vendored reference's own EI; there is one acquisition
-    # now, so an old `.sbatch` that still passes it must fail rather than run something else.
+    # `--acq` chose between LogEI and the reference implementation's own EI; there is one
+    # acquisition now, so an old `.sbatch` that still passes it must fail rather than run
+    # something else.
     assert main([*base, *out, "--acq", "logei"]) == 2
     assert main(base) == 2  # no --out
     # Which families exist is `synthobj.families`' business, so this one cannot be a `choices=`

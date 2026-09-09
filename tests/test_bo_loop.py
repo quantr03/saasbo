@@ -2,8 +2,8 @@
 
 Three things are pinned. First, the acquisition the loop maximizes *is* BoTorch's
 `LogExpectedImprovement` -- checked against the analytic sample-average formula written out in
-numpy/scipy, and against the vendored code's own convention on negated targets, which the sign
-flips make the very same number. Second, every random draw of iteration `t` is a function of
+numpy/scipy, and against the reference implementation's own convention on negated targets, which the
+sign flips make the very same number. Second, every random draw of iteration `t` is a function of
 `(seed, t)` alone: the acquisition optimizer takes two seeds, one for its raw Sobol candidates and
 one for torch's global RNG, and a run that repeats them repeats the point. Third, the two
 fallbacks -- a fit that raises twice, and a proposer that raises -- both query the same seeded
@@ -98,7 +98,7 @@ def test_log_ei_is_botorchs_ensemble_log_expected_improvement():
     expected = logsumexp(per_draw, axis=0) - np.log(sigma.shape[0])
     np.testing.assert_allclose(ours, expected, atol=1e-10, rtol=0)
 
-    # The vendored convention on the negated targets is the same number: EI of (y_target - (-mu))
+    # The reference's convention on the negated targets is the same number: EI of (y_target - (-mu))
     # against y_target = -best_f is EI of (mu - best_f), both sign flips cancelling. This is what
     # licenses `standardize` to stop negating without the acquisition changing meaning.
     y_target = -best_f
