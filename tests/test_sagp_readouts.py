@@ -24,7 +24,6 @@ from sagp.gp import ACTIVE_EPS, GL_NODES, GL_WEIGHTS, FittedGP, NUTSConfig
 
 import warnings
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -39,17 +38,7 @@ WEIGHTS = np.asarray(GL_WEIGHTS)
 
 def _fitted(cell, X, y, samples, *, fixed_noise=None, active=None) -> FittedGP:
     """A `FittedGP` with the fit-status fields a readout test does not care about filled in."""
-    return FittedGP(
-        cell=cell,
-        X_train=jnp.asarray(X),
-        Y_train=jnp.asarray(y),
-        samples={site: jnp.asarray(draws) for site, draws in samples.items()},
-        fixed_noise=fixed_noise,
-        active=active,
-        status="ok",
-        status_reason="",
-        attempts=(),
-    )
+    return FittedGP.from_draws(cell, X, y, samples, fixed_noise=fixed_noise, active=active)
 
 
 def _brute_force_sobol(fitted, D) -> tuple[np.ndarray, float]:
@@ -91,7 +80,8 @@ def test_exact_product_amplitude_matches_brute_force():
         # from the sum of per-sample variances a single draw could not tell apart.
         "a_sq": np.array([[0.9, 0.2], [1.4, 0.05]]),
         "kernel_ell": np.array([[0.4, 0.8], [0.6, 0.3]]),
-        "kernel_noise": np.array([0.02, 0.05]),
+        "noise": np.array([0.02, 0.05]),
+        "mean": np.zeros(2),
     }
     fitted = _fitted(
         ("product", "amplitude"), rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples
@@ -112,16 +102,18 @@ def test_exact_additive_matches_brute_force(prior):
     # unnormalized k~ scaled by kernel_var.
     D, n = 2, 3
     rng = np.random.default_rng(21)
+    rho = np.array([[3.0, 0.4], [1.2, 2.5]])
     samples = {
         "amplitude": {
             "a_sq": np.array([[0.9, 0.2], [1.4, 0.05]]),
             "kernel_ell": np.array([[0.4, 0.8], [0.6, 0.3]]),
         },
         "lengthscale": {
-            "kernel_var": np.array([1.1, 0.7]),
-            "kernel_inv_length_sq": np.array([[3.0, 0.4], [1.2, 2.5]]),
+            "outputscale": np.array([1.1, 0.7]),
+            "kernel_inv_length_sq": rho,
+            "lengthscale": rho**-0.5,
         },
-    }[prior] | {"kernel_noise": np.array([0.02, 0.05])}
+    }[prior] | {"noise": np.array([0.02, 0.05]), "mean": np.zeros(2)}
     fitted = _fitted(
         ("additive", prior), rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples
     )
@@ -147,7 +139,8 @@ def test_qmc_matches_exact_on_product_amplitude():
     samples = {
         "a_sq": a_sq,
         "kernel_ell": rng.uniform(0.3, 1.2, (S, D)),
-        "kernel_noise": np.array([0.02, 0.04]),
+        "noise": np.array([0.02, 0.04]),
+        "mean": np.zeros(S),
     }
     fitted = _fitted(("product", "amplitude"), X, y, samples)
 
@@ -166,10 +159,13 @@ def test_qmc_skips_coordinates_outside_active():
     D, n, S = 6, 15, 2
     active = np.asarray([1, 4])
     rng = np.random.default_rng(41)
+    rho = rng.uniform(0.5, 4.0, (S, len(active)))
     samples = {
-        "kernel_var": np.full(S, 1.3),
-        "kernel_inv_length_sq": rng.uniform(0.5, 4.0, (S, len(active))),
-        "kernel_noise": np.array([0.02, 0.04]),
+        "outputscale": np.full(S, 1.3),
+        "kernel_inv_length_sq": rho,
+        "lengthscale": rho**-0.5,
+        "noise": np.array([0.02, 0.04]),
+        "mean": np.zeros(S),
     }
     fitted = _fitted(
         "oracle_S", rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples, active=active
@@ -195,7 +191,7 @@ def test_shares_and_active_rules():
     a_sq[:, 0] = 0.5  # above the cutoff in every sample
     a_sq[:3, 1] = 0.5  # in three of four
     a_sq[:1, 2] = 0.5  # in one of four
-    samples = {"a_sq": a_sq, "kernel_ell": np.full((S, D), 0.5)}
+    samples = {"a_sq": a_sq, "kernel_ell": np.full((S, D), 0.5), "mean": np.zeros(S)}
     fitted = _fitted(
         ("additive", "amplitude"),
         rng.uniform(0.0, 1.0, (n, D)),
@@ -236,7 +232,8 @@ def test_degenerate_noise_gives_nan_shares():
     samples = {
         "a_sq": a_sq,
         "kernel_ell": np.full((S, D), 0.5),
-        "kernel_noise": np.array([0.01, 0.01, 0.01, 1.5]),
+        "noise": np.array([0.01, 0.01, 0.01, 1.5]),
+        "mean": np.zeros(S),
     }
     fitted = _fitted(
         ("additive", "amplitude"), rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples
@@ -257,7 +254,12 @@ def test_readouts_lengthscale_cells_have_no_share():
     rng = np.random.default_rng(12)
     rho = np.full((S, D), 0.5 * gp.RHO_EPS)
     rho[:, 0] = 2.0 * gp.RHO_EPS
-    samples = {"kernel_var": np.full(S, 1.0), "kernel_inv_length_sq": rho}
+    samples = {
+        "outputscale": np.full(S, 1.0),
+        "kernel_inv_length_sq": rho,
+        "lengthscale": rho**-0.5,
+        "mean": np.zeros(S),
+    }
     fitted = _fitted(
         ("additive", "lengthscale"),
         rng.uniform(0.0, 1.0, (n, D)),
@@ -281,8 +283,10 @@ def test_readouts_widen_the_oracle_to_full_D():
     active = np.asarray([1, 4])
     rng = np.random.default_rng(42)
     samples = {
-        "kernel_var": np.full(S, 1.3),
+        "outputscale": np.full(S, 1.3),
         "kernel_inv_length_sq": np.array([[3.0, 0.4]]),
+        "lengthscale": np.array([[3.0, 0.4]]) ** -0.5,
+        "mean": np.zeros(S),
     }
     fitted = _fitted(
         "oracle_S",
@@ -307,7 +311,7 @@ def _readout_at_D10():
     rng = np.random.default_rng(13)
     a_sq = np.full((S, 10), 5.0e-4) + rng.uniform(0.0, 1.0e-4, (S, 10))
     a_sq[:, list(labels.S)] = np.array([0.30, 0.20, 0.35]) + rng.uniform(0.0, 0.02, (S, 3))
-    samples = {"a_sq": a_sq, "kernel_ell": np.full((S, 10), 0.5)}
+    samples = {"a_sq": a_sq, "kernel_ell": np.full((S, 10), 0.5), "mean": np.zeros(S)}
     fitted = _fitted(
         ("additive", "amplitude"),
         rng.uniform(0.0, 1.0, (n, 10)),
@@ -391,7 +395,7 @@ def _assert_recovers_shares(D: int, n: int, nuts: NUTSConfig) -> None:
     """Fit additive/amplitude to `aligned3` and check the neutral readout against `labels.s`."""
     objective, X, z = _identification_data("aligned3", D, n, 0)
 
-    fitted = gp.fit(X, z, jax.random.PRNGKey(0), ("additive", "amplitude"), nuts=nuts)
+    fitted = gp.fit(X, z, 0, ("additive", "amplitude"), nuts=nuts)
     out = readouts.readouts(fitted)
 
     assert np.max(np.abs(out["sobol_hat"] - objective.labels.s)) <= 0.03
@@ -479,7 +483,7 @@ def test_gate1_replication():
         fitted = gp.fit(
             X,
             jnp.asarray(y),
-            jax.random.PRNGKey(i),
+            i,
             ("additive", "amplitude"),
             fixed_noise=_GATE1_NOISE_SD**2,
         )

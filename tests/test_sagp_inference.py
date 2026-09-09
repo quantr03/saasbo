@@ -1,23 +1,23 @@
-"""Tests for sagp.gp's NUTS inference: reference equivalence, the refit policy and diagnostics.
+"""Tests for sagp.gp's NUTS inference: BoTorch equivalence, the gate and prediction.
 
 The thesis's claim that the four cells differ in nothing but the kernel/prior block rests on the
-sampler being the vendored reference's. `_run_nuts` is `SAASGP.run_inference` copied -- a copy
-nothing but a test can keep honest -- so the first test runs the reference class and `fit` on the
-same data with the key `SAASGP.fit` derives and demands *bit-for-bit* equal draws: a difference of
-one ulp would mean the copy is no longer the same sampler on the same model. It runs twice, at a
-toy budget and at the production 512/256/16 -- both on every invocation of the suite (ruling R20):
-the production pair of fits measures about 4.4 s against the slow marker's ten-second threshold,
-and reference equivalence at the budget the study is actually run at is not a claim worth
-deferring to a marker the default invocation deselects.
+sampler being BoTorch's. `_run_nuts` is `fit_fully_bayesian_model_nuts`'s sampler lines copied -- a
+copy nothing but a test can keep honest -- so the first tests run
+`SaasFullyBayesianSingleTaskGP` + `fit_fully_bayesian_model_nuts` and `fit` on the same data at the
+same seed and demand *bit-for-bit* equal hyperparameters in the loaded model: a difference of one
+ulp would mean the copy is no longer the same sampler on the same model. They run at a toy budget
+and at the production 512/256/16 -- both on every invocation of the suite (ruling R20): reference
+equivalence at the budget the study is actually run at is not a claim worth deferring to a marker
+the default invocation deselects.
 
-The refit policy is behaviour the reference does not have, so it is tested against stubbed
-diagnostics rather than a chain that happens to converge: the verdict decides the path, and the
-path must be a fresh chain with twice the warm-up and a different key.
+The gate is behaviour BoTorch does not have. `fit` makes one attempt and records its verdict, so
+what is tested is that the verdict is read off the *un-thinned* chain the sampler produced and that
+a failed gate still returns its draws -- the loop has to keep querying.
 
 `sagp.gp` is imported first, before this module creates any JAX array, so `sagp/__init__.py`'s
 enable_x64 is in force for every array below.
 """
-from sagp.diagnostics import DiagThresholds, Diagnostics
+from sagp.diagnostics import DiagThresholds
 from sagp.gp import (
     CELLS,
     KERNELS,
@@ -26,18 +26,23 @@ from sagp.gp import (
     standardize,
 )
 
-from functools import partial
-
-import jax
+import botorch.settings
+import jax.numpy as jnp
 import numpy as np
 import pytest
+import torch
+from botorch.fit import fit_fully_bayesian_model_nuts
+from botorch.models.fully_bayesian import SaasFullyBayesianSingleTaskGP
 
-import saasgp
 import sagp.gp
 
 # Diagnostics that can never fail, so a test that is about the sampler's draws is not also about
-# whether a 64-draw chain converged: with these, `fit` always returns attempt 0's samples.
+# whether a 64-draw chain converged.
 NEVER_FAILS = DiagThresholds(r_hat_max=float("inf"), n_eff_min=0.0, max_divergences=10**9)
+
+# Their negation: every criterion fails whatever the chain did, so the excluded path is reachable
+# without a chain that happens to diverge.
+NEVER_PASSES = DiagThresholds(r_hat_max=0.0, n_eff_min=float("inf"), max_divergences=-1)
 
 CELL_KEYS = list(CELLS)
 CELL_IDS = ["/".join(key) for key in CELL_KEYS]
@@ -49,210 +54,183 @@ def _data(n: int, D: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
     return rng.random((n, D)), rng.standard_normal(n)
 
 
-def _reference_key() -> jax.Array:
-    """The key `SAASGP.fit(X, y, seed=0)` hands its HMC run -- the first half of the split."""
-    return jax.random.split(jax.random.PRNGKey(0), 2)[0]
-
-
-def _assert_matches_reference(ours, ref, thinning: int) -> None:
-    """Every hyperparameter the reference retains, thinned as it thins, equal draw for draw."""
-    assert ours.status == "ok"
-    for site in ("kernel_var", "kernel_noise", "kernel_tausq", "kernel_inv_length_sq"):
-        ours_site = np.asarray(ours.samples[site])
-        assert ours_site.shape[0] == 16
-        assert np.array_equal(ours_site, np.asarray(ref.flat_samples[site])[::thinning])
-
-
-def test_nuts_reproduces_reference_bit_for_bit():
-    X, y = _data(n=30, D=5, seed=0)
-    ref = saasgp.SAASGP(
-        alpha=0.1,
-        num_warmup=64,
-        num_samples=64,
-        max_tree_depth=6,
-        num_chains=1,
-        thinning=4,
-        verbose=False,
-        observation_variance=0.0,
-        kernel="matern",
-    ).fit(X, y)
-    ours = fit(
-        X,
-        y,
-        key=_reference_key(),
-        cell=("product", "lengthscale"),
-        nuts=NUTSConfig(64, 64, 4),
-        thresholds=NEVER_FAILS,
+def _reference_fit(X, y, fixed_noise, nuts: NUTSConfig, seed: int):
+    """BoTorch's own SAAS fit of the same data at the same seed: the pin's other side."""
+    Xt = torch.as_tensor(X)
+    zt = torch.as_tensor(y)[:, None]
+    train_Yvar = None if fixed_noise is None else torch.full_like(zt, fixed_noise)
+    with botorch.settings.validate_input_scaling(False):
+        ref = SaasFullyBayesianSingleTaskGP(Xt, zt, train_Yvar)
+    fit_fully_bayesian_model_nuts(
+        ref,
+        max_tree_depth=nuts.max_tree_depth,
+        warmup_steps=nuts.num_warmup,
+        num_samples=nuts.num_samples,
+        thinning=nuts.thinning,
+        disable_progbar=True,
+        seed=seed,
     )
-    _assert_matches_reference(ours, ref, thinning=4)
+    return ref
 
 
-def test_nuts_reproduces_reference_bit_for_bit_production_budget():
-    X, y = _data(n=30, D=5, seed=0)
-    ref = saasgp.SAASGP(
-        alpha=0.1,
-        num_warmup=512,
-        num_samples=256,
-        max_tree_depth=6,
-        num_chains=1,
-        thinning=16,
-        verbose=False,
-        observation_variance=0.0,
-        kernel="matern",
-    ).fit(X, y)
-    ours = fit(
-        X,
-        y,
-        key=_reference_key(),
-        cell=("product", "lengthscale"),
-        nuts=NUTSConfig(),
-        thresholds=NEVER_FAILS,
+def _assert_matches_botorch(ours, ref) -> None:
+    """Every hyperparameter the loaded GPyTorch model carries, equal tensor for tensor."""
+    assert torch.equal(
+        ours.model.covar_module.base_kernel.lengthscale,
+        ref.covar_module.base_kernel.lengthscale,
     )
-    _assert_matches_reference(ours, ref, thinning=16)
+    assert torch.equal(ours.model.covar_module.outputscale, ref.covar_module.outputscale)
+    assert torch.equal(ours.model.mean_module.constant, ref.mean_module.constant)
+    assert torch.equal(ours.model.likelihood.noise, ref.likelihood.noise)
 
 
-def test_nuts_reproduces_reference_bit_for_bit_with_a_fixed_noise():
-    """The same equivalence on the *other* model the study runs: `kernel_noise` not sampled at all.
+def test_fit_reproduces_botorch_nuts_bit_for_bit():
+    X, y = _data(n=30, D=5, seed=0)
+    nuts = NUTSConfig(64, 64, 4)
 
-    The reference spells a fixed observation variance `observation_variance=v` and drops the site
-    from its model; `fit` spells it `fixed_noise=v` and does the same. That is a different latent
-    space and therefore a different chain, so the two tests above -- both on the learned-noise
-    model -- say nothing about it, while `test_bo_reference.py` runs the whole loop at
-    `fixed_noise=1e-6`. `kernel_noise` is absent from both sides, so only the three sites the
-    model still has are compared.
+    ref = _reference_fit(X, y, None, nuts, seed=7)
+    ours = fit(
+        X, y, 7, ("product", "lengthscale"), nuts=nuts, thresholds=NEVER_FAILS
+    )
+
+    _assert_matches_botorch(ours, ref)
+    assert ours.samples["lengthscale"].shape[0] == 16
+
+
+def test_fit_reproduces_botorch_nuts_bit_for_bit_production_budget():
+    """The same equivalence at the budget the study is actually run at (ruling R20).
+
+    The pair of fits measures a few seconds against the slow marker's ten-second threshold, and
+    equivalence at 512/256/16 is not a claim worth deferring to a marker the default invocation
+    deselects: warm-up length changes the step size and the mass matrix, so a 64-draw agreement
+    does not imply this one.
     """
     X, y = _data(n=30, D=5, seed=0)
-    ref = saasgp.SAASGP(
-        alpha=0.1,
-        num_warmup=64,
-        num_samples=64,
-        max_tree_depth=6,
-        num_chains=1,
-        thinning=4,
-        verbose=False,
-        observation_variance=1.0e-6,
-        kernel="matern",
-    ).fit(X, y)
+    nuts = NUTSConfig()
+
+    ref = _reference_fit(X, y, None, nuts, seed=7)
+    ours = fit(X, y, 7, ("product", "lengthscale"), nuts=nuts, thresholds=NEVER_FAILS)
+
+    _assert_matches_botorch(ours, ref)
+    assert ours.samples["lengthscale"].shape[0] == 16
+
+
+def test_fit_reproduces_botorch_nuts_bit_for_bit_with_a_fixed_noise():
+    """The same equivalence on the *other* model the study runs: `noise` not sampled at all.
+
+    BoTorch spells a fixed observation variance `train_Yvar` and drops the site from the model;
+    `fit` spells it `fixed_noise` and does the same. That is a different latent space and therefore
+    a different chain, so the two tests above -- both on the learned-noise model -- say nothing
+    about it.
+    """
+    X, y = _data(n=30, D=5, seed=0)
+    nuts = NUTSConfig(64, 64, 4)
+
+    ref = _reference_fit(X, y, 1.0e-4, nuts, seed=7)
     ours = fit(
-        X,
-        y,
-        key=_reference_key(),
-        cell=("product", "lengthscale"),
-        fixed_noise=1.0e-6,
-        nuts=NUTSConfig(64, 64, 4),
-        thresholds=NEVER_FAILS,
+        X, y, 7, ("product", "lengthscale"), fixed_noise=1.0e-4, nuts=nuts, thresholds=NEVER_FAILS
     )
 
-    assert "kernel_noise" not in ours.samples
-    for site in ("kernel_var", "kernel_tausq", "kernel_inv_length_sq"):
-        assert np.array_equal(
-            np.asarray(ours.samples[site]), np.asarray(ref.flat_samples[site])[::4]
-        )
+    _assert_matches_botorch(ours, ref)
+    assert "noise" not in ours.samples
+    assert np.array_equal(np.asarray(ours.noises()), np.full(16, 1.0e-4))
 
 
-def _stub_diagnose(verdicts):
-    """A `_diagnose` returning the given passed/failed verdicts in order, whatever the chain did.
-
-    The refit policy branches on the verdict alone, so stubbing it is what makes the two paths
-    reachable in a test at all: no toy chain reliably fails, and none reliably fails then passes.
-    """
-    remaining = iter(verdicts)
-
-    def stub(flat_samples, extra, thresholds, wall_s):
-        passed = next(remaining)
-        return Diagnostics(
-            r_hat_max=1.0,
-            r_hat_median=1.0,
-            frac_r_hat_below_1_05=1.0,
-            n_eff_min=32.0,
-            divergences=0,
-            num_steps_mean=1.0,
-            r_hat_max_native=1.0,
-            n_eff_min_native=32.0,
-            r_hat_max_ell=float("nan"),
-            n_eff_min_ell=float("nan"),
-            r_hat_max_global=1.0,
-            n_eff_min_global=32.0,
-            wall_s=wall_s,
-            passed=passed,
-            reason="" if passed else "stubbed failure",
-        )
-
-    return stub
-
-
-def _spy_on_mcmc(monkeypatch) -> list[dict]:
-    """Record every `MCMC(...)` construction's kwargs while still running the real sampler."""
-    real = sagp.gp.MCMC
-    calls: list[dict] = []
-
-    class Spy(real):
-        def __init__(self, kernel, **kwargs):
-            calls.append(dict(kwargs))
-            super().__init__(kernel, **kwargs)
-
-    monkeypatch.setattr(sagp.gp, "MCMC", Spy)
-    return calls
-
-
-def _spy_on_run_nuts(monkeypatch) -> list[jax.Array]:
-    """Record the key of every `_run_nuts` call while still running it."""
-    real = sagp.gp._run_nuts
-    keys: list[jax.Array] = []
-
-    def spy(model, X, Y, key, nuts):
-        keys.append(key)
-        return real(model, X, Y, key, nuts)
-
-    monkeypatch.setattr(sagp.gp, "_run_nuts", spy)
-    return keys
-
-
-def test_refit_and_excluded_paths(monkeypatch):
+def test_fit_is_deterministic_in_its_seed():
+    # `seed` is the whole of the fit's randomness: a run is reproducible from its record, and two
+    # cells at the same seed are comparable because they saw the same stream.
     X, y = _data(n=12, D=3, seed=1)
-    key = jax.random.PRNGKey(0)
-    nuts = NUTSConfig(64, 32, 4)
-    mcmc_calls = _spy_on_mcmc(monkeypatch)
-    keys = _spy_on_run_nuts(monkeypatch)
+    nuts = NUTSConfig(32, 32, 8)
 
-    monkeypatch.setattr(sagp.gp, "diagnose", _stub_diagnose([False, True]))
-    refit = fit(X, y, key=key, cell=("product", "lengthscale"), nuts=nuts)
+    first = fit(X, y, 4, ("additive", "amplitude"), nuts=nuts, thresholds=NEVER_FAILS)
+    again = fit(X, y, 4, ("additive", "amplitude"), nuts=nuts, thresholds=NEVER_FAILS)
+    other = fit(X, y, 5, ("additive", "amplitude"), nuts=nuts, thresholds=NEVER_FAILS)
 
-    assert refit.status == "refit"
-    assert len(refit.attempts) == 2
-    # The refit is a fresh chain with twice the warm-up, driven by a key disjoint from attempt 0's.
-    # Both keys are pinned to the values `fit` documents, not merely to being different: attempt 0
-    # must use the caller's key *unchanged* (that is what lets a run reproduce the reference), and
-    # the refit must use `fold_in(key, 1)` (disjoint from `bo.py`'s exception retry, `fold_in(2)`).
-    assert [call["num_warmup"] for call in mcmc_calls] == [64, 128]
-    assert np.array_equal(np.asarray(keys[0]), np.asarray(key))
-    assert np.array_equal(np.asarray(keys[1]), np.asarray(jax.random.fold_in(key, 1)))
-    assert refit.samples["kernel_inv_length_sq"].shape == (8, 3)
+    assert set(first.samples) == set(again.samples)
+    for site, draws in first.samples.items():
+        assert np.array_equal(np.asarray(draws), np.asarray(again.samples[site]))
+    assert not np.array_equal(
+        np.asarray(first.samples["kernel_tausq"]), np.asarray(other.samples["kernel_tausq"])
+    )
 
-    monkeypatch.setattr(sagp.gp, "diagnose", _stub_diagnose([False, False]))
-    excluded = fit(X, y, key=key, cell=("product", "lengthscale"), nuts=nuts)
+
+def test_failed_gate_is_excluded_with_its_draws():
+    # The gate decides the *label*, not whether the fit is usable: the loop has to keep querying
+    # with an excluded fit, so its draws come back and its posterior works.
+    X, y = _data(n=15, D=3, seed=2)
+    nuts = NUTSConfig(64, 64, 4)
+    X_test = np.random.default_rng(3).random((5, 3))
+
+    excluded = fit(X, y, 0, ("product", "lengthscale"), nuts=nuts, thresholds=NEVER_PASSES)
 
     assert excluded.status == "excluded"
-    assert excluded.status_reason != ""
-    assert len(excluded.attempts) == 2
-    # An excluded fit still carries the second attempt's draws: the loop has to query with it.
-    assert excluded.samples["kernel_inv_length_sq"].shape == (8, 3)
+    assert len(excluded.attempts) == 1
+    for criterion in ("r_hat_max", "n_eff_min", "divergences"):
+        assert criterion in excluded.status_reason
+    assert excluded.samples["kernel_inv_length_sq"].shape == (16, 3)
+    assert excluded.posterior(X_test)[0].shape == (16, 5)
+
+    passed = fit(X, y, 0, ("product", "lengthscale"), nuts=nuts, thresholds=NEVER_FAILS)
+
+    assert passed.status == "ok"
+    assert passed.status_reason == ""
+
+
+@pytest.mark.parametrize("fixed_noise", [0.0, 1.0e-6], ids=["zero", "below_the_floor"])
+def test_fixed_noise_below_the_floor_is_rejected(fixed_noise):
+    # BoTorch clamps `train_Yvar` at 1e-4 before the sampler sees it, so a smaller value would run
+    # a different model than the record says and 0.0 would silently become 1e-4.
+    X, y = _data(n=8, D=2, seed=4)
+
+    with pytest.raises(ValueError, match="1e-4"):
+        fit(
+            X, y, 0, ("product", "lengthscale"),
+            fixed_noise=fixed_noise,
+            nuts=NUTSConfig(2, 2, 1),  # never reached: the check fires before any sampling
+        )
+
+    accepted = fit(
+        X, y, 0, ("product", "lengthscale"), fixed_noise=1.0e-4, nuts=NUTSConfig(8, 8, 4)
+    )
+    assert accepted.fixed_noise == 1.0e-4
+
+
+def test_diagnostics_read_the_unthinned_chain(monkeypatch):
+    # The gate is a statement about the chain, not about the 16 draws prediction keeps: R-hat over
+    # 16 draws is meaningless, and the divergence count is a property of the whole run. BoTorch
+    # discards both the un-thinned draws and the counters, which is why `_run_nuts` returns the
+    # sampler rather than calling BoTorch's fit function.
+    X, y = _data(n=12, D=3, seed=5)
+    real = sagp.gp.diagnose
+    seen: dict = {}
+
+    def recorder(flat_samples, extra, thresholds, wall_s):
+        seen.update(flat=flat_samples, extra=extra, wall_s=wall_s)
+        return real(flat_samples, extra, thresholds, wall_s)
+
+    monkeypatch.setattr(sagp.gp, "diagnose", recorder)
+    fitted = fit(X, y, 0, ("product", "lengthscale"), nuts=NUTSConfig(64, 64, 4))
+
+    assert np.asarray(seen["flat"]["kernel_tausq"]).shape == (64,)
+    assert set(seen["extra"]) == {"diverging", "num_steps"}
+    assert np.asarray(seen["extra"]["diverging"]).shape == (64,)
+    assert np.asarray(seen["extra"]["num_steps"]).shape == (64,)
+    assert seen["wall_s"] > 0.0
+    # And what prediction keeps is the thinned chain, not the one the gate read.
+    assert fitted.samples["kernel_tausq"].shape == (16,)
 
 
 def test_run_nuts_refuses_more_than_one_chain():
-    # The plan pins one chain per fit and `_diagnose` pools with `group_by_chain=False`, so a
-    # second chain would be concatenated onto the first and split-R-hat would compare the halves
-    # of the concatenation -- a number that looks like a diagnostic and is not one.
-    X, y = _data(n=8, D=2, seed=8)
+    # The plan pins one chain per fit and `diagnose` pools with `group_by_chain=False`, so a second
+    # chain would be concatenated onto the first and split-R-hat would compare the halves of the
+    # concatenation -- a number that looks like a diagnostic and is not one.
+    X, y = _data(n=8, D=2, seed=6)
+    model = sagp.gp.CellGP(
+        torch.as_tensor(X), torch.as_tensor(y)[:, None], cell=CELLS[("product", "lengthscale")]
+    )
 
     with pytest.raises(ValueError, match="num_chains must be 1"):
-        sagp.gp._run_nuts(
-            partial(sagp.gp.model_product_lengthscale, alpha=0.1, fixed_noise=None),
-            X,
-            y,
-            jax.random.PRNGKey(0),
-            NUTSConfig(2, 2, 1, num_chains=2),
-        )
+        sagp.gp._run_nuts(model, NUTSConfig(2, 2, 1, num_chains=2), 0)
 
 
 @pytest.mark.parametrize(
@@ -273,98 +251,95 @@ def test_nuts_config_rejects_a_budget_that_would_fail_later(kwargs):
         NUTSConfig(**{"num_warmup": 64, "num_samples": 64, "thinning": 4, **kwargs})
 
 
-# The retained sites and their shapes at S = 32 // 4 = 8 draws and D = 3: the amplitude cells
-# carry no `kernel_var`, and the whole point of the sparse parameterization is which sites are
-# per-coordinate rather than scalar.
-S, D = 8, 3
-SAMPLE_SHAPES = {
-    "kernel_var": (S,),
-    "kernel_noise": (S,),
-    "kernel_tausq": (S,),
-    "_kernel_inv_length_sq": (S, D),
-    "kernel_inv_length_sq": (S, D),
-    "_a_sq": (S, D),
-    "a_sq": (S, D),
-    "kernel_ell": (S, D),
-}
+# --- prediction ---
+
+
+def _assert_posterior_is_the_models(fitted, X_test) -> None:
+    """`FittedGP.posterior` is the GPyTorch posterior reshaped, in both noise conventions."""
+    for observation_noise in (False, True):
+        mean, var = fitted.posterior(X_test, observation_noise=observation_noise)
+        with torch.no_grad():
+            post = fitted.model.posterior(
+                torch.as_tensor(X_test)[:, None, :], observation_noise=observation_noise
+            )
+        expected_mean = post.mean.reshape(X_test.shape[0], -1).T
+        expected_var = post.variance.reshape(X_test.shape[0], -1).T
+        assert np.array_equal(np.asarray(mean), expected_mean.numpy())
+        assert np.array_equal(np.asarray(var), expected_var.numpy())
+
+
+def test_posterior_matches_botorch_on_the_same_model():
+    # `FittedGP.posterior` may reshape BoTorch's answer and nothing else -- the acquisition
+    # optimizes the GPyTorch posterior, and a readout that saw a different number would describe a
+    # different surrogate. `alphas()` is then pinned as the weights that very mean contracts.
+    X, y = _data(n=20, D=4, seed=7)
+    X_test = np.random.default_rng(8).random((6, 4))
+    ours = fit(
+        X, y, 2, ("product", "lengthscale"), nuts=NUTSConfig(32, 32, 8), thresholds=NEVER_FAILS
+    )
+
+    _assert_posterior_is_the_models(ours, X_test)
+
+    mean, _ = ours.posterior(X_test)
+    alphas, means = ours.alphas(), ours.means()
+    kernel = KERNELS[("product", "lengthscale")][0]
+    assert alphas.shape == (4, 20)
+    for s in range(alphas.shape[0]):
+        k_star = kernel(jnp.asarray(X_test), jnp.asarray(X), ours.params(s))
+        rebuilt = means[s] + k_star @ alphas[s]
+        assert np.max(np.abs(np.asarray(rebuilt) - np.asarray(mean[s]))) < 1.0e-8
 
 
 @pytest.mark.parametrize(
     "cell_key",
-    [("additive", "amplitude"), ("product", "amplitude"), ("additive", "lengthscale")],
-    ids=["additive/amplitude", "product/amplitude", "additive/lengthscale"],
+    [("product", "lengthscale"), ("additive", "amplitude")],
+    ids=["product/lengthscale", "additive/amplitude"],
 )
-def test_amplitude_cells_fit_smoke(cell_key):
-    X, y = _data(n=15, D=D, seed=3)
-    fitted = fit(X, y, key=jax.random.PRNGKey(0), cell=cell_key, nuts=NUTSConfig(32, 32, 4))
+def test_posterior_is_right_when_draws_equal_points(cell_key):
+    # Task 1 found that GPyTorch's `Kernel.__call__` collapses a (S, n) diagonal to (n,) when
+    # S == n on a bare (n, D) input -- a silently wrong posterior at exactly the retained count
+    # this study uses. `FittedGP.posterior` gives each test point its own batch entry, so the
+    # heuristic cannot fire; both a square and a non-square test set are checked.
+    n = 16
+    X, y = _data(n=n, D=3, seed=9)
+    rng = np.random.default_rng(10)
+    fitted = fit(X, y, 1, cell_key, nuts=NUTSConfig(64, 64, 4), thresholds=NEVER_FAILS)
 
-    assert set(fitted.samples) == set(CELLS[cell_key].sites)
-    assert (cell_key[1] == "amplitude") == ("kernel_var" not in fitted.samples)
-    for site, samples in fitted.samples.items():
-        assert samples.shape == SAMPLE_SHAPES[site]
-        assert np.all(np.asarray(samples) > 0.0)
+    assert fitted.samples["mean"].shape == (16,)
+    for n_test in (n, 5):
+        X_test = rng.random((n_test, 3))
+
+        mean, var = fitted.posterior(X_test)
+
+        assert mean.shape == var.shape == (16, n_test)
+        assert np.all(np.asarray(var) > 0.0)
+        _assert_posterior_is_the_models(fitted, X_test)
 
 
+@pytest.mark.parametrize("fixed_noise", [None, 1.0e-3], ids=["learned_noise", "fixed_noise"])
 @pytest.mark.parametrize("cell_key", CELL_KEYS, ids=CELL_IDS)
-def test_cells_wiring(cell_key):
-    """A registry entry paired with the wrong cell's kernel would pass every other test.
+def test_all_cells_fit_and_predict(cell_key, fixed_noise):
+    # One code path serves all four cells and both noise conventions: what is pinned is the site
+    # set each fit retains, the shapes prediction answers with, and that `noises()` reports the
+    # variance prediction actually used -- BoTorch's floor, or the fixed value exactly.
+    S, D, n_test = 4, 3, 5
+    X, y = _data(n=12, D=D, seed=11)
+    X_test = np.random.default_rng(12).random((n_test, D))
 
-    Site names encode only the sparsity prior, so ("additive", "amplitude") holding the *product*
-    amplitude kernel traces, samples and thins exactly as it should -- while silently comparing
-    the wrong two cells.
-    """
-    cell = CELLS[cell_key]
+    fitted = fit(X, y, 0, cell_key, fixed_noise=fixed_noise, nuts=NUTSConfig(16, 16, 4))
 
-    assert cell.key == cell_key
-    assert cell.model.__name__ == f"model_{cell.structure}_{cell.prior}"
-    assert cell.kernel is KERNELS[cell.key][0]
-    assert cell.kernel_diag is KERNELS[cell.key][1]
-
-
-def test_fit_with_fixed_noise():
-    """A fixed observation variance removes `kernel_noise` from the model, not just from the draws.
-
-    The reproduction test runs the whole loop at `fixed_noise=1e-6`, which is the reference
-    driver's `observation_variance`; what makes that the same model is that the site is never
-    sampled, so a fit that merely fixed the *value* would still have an extra latent dimension and
-    a different chain. `fixed_noise` is kept on the fitted object because prediction needs it:
-    `FittedGP.noises` has no `kernel_noise` to read.
-    """
-    X, y = _data(n=12, D=3, seed=5)
-    fitted = fit(
-        X,
-        y,
-        key=jax.random.PRNGKey(0),
-        cell=("product", "lengthscale"),
-        fixed_noise=1.0e-6,
-        nuts=NUTSConfig(32, 32, 4),
+    expected = tuple(
+        site for site in CELLS[cell_key].sites if fixed_noise is None or site != "noise"
     )
-
-    assert "kernel_noise" not in fitted.samples
-    assert set(fitted.samples) == {
-        "kernel_var", "kernel_tausq", "_kernel_inv_length_sq", "kernel_inv_length_sq"
-    }
-    assert fitted.fixed_noise == 1.0e-6
-    assert fitted.samples["kernel_inv_length_sq"].shape == (8, 3)
-
-
-def test_fit_rejects_fixed_noise_zero():
-    """`observation_variance=0.0` means "learn the noise" in the reference; here it would fix it.
-
-    Silently reinterpreting the value either way would be a trap, so `fit` refuses it and names
-    the spelling that learns the noise.
-    """
-    X, y = _data(n=8, D=2, seed=4)
-
-    with pytest.raises(ValueError, match="None"):
-        fit(
-            X,
-            y,
-            key=jax.random.PRNGKey(0),
-            cell=("product", "lengthscale"),
-            fixed_noise=0.0,
-            nuts=NUTSConfig(2, 2, 1),  # never reached: the check fires before any sampling
-        )
+    assert tuple(fitted.samples) == expected
+    mean, var = fitted.posterior(X_test)
+    assert mean.shape == var.shape == (S, n_test)
+    assert np.all(np.isfinite(np.asarray(mean))) and np.all(np.asarray(var) > 0.0)
+    assert fitted.means().shape == (S,)
+    assert fitted.noises().shape == (S,)
+    assert np.all(np.asarray(fitted.noises()) >= 1.0e-4)
+    if fixed_noise is not None:
+        assert np.array_equal(np.asarray(fitted.noises()), np.full(S, fixed_noise))
 
 
 # --- standardize ---

@@ -1,8 +1,8 @@
 """sagp.diagnostics: the NUTS convergence verdict for one fit attempt.
 
-Pools every positive sampled site's R-hat and effective sample size against `DiagThresholds` --
-on the log scale the sampler moves in, over the attempt's un-thinned draws, not the thinned draws
-`fit` retains -- into one pass/fail `Diagnostics` record.
+Pools every sampled site's R-hat and effective sample size against `DiagThresholds` -- the
+positive ones on the log scale the sampler moves in, over the attempt's un-thinned draws, not the
+thinned draws `fit` retains -- into one pass/fail `Diagnostics` record.
 """
 from __future__ import annotations
 
@@ -58,22 +58,26 @@ class Diagnostics:
 # and `a_sq` are left out, so the gate reads the sampler's own coordinates. R-hat and ESS are
 # taken on the logs: on the constrained half-Cauchy sites both are dominated by single draws.
 _POSITIVE_SAMPLED_SITES: tuple[str, ...] = (
-    "kernel_var",
-    "kernel_noise",
+    "outputscale",
+    "noise",
     "kernel_tausq",
     "_kernel_inv_length_sq",
     "_a_sq",
     "kernel_ell",
 )
 
-# The three blocks the per-group fields report over, together exactly `_POSITIVE_SAMPLED_SITES`:
+# The sampled sites that are real-valued rather than positive: `mean` is a Normal draw, so its
+# R-hat and ESS are taken on its natural scale and a log would be NaN half the time.
+_REAL_SAMPLED_SITES: tuple[str, ...] = ("mean",)
+
+# The three blocks the per-group fields report over, together exactly the two tuples above:
 # `native` is whichever site the cell's own sparsity lives on, `ell` the shape parameter only the
-# amplitude cells carry (2D + 2 pooled statistics against a lengthscale cell's D + 3), and
+# amplitude cells carry (2D + 3 pooled statistics against a lengthscale cell's D + 4), and
 # `global` the scalars every cell has.
 _DIAG_GROUPS: dict[str, tuple[str, ...]] = {
     "native": ("_kernel_inv_length_sq", "_a_sq"),
     "ell": ("kernel_ell",),
-    "global": ("kernel_var", "kernel_noise", "kernel_tausq"),
+    "global": ("outputscale", "noise", "kernel_tausq", "mean"),
 }
 
 
@@ -103,18 +107,19 @@ def diagnose(
     """The convergence verdict for one attempt, from its un-thinned draws.
 
     `numpyro.diagnostics.summary` is the reference's own, and with one chain its split-R-hat
-    compares the chain's two halves. Every per-coordinate site contributes D statistics and all of
-    them are pooled, so the rule reads "every scalar the sampler moved converged", not "the
-    average did". The criteria are negations of the pass conditions, so a NaN R-hat -- what a site
-    that never moved produces -- fails rather than silently passing; the per-group fields are read
-    off these very statistics and so cannot disagree with the verdict.
+    compares the chain's two halves. Every sampled site is read -- the positive ones on the log
+    scale, `mean` on its own -- and every per-coordinate site contributes D statistics, all of them
+    pooled, so the rule reads "every scalar the sampler moved converged", not "the average did".
+    The criteria are negations of the pass conditions, so a NaN R-hat -- what a site that never
+    moved produces -- fails rather than silently passing; the per-group fields are read off these
+    very statistics and so cannot disagree with the verdict.
     """
-    logs = {
+    stats_input = {
         site: jnp.log(flat_samples[site])
         for site in _POSITIVE_SAMPLED_SITES
         if site in flat_samples
-    }
-    stats = summary(logs, prob=0.9, group_by_chain=False)
+    } | {site: flat_samples[site] for site in _REAL_SAMPLED_SITES if site in flat_samples}
+    stats = summary(stats_input, prob=0.9, group_by_chain=False)
     per_site = {
         site: (np.ravel(site_stats["r_hat"]), np.ravel(site_stats["n_eff"]))
         for site, site_stats in stats.items()

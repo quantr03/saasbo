@@ -5,9 +5,9 @@ component must reproduce `synthobj.kernel` -- and through it Gate 1's check scri
 `Research Context/research direction/Kernel normalization check.py` -- in float64, so
 the surrogate and the synthetic objectives share one definition of a component. Normalization
 must actually deliver unit marginal variance under U[0,1], since that is the only thing that
-makes an amplitude threshold well defined. And ("product", "lengthscale") must be
-`saasgp.matern_kernel` bit-for-bit, because that cell is the SAASBO baseline the other three are
-measured against.
+makes an amplitude threshold well defined. And ("product", "lengthscale") must be BoTorch's own
+`matern52_kernel` bit-for-bit, because that cell is the SAASBO baseline the other three are
+measured against and the kernel NUTS samples the model under.
 
 `sagp.gp` is imported first, before this module creates any JAX array, so `sagp/__init__.py`'s
 enable_x64 is in force for every array below.
@@ -36,7 +36,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import saasgp
+from botorch.models.fully_bayesian import matern52_kernel
 from synthobj.kernel import centered, normalized
 from synthobj.kernel import v as v_numpy
 
@@ -45,7 +45,7 @@ CELL_KEYS = list(KERNELS)
 CELL_IDS = ["/".join(key) for key in CELL_KEYS]
 
 # The three cells built out of the centered component; ("product", "lengthscale") is pinned
-# against `saasgp.matern_kernel` instead.
+# against BoTorch's `matern52_kernel` instead.
 CENTERED_CELL_KEYS = [key for key in CELL_KEYS if key != ("product", "lengthscale")]
 CENTERED_CELL_IDS = ["/".join(key) for key in CENTERED_CELL_KEYS]
 
@@ -58,11 +58,10 @@ ELLS_TABLE = [0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0]
 V_TABLE = [0.88574, 0.78149, 0.60296, 0.28218, 0.10680, 0.03183, 0.01478, 0.00546, 0.00138, 0.00015]
 
 # Every cell's `cell_kernel_diag` agrees with its own matrix diagonal to float64 round-off,
-# except ("product", "lengthscale"): the vendored `matern_kernel` clips dsq to 1e-12 in the sqrt
-# that makes `exponent` but leaves it at 0 in `poly`, so its diagonal is var * (1 - 2.5e-12),
-# not var. That floor is the reference's own, and reproducing it in the diagonal would break
-# `cell_kernel_diag + noise + 1e-6 == saasgp.kernel_diag(var, noise)`, so the diagonal stays
-# var * ones and the tolerance absorbs the floor instead (1.3 * 2.5e-12 = 3.3e-12, measured).
+# except ("product", "lengthscale"): BoTorch floors the squared distance at 1e-30 before the
+# square root, so the matrix's own diagonal is var * (1 - sqrt(5) * 1e-15) rather than var. That
+# floor is BoTorch's, and reproducing it in an O(n D Q) diagonal would state it twice, so the
+# diagonal stays var * ones and the tolerance absorbs the floor instead.
 DIAG_ATOL = dict.fromkeys(CELL_KEYS, 1.0e-12)
 DIAG_ATOL[("product", "lengthscale")] = 1.0e-11
 
@@ -82,7 +81,7 @@ def _params() -> dict[str, jax.Array | float]:
     return {
         "a_sq": jnp.asarray(rng.uniform(0.0, 1.0, D)),
         "kernel_ell": jnp.asarray(rng.uniform(0.1, 2.0, D)),
-        "kernel_var": 1.3,
+        "outputscale": 1.3,
         "kernel_inv_length_sq": jnp.asarray(rng.uniform(0.1, 5.0, D)),
     }
 
@@ -109,7 +108,7 @@ def _numpy_oracle(key, X, Z, params) -> np.ndarray:
         return terms.sum(axis=0) if key[0] == "additive" else (1.0 + terms).prod(axis=0)
     ell = np.asarray(params["kernel_inv_length_sq"]) ** -0.5
     terms = np.array([centered(X[:, i], Z[:, i], ell[i]) for i in range(D)])
-    return params["kernel_var"] * terms.sum(axis=0)
+    return params["outputscale"] * terms.sum(axis=0)
 
 
 @pytest.mark.parametrize("normalize", [False, True])
@@ -156,37 +155,27 @@ def test_normalized_component_has_unit_quadrature_mean_variance(ell):
 def test_cell_kernel_is_positive_semidefinite(key):
     X = _points(50, seed=1)
 
-    eigenvalues = jnp.linalg.eigvalsh(KERNELS[key][0](X, X, _params(), 0.0, False))
+    eigenvalues = jnp.linalg.eigvalsh(KERNELS[key][0](X, X, _params()))
 
     assert float(eigenvalues.min()) > -1.0e-10
 
 
-@pytest.mark.parametrize("key", CELL_KEYS, ids=CELL_IDS)
-def test_include_noise_adds_noise_plus_jitter_to_the_diagonal(key):
-    X, params = _points(50, seed=1), _params()
-    kernel = KERNELS[key][0]
-
-    added = kernel(X, X, params, 0.1, True) - kernel(X, X, params, 0.1, False)
-
-    np.testing.assert_allclose(
-        np.asarray(added), (0.1 + 1.0e-6) * np.eye(50), atol=1.0e-12, rtol=0.0
-    )
-
-
-@pytest.mark.parametrize("include_noise", [False, True])
-def test_product_lengthscale_cell_is_the_reference_matern_kernel(include_noise):
-    # This cell is SAASBO; anything but bit-for-bit equality would make the baseline a different
-    # model from the reference. Z is square because matern_kernel's noise term assumes it.
+def test_product_lengthscale_cell_is_botorchs_matern_kernel():
+    # This cell is SAASBO, and on this path that means BoTorch's own `matern52_kernel` scaled by
+    # the outputscale: anything but bit-for-bit equality would have the readouts describe a
+    # different kernel from the one `SaasPyroModel` samples the model under. The oracle is jitted
+    # because ours is: XLA fuses the multiply into the polynomial, which moves the last bit of 37
+    # of these 81 entries, so an eager oracle would compare a differently *compiled* expression
+    # rather than a different one.
     rng = np.random.default_rng(2)
-    X, Z = jnp.asarray(rng.uniform(size=(9, D))), jnp.asarray(rng.uniform(size=(9, D)))
-    var, rho, noise = 1.3, jnp.asarray(rng.uniform(0.1, 5.0, D)), 0.1
-    params = {"kernel_var": var, "kernel_inv_length_sq": rho}
+    X = jnp.asarray(rng.uniform(size=(9, D)))
+    var, rho = 1.3, jnp.asarray(rng.uniform(0.1, 5.0, D))
+    params = {"outputscale": var, "kernel_inv_length_sq": rho}
+    oracle = jax.jit(lambda X, rho: var * matern52_kernel(X, rho**-0.5))
 
-    ours = kernel_product_lengthscale(X, Z, params, noise, include_noise)
+    ours = kernel_product_lengthscale(X, X, params)
 
-    assert np.array_equal(
-        np.asarray(ours), np.asarray(saasgp.matern_kernel(X, Z, var, rho, noise, include_noise))
-    )
+    assert np.array_equal(np.asarray(ours), np.asarray(oracle(X, rho)))
 
 
 @pytest.mark.parametrize("key", CENTERED_CELL_KEYS, ids=CENTERED_CELL_IDS)
@@ -198,7 +187,7 @@ def test_centered_cells_match_the_numpy_oracle(key):
     Z = jnp.asarray(rng.uniform(0.0, 1.0, (9, D)))
     params = _params()
 
-    K = KERNELS[key][0](X, Z, params, 0.0, False)
+    K = KERNELS[key][0](X, Z, params)
 
     np.testing.assert_allclose(
         np.asarray(K), _numpy_oracle(key, X, Z, params), atol=1.0e-12, rtol=0.0
@@ -213,7 +202,7 @@ def test_cell_kernel_diag_matches_the_kernel_diagonal(key):
 
     np.testing.assert_allclose(
         np.asarray(diagonal),
-        np.asarray(jnp.diagonal(KERNELS[key][0](X, X, params, 0.0, False))),
+        np.asarray(jnp.diagonal(KERNELS[key][0](X, X, params))),
         atol=DIAG_ATOL[key],
         rtol=0.0,
     )
@@ -229,7 +218,7 @@ def test_cell_kernel_gradients_are_finite(key):
     X = jnp.asarray(X)
     kernel = KERNELS[key][0]
 
-    grads = jax.grad(lambda p: kernel(X, X, p, 0.0, False).sum())(_params())
+    grads = jax.grad(lambda p: kernel(X, X, p).sum())(_params())
 
     assert all(bool(jnp.isfinite(g).all()) for g in jax.tree.leaves(grads))
 
@@ -251,7 +240,7 @@ def test_cell_kernel_gradients_match_central_differences(key):
     theta = params[site]
 
     def total(value):
-        return kernel(X, X, params | {site: value}, 0.0, False).sum()
+        return kernel(X, X, params | {site: value}).sum()
 
     analytic = float(jax.grad(total)(theta)[0])
 

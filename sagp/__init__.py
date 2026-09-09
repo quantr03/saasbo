@@ -1,8 +1,8 @@
-"""sagp: the thesis's four sparse-GP cells on the SAASBO reference code path.
+"""sagp: the thesis's four sparse-GP cells on BoTorch's fully Bayesian path.
 
 `sagp.gp` implements the four model cells (additive/product structure x amplitude/lengthscale
-prior; see the plan), NUTS inference and prediction, following the vendored
-`saasgp.py`/`saasbo.py` reference exactly except where the plan calls for a change.
+prior; see the plan) as BoTorch `PyroModel`s, fitted by BoTorch's own NUTS scheme and predicted
+through the batched GPyTorch model it loads the retained draws into.
 `sagp.diagnostics` is the convergence verdict `sagp.gp.fit` calls once per attempt. `sagp.bo`
 runs the Bayesian-optimization loop against any cell through `FittedGP`/`posterior` alone, never
 learning how a cell is parameterized; `sagp.references` and `sagp.readouts` sit beside it, the

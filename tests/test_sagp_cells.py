@@ -1,25 +1,17 @@
-"""Tests for sagp.gp's four NumPyro cells and their prediction: models, sites and `FittedGP`.
+"""Tests for sagp.gp's four BoTorch cells and their prediction: models, sites and `FittedGP`.
 
-Two properties carry the 2x2 comparison. ("product", "lengthscale") must be the vendored
-`SAASGP.model` -- its body is copied into `model_product_lengthscale` rather than imported, so
-nothing but a test can keep the copy honest; comparing the two log joints on the same parameter
-values checks the priors, the kernel and the likelihood in one number. And every cell must expose
-exactly the sites the plan names, in the plan's order and shapes, because `Cell.sites` is what
-inference retains and every readout downstream indexes those samples by name.
+Two properties carry the 2x2 comparison. ("product", "lengthscale") must be BoTorch's own
+`SaasPyroModel` -- checked as an equal log density, since `sample()` is inherited and only the
+kernel/prior block may differ -- and every cell must declare exactly the sites named here, in this
+order, because those names are what the retained draws are keyed by and what the diagnostics report
+on. Their kernels are pinned to the JAX ones twice over, through the likelihood term `sample`
+builds and through the GPyTorch posterior `load_mcmc_samples` produces.
 
-Prediction is held to the same standard: `FittedGP.posterior` is the reference's
-`compute_choleskys` + `predict` with the kernel and its diagonal generalized to the cell, so on
-("product", "lengthscale") it must reproduce `SAASGP.posterior` bit for bit, and the
-generalizations it adds -- the other three cells, the oracle's `active` restriction, the
-memory-driven row chunking -- must not change what any of the four cells predicts.
-
-The same four cells now also exist as BoTorch `PyroModel`s, and the last section holds them to the
-same two standards: ("product", "lengthscale") must be BoTorch's own `SaasPyroModel` -- checked as
-an equal log density, since `sample()` is inherited and only the kernel/prior block may differ --
-and every cell must declare exactly the sites named here, in this order, because those names are
-what the retained draws are keyed by. Their kernels are pinned to the JAX ones a second time,
-through the likelihood term `sample` builds and through the GPyTorch posterior
-`load_mcmc_samples` produces.
+Prediction is held to the same standard: `FittedGP.posterior` is a reshape of that GPyTorch
+posterior, so what is tested here is that one code path serves all four cells, that the oracle's
+`active` restriction is the same computation as having been handed the narrow design, and that the
+two identities the readouts rest on -- the additive mean is its components plus the intercept, and
+`alphas()` are the weights that mean contracts -- hold against the posterior itself.
 
 `sagp.gp` is imported first, before this module creates any JAX array, so `sagp/__init__.py`'s
 enable_x64 is in force for every array below.
@@ -31,10 +23,7 @@ from sagp.gp import (
     ELL_PRIOR,
     KERNELS,
     FittedGP,
-    model_product_lengthscale,
 )
-
-from functools import partial
 
 import botorch.settings
 import jax.numpy as jnp
@@ -46,115 +35,31 @@ import torch
 from botorch.models.fully_bayesian import SaasFullyBayesianSingleTaskGP
 from numpyro.infer.util import log_density
 
-import saasgp
-
 N = 12
 P = 4
 
 CELL_KEYS = list(CELLS)
 CELL_IDS = ["/".join(key) for key in CELL_KEYS]
 
-# The plan's site list per sparsity prior: every site inference retains, sampled and
-# deterministic, in the order the model declares them. Stated here as literals rather than read
-# off `Cell.sites` so that the trace pins the *names*, not merely the registry's agreement with
-# itself; the registry is then checked against the same literals.
-SITES = {
-    "lengthscale": (
-        "kernel_var",
-        "kernel_noise",
-        "kernel_tausq",
-        "_kernel_inv_length_sq",
-        "kernel_inv_length_sq",
-    ),
-    "amplitude": ("kernel_noise", "kernel_tausq", "_a_sq", "a_sq", "kernel_ell"),
-}
-
-# Scalar hyperparameters versus the (P,) per-coordinate ones -- the distinction the whole sparse
-# parameterization rests on, and the one a mis-shaped prior would silently break.
-SHAPES = {
-    "kernel_var": (),
-    "kernel_noise": (),
-    "kernel_tausq": (),
-    "_kernel_inv_length_sq": (P,),
-    "kernel_inv_length_sq": (P,),
-    "_a_sq": (P,),
-    "a_sq": (P,),
-    "kernel_ell": (P,),
-}
-
 
 def _data() -> tuple[jnp.ndarray, jnp.ndarray]:
-    """N points uniform on [0,1]^P with standard-normal responses: the shape a fit sees."""
+    """N points uniform on [0,1]^P with standardized responses: the shape a fit sees."""
     rng = np.random.default_rng(0)
-    return jnp.asarray(rng.uniform(0.0, 1.0, (N, P))), jnp.asarray(rng.normal(size=N))
-
-
-@pytest.mark.parametrize("fixed_noise", [None, 1.0e-6], ids=["learned_noise", "fixed_noise"])
-def test_product_lengthscale_log_joint_matches_reference(fixed_noise):
-    # Both noise branches, because `fixed_noise` replaces the reference's `learn_noise` /
-    # `observation_variance` pair and a wrong branch would change the site set and the kernel.
-    X, Y = _data()
-    params = {
-        "kernel_var": 1.3,
-        "kernel_noise": 0.05,
-        "kernel_tausq": 0.2,
-        "_kernel_inv_length_sq": jnp.asarray(np.random.default_rng(1).uniform(0.1, 5.0, P)),
-    }
-    if fixed_noise is not None:
-        del params["kernel_noise"]
-    reference = saasgp.SAASGP(alpha=0.1, observation_variance=fixed_noise or 0.0).model
-    ours = partial(model_product_lengthscale, alpha=0.1, fixed_noise=fixed_noise)
-
-    # `log_density` substitutes the sampled sites and recomputes the deterministic ones, so this
-    # is the full log joint -- priors plus likelihood -- at one point of the parameter space.
-    ours_log_joint, _ = log_density(ours, (X, Y), {}, params)
-    reference_log_joint, _ = log_density(reference, (X, Y), {}, params)
-
-    assert abs(float(ours_log_joint) - float(reference_log_joint)) < 1.0e-10
-
-
-@pytest.mark.parametrize("key", CELL_KEYS, ids=CELL_IDS)
-@pytest.mark.parametrize("fixed_noise", [None, 1.0e-6], ids=["learned_noise", "fixed_noise"])
-def test_trace_sites_per_cell(key, fixed_noise):
-    cell = CELLS[key]
-    X, Y = _data()
-    kwargs = {"alpha": cell.alpha_default, "fixed_noise": fixed_noise}
-    if cell.prior == "amplitude":
-        kwargs["ell_prior"] = ELL_PRIOR
-    model = numpyro.handlers.seed(partial(cell.model, **kwargs), rng_seed=0)
-
-    trace = numpyro.handlers.trace(model).get_trace(X, Y)
-
-    assert cell.sites == SITES[cell.prior]
-    # `kernel_noise` is the only site the noise branch adds or removes; everything else is the
-    # cell's own parameterization and must be there whatever the noise is.
-    expected = [site for site in cell.sites if fixed_noise is None or site != "kernel_noise"]
-    latent = [
-        name
-        for name, site in trace.items()
-        if site["type"] in {"sample", "deterministic"} and name != "Y"
-    ]
-    assert latent == expected
-    assert [trace[name]["value"].shape for name in latent] == [SHAPES[name] for name in latent]
-    assert trace["Y"]["is_observed"]  # the one site excluded above is the likelihood, not a latent
+    y = rng.normal(size=N)
+    return jnp.asarray(rng.uniform(0.0, 1.0, (N, P))), jnp.asarray((y - y.mean()) / y.std())
 
 
 # --- prediction ---
-
-# The reference's `posterior` thins its own draws and hands `util.chunk_vmap` a fixed
-# `chunk_size=8`; `util.get_chunks` raises a latent `NameError` (it calls `np.arange` without
-# importing numpy) whenever the retained count is not a multiple of 8. 32 // 4 = 8 keeps every
-# reference call on the working path -- never give the vendored class fewer retained draws.
-REFERENCE_RETAINED = 8
-REFERENCE_THINNING = 4
 
 
 def _hand_made_samples(prior: str, S: int, D: int, seed: int) -> dict[str, jnp.ndarray]:
     """Positive kernel parameters with the shapes a fit's `samples` has: leading dimension S.
 
     Hand-made rather than sampled, because these tests are about prediction's plumbing -- shapes,
-    the `active` restriction, chunking -- and running NUTS to obtain draws would make them slow
-    and make a failure ambiguous between the sampler and the code under test.
+    the `active` restriction, the two readout identities -- and running NUTS to obtain draws would
+    make them slow and make a failure ambiguous between the sampler and the code under test. The
+    dict carries what `load_mcmc_samples` reads, so it is a draw the GPyTorch model can be built
+    from and not merely a bag of kernel arguments.
     """
     rng = np.random.default_rng(seed)
     if prior == "amplitude":
@@ -164,71 +69,24 @@ def _hand_made_samples(prior: str, S: int, D: int, seed: int) -> dict[str, jnp.n
         }
     else:
         samples = {
-            "kernel_var": np.full(S, 1.3),
+            "outputscale": np.full(S, 1.3),
             "kernel_inv_length_sq": rng.uniform(0.1, 5.0, (S, D)),
         }
-    samples["kernel_noise"] = rng.uniform(0.01, 0.1, S)
+        samples["lengthscale"] = samples["kernel_inv_length_sq"] ** -0.5
+    samples["mean"] = rng.normal(size=S)
+    samples["noise"] = rng.uniform(0.01, 0.1, S)
     return {site: jnp.asarray(draws) for site, draws in samples.items()}
 
 
 def _fitted(cell, X, y, samples, *, fixed_noise=None, active=None) -> FittedGP:
     """A `FittedGP` with the fit-status fields a prediction test does not care about filled in."""
-    return FittedGP(
-        cell=cell,
-        X_train=X,
-        Y_train=y,
-        samples=samples,
-        fixed_noise=fixed_noise,
-        active=active,
-        status="ok",
-        status_reason="",
-        attempts=(),
-    )
-
-
-@pytest.mark.parametrize("fixed_noise", [None, 1.0e-6], ids=["learned_noise", "fixed_noise"])
-def test_posterior_matches_reference(fixed_noise):
-    # ("product", "lengthscale") *is* SAASBO, so its prediction must be the vendored class's to
-    # the last bit -- not merely close. Both noise branches, because ours uses the configured
-    # variance in the predictive diagonal where the reference hard-codes 1e-6; 1e-6 is the value
-    # at which the two agree, and the only fixed variance this study uses.
-    rng = np.random.default_rng(2)
-    X = jnp.asarray(rng.uniform(0.0, 1.0, (20, 4)))
-    y = jnp.asarray(rng.normal(size=20))
-    X_test = jnp.asarray(rng.uniform(0.0, 1.0, (7, 4)))
-
-    reference = saasgp.SAASGP(
-        num_warmup=16,
-        num_samples=REFERENCE_RETAINED * REFERENCE_THINNING,
-        thinning=REFERENCE_THINNING,
-        verbose=False,
-        kernel="matern",
-        observation_variance=0.0 if fixed_noise is None else fixed_noise,
-    ).fit(X, y)
-    sites = ("kernel_var", "kernel_tausq", "kernel_inv_length_sq")
-    if fixed_noise is None:
-        sites = sites + ("kernel_noise",)
-    fitted = _fitted(
-        ("product", "lengthscale"),
-        X,
-        y,
-        {site: reference.flat_samples[site][::REFERENCE_THINNING] for site in sites},
-        fixed_noise=fixed_noise,
-    )
-
-    mean, var = fitted.posterior(X_test)
-    reference_mean, reference_var = reference.posterior(X_test)
-
-    assert mean.shape == (REFERENCE_RETAINED, 7)
-    assert np.array_equal(np.asarray(mean), np.asarray(reference_mean))
-    assert np.array_equal(np.asarray(var), np.asarray(reference_var))
+    return FittedGP.from_draws(cell, X, y, samples, fixed_noise=fixed_noise, active=active)
 
 
 @pytest.mark.parametrize("key", CELL_KEYS, ids=CELL_IDS)
 def test_posterior_shapes_all_cells(key):
-    # The other three cells have no reference to compare against, so what is pinned here is that
-    # one code path serves all four: every cell's parameters reach its kernel and its (in three
-    # cases non-constant) diagonal, and the predictive variance stays a variance.
+    # One code path serves all four cells: every cell's draws reach its torch kernel and its
+    # likelihood, and the predictive variance stays a variance.
     S, n_test = 3, 5
     X, y = _data()
     X_test = jnp.asarray(np.random.default_rng(3).uniform(0.0, 1.0, (n_test, P)))
@@ -242,10 +100,11 @@ def test_posterior_shapes_all_cells(key):
 
 
 def test_oracle_active_restricts_columns():
-    # Task 7's oracle fits on X[:, S] alone but keeps the full-D X_train, because the BO loop and
-    # `saasbo.optimize_ei` read it. Restricting inside prediction must therefore be exactly the
-    # same computation as having been handed the narrow matrix in the first place. The `cell`
-    # string also pins the MAP references onto ("product", "lengthscale")'s kernel.
+    # Task 7's oracle fits on X[:, S] alone but keeps the full-D X_train, because the BO loop reads
+    # it. Restricting through the model's own `FilterFeatures` transform must therefore be the same
+    # computation as having been handed the narrow matrix in the first place -- the gather changes
+    # the tensor's layout and so the last bits, and nothing else. The `cell` string also pins the
+    # MAP references onto ("product", "lengthscale")'s kernel.
     active = np.asarray([0, 2])
     S = 2
     X, y = _data()
@@ -257,77 +116,26 @@ def test_oracle_active_restricts_columns():
         X_test[:, active]
     )
 
-    assert np.array_equal(np.asarray(restricted[0]), np.asarray(narrow[0]))
-    assert np.array_equal(np.asarray(restricted[1]), np.asarray(narrow[1]))
-
-
-def test_posterior_chunked_equals_unchunked(monkeypatch):
-    # Row-chunking (ruling R19) is a memory measure, not a modelling one: each test point's mean
-    # and variance depend on no other test point, so blocking the test axis may move the last ulp
-    # and nothing else. Forced on a small problem, since the size that triggers it in production
-    # (5000 x 200 x 100) is far too large for a test.
-    S, D, n, n_test = 2, 6, 30, 600
-    rng = np.random.default_rng(7)
-    X = jnp.asarray(rng.uniform(0.0, 1.0, (n, D)))
-    y = jnp.asarray(rng.normal(size=n))
-    X_test = jnp.asarray(rng.uniform(0.0, 1.0, (n_test, D)))
-    fitted = _fitted(("product", "amplitude"), X, y, _hand_made_samples("amplitude", S, D, seed=8))
-
-    unchunked = fitted.posterior(X_test)  # n_test * n * D = 1.1e5, far below the threshold
-    monkeypatch.setattr(sagp.gp, "_CHUNK_THRESHOLD", 0)
-    chunked = fitted.posterior(X_test)
-
-    assert chunked[0].shape == (S, n_test)  # 600 rows is 2 full blocks of 256 and a partial one
-    assert np.max(np.abs(np.asarray(chunked[0]) - np.asarray(unchunked[0]))) < 1.0e-12
-    assert np.max(np.abs(np.asarray(chunked[1]) - np.asarray(unchunked[1]))) < 1.0e-12
-
-
-@pytest.mark.parametrize(
-    ("retained", "expected"), [(16, 8), (8, 8), (1, 1), (12, 6), (22, 2), (9, 3)]
-)
-def test_chunk_size_is_the_largest_divisor_below_the_references_eight(retained, expected):
-    # Ruling R44. `util.get_chunks` builds its ragged final chunk with an `np.arange` in a module
-    # that never imports numpy, so anything that leaves a remainder raises `NameError` deep inside
-    # a prediction. The rule keeps the reference's own 8 wherever it divides -- 16 and 8 are the
-    # study's retained counts and 1 is a MAP reference's -- and takes a divisor everywhere else.
-    assert sagp.gp._chunk_size(retained) == expected
-    assert retained % sagp.gp._chunk_size(retained) == 0
-
-
-def test_posterior_works_at_a_retained_count_that_eight_does_not_divide():
-    # The case R44 is about, end to end: `--nuts 512,252,21` retains 12 draws, and under the old
-    # `min(8, S)` the first prediction of the run died in `util.get_chunks` rather than in
-    # anything a reader could attribute to a budget.
-    S, n_test = 12, 5
-    X, y = _data()
-    X_test = jnp.asarray(np.random.default_rng(11).uniform(0.0, 1.0, (n_test, P)))
-    fitted = _fitted(
-        ("additive", "amplitude"), X, y, _hand_made_samples("amplitude", S, P, seed=12)
-    )
-
-    mean, var = fitted.posterior(X_test)
-
-    assert mean.shape == var.shape == (S, n_test)
-    assert np.all(np.isfinite(np.asarray(mean))) and np.all(np.asarray(var) > 0.0)
+    for ours, theirs in zip(restricted, narrow):
+        assert np.max(np.abs(np.asarray(ours) - np.asarray(theirs))) < 1.0e-12
 
 
 def test_unknown_string_cell_is_rejected():
     # "dsp_map" and "oracle_S" are the only non-CellKey cells; anything else would silently be
     # served the product/lengthscale kernel and reported under its own name.
     with pytest.raises(ValueError, match="unknown cell"):
-        _fitted("map", *_data(), _hand_made_samples("lengthscale", 1, P, seed=0)).posterior(
-            np.zeros((1, P))
-        )
+        _fitted("map", *_data(), _hand_made_samples("lengthscale", 1, P, seed=0))
 
 
 @pytest.mark.parametrize("prior", ["amplitude", "lengthscale"], ids=["amplitude", "lengthscale"])
-def test_additive_posterior_mean_is_sum_of_component_means(prior):
-    # The additive cells' posterior mean is the sum of its components, because the kernel is the
-    # sum of one-coordinate kernels: that identity is what makes `component_means` the components
-    # of the surrogate the loop optimizes, and what makes the exact Sobol index of decision 6
-    # available at all. Evaluated with every coordinate at the same grid value at once, so the
-    # sum on the left is a whole posterior mean rather than one coordinate's slice; there is no
-    # constant term to account for, every component being centered under the reference measure.
+def test_additive_posterior_mean_equals_sum_of_component_means(prior):
+    # The additive cells' posterior mean is the constant mean plus the sum of its components,
+    # because the kernel is the sum of one-coordinate kernels: that identity is what makes
+    # `component_means` the components of the surrogate the loop optimizes, and what makes the
+    # exact Sobol index of decision 6 available at all. Evaluated with every coordinate at the same
+    # grid value at once, so the sum on the left is a whole posterior mean rather than one
+    # coordinate's slice; every component is centered, so the intercept is the whole of the
+    # constant term.
     S, G = 3, 9
     X, y = _data()
     grid = np.linspace(0.05, 0.95, G)
@@ -335,15 +143,16 @@ def test_additive_posterior_mean_is_sum_of_component_means(prior):
 
     components = sagp.readouts.component_means(fitted, grid)
     mean, _ = fitted.posterior(np.tile(grid[:, None], (1, P)))
+    rebuilt = components.sum(axis=1) + fitted.means()[:, None]
 
     assert components.shape == (S, P, G)
-    assert np.max(np.abs(np.asarray(components.sum(axis=1)) - np.asarray(mean))) < 1.0e-12
+    assert np.max(np.abs(np.asarray(rebuilt) - np.asarray(mean))) < 1.0e-10
 
 
 def test_alphas_are_the_weights_the_mean_contracts():
     # Task 5's readouts contract the kernel with `alphas()` instead of calling `posterior`, so it
-    # has to be exactly the vector `_predict` uses -- otherwise a component mean or a Sobol index
-    # would describe a slightly different surrogate than the loop optimizes.
+    # has to be exactly the vector the posterior mean uses -- otherwise a component mean or a Sobol
+    # index would describe a slightly different surrogate than the loop optimizes.
     S = 3
     X, y = _data()
     X_test = jnp.asarray(np.random.default_rng(9).uniform(0.0, 1.0, (5, P)))
@@ -351,21 +160,22 @@ def test_alphas_are_the_weights_the_mean_contracts():
     fitted = _fitted(key, X, y, _hand_made_samples(key[1], S, P, seed=10))
 
     mean, _ = fitted.posterior(X_test)
-    kernel, _ = fitted._kernel()
-    alphas = fitted.alphas()
+    kernel = KERNELS[key][0]
+    alphas, means = fitted.alphas(), fitted.means()
     rebuilt = jnp.stack(
-        [kernel(X_test, X, fitted.params(s), 0.0, False) @ alphas[s] for s in range(S)]
+        [means[s] + kernel(X_test, X, fitted.params(s)) @ alphas[s] for s in range(S)]
     )
 
-    assert np.allclose(np.asarray(rebuilt), np.asarray(mean), rtol=0.0, atol=1.0e-12)
+    assert np.allclose(np.asarray(rebuilt), np.asarray(mean), rtol=0.0, atol=1.0e-10)
 
 
-# --- the same four cells as BoTorch PyroModels ---
+# --- the four cells as BoTorch PyroModels ---
 
 # Every site each cell's `PyroModel.sample` declares, in declaration order, ending at the
-# likelihood. Literals again rather than `Cell.sites`, which lists the old path's names: these are
-# the npz schema and the diagnostics' vocabulary on the BoTorch path, and BoTorch's own order for
-# the shared prefix is what makes ("product", "lengthscale") its `SaasPyroModel` bit for bit.
+# likelihood. Literals rather than `Cell.sites`, so the trace pins the *names*: these are the npz
+# schema and the diagnostics' vocabulary, and BoTorch's own order for the shared prefix is what
+# makes ("product", "lengthscale") its `SaasPyroModel` bit for bit. The registry is checked against
+# the same literals.
 PYRO_SITES = {
     "lengthscale": (
         "outputscale",
@@ -386,12 +196,9 @@ NOISE_FLOOR = 1.0e-4
 
 
 def _torch_data() -> tuple[torch.Tensor, torch.Tensor]:
-    """`_data()`'s X with its y standardized (ddof 0), in the (n, D)/(n, 1) shapes BoTorch takes."""
-    rng = np.random.default_rng(0)
-    X = rng.uniform(0.0, 1.0, (N, P))
-    y = rng.normal(size=N)
-    z = (y - y.mean()) / y.std()
-    return torch.as_tensor(X), torch.as_tensor(z)[:, None]
+    """`_data()`'s X and y in the (n, D)/(n, 1) shapes BoTorch takes."""
+    X, z = _data()
+    return torch.as_tensor(np.array(X)), torch.as_tensor(np.array(z))[:, None]
 
 
 def _constrained_params(prior: str, seed: int) -> dict[str, jnp.ndarray]:
@@ -415,7 +222,7 @@ def _kernel_params(prior: str, params: dict[str, jnp.ndarray]) -> dict[str, jnp.
     """The deterministic kernel arguments `params` implies, in the names `KERNELS` takes."""
     if prior == "lengthscale":
         return {
-            "kernel_var": params["outputscale"],
+            "outputscale": params["outputscale"],
             "kernel_inv_length_sq": params["kernel_tausq"] * params["_kernel_inv_length_sq"],
         }
     return {
@@ -428,9 +235,9 @@ def _kernel_params(prior: str, params: dict[str, jnp.ndarray]) -> dict[str, jnp.
 def test_product_lengthscale_pyro_model_is_botorchs_saas_model(fixed_noise):
     # ("product", "lengthscale") *is* SAASBO, and on this path that means BoTorch's
     # `SaasPyroModel` with `sample()` inherited untouched -- so the two log densities at the same
-    # parameters must agree bit for bit, which is what lets a later test pin our NUTS run against
-    # `fit_fully_bayesian_model_nuts`. Both noise branches, because `train_Yvar` removes the
-    # `noise` site and changes the likelihood.
+    # parameters must agree bit for bit, which is what lets `test_sagp_inference.py` pin our NUTS
+    # run against `fit_fully_bayesian_model_nuts`. Both noise branches, because `train_Yvar`
+    # removes the `noise` site and changes the likelihood.
     Xt, zt = _torch_data()
     train_Yvar = None if fixed_noise is None else torch.full_like(zt, fixed_noise)
     ours = sagp.gp.CellGP(Xt, zt, train_Yvar, cell=CELLS[("product", "lengthscale")])
@@ -470,6 +277,8 @@ def test_pyro_model_trace_sites_per_cell(key, fixed_noise):
         site for site in PYRO_SITES[cell.prior] if fixed_noise is None or site != "noise"
     )
     assert tuple(trace) == expected
+    # The registry says the same thing: `Cell.sites` is that trace minus the likelihood.
+    assert cell.sites == tuple(site for site in PYRO_SITES[cell.prior] if site != "Y")
     # The priors themselves, not merely their sites: alpha is the calibration that makes the four
     # cells comparable, and `ell_prior` the amplitude cells' only lengthscale prior.
     assert float(trace["kernel_tausq"]["fn"].scale) == cell.alpha_default
@@ -485,9 +294,11 @@ def test_pyro_model_trace_sites_per_cell(key, fixed_noise):
 )
 def test_pyro_model_observation_term_is_the_cells_kernel(key):
     # The three cells whose `sample` is written here rather than inherited must put exactly the
-    # old path's kernel into the likelihood -- no jitter of their own, the noise floor BoTorch's
-    # `sample_noise` adds and nothing else -- or the BoTorch path would be fitting a different
-    # model than the JAX path predicts with.
+    # registry's kernel into the likelihood -- no jitter of their own, the noise floor BoTorch's
+    # `sample_noise` adds and nothing else -- or the model NUTS samples would not be the model the
+    # readouts describe. This is also what pins each registry entry to its own kernel: site names
+    # encode only the sparsity prior, so ("additive", "amplitude") holding the *product* kernel
+    # would trace and sample exactly as it should while silently comparing the wrong two cells.
     cell = CELLS[key]
     Xt, zt = _torch_data()
     X, z = np.asarray(Xt), np.asarray(zt)[:, 0]
@@ -501,7 +312,8 @@ def test_pyro_model_observation_term_is_the_cells_kernel(key):
     ).get_trace()
 
     site = trace["Y"]
-    K = np.asarray(KERNELS[key][0](X, X, _kernel_params(cell.prior, params), 0.0, False))
+    assert cell.kernel is KERNELS[key][0] and cell.kernel_diag is KERNELS[key][1]
+    K = np.asarray(KERNELS[key][0](X, X, _kernel_params(cell.prior, params)))
     noise = NOISE_FLOOR + float(params["noise"])
     expected = scipy.stats.multivariate_normal(
         mean=np.full(N, float(params["mean"])), cov=K + noise * np.eye(N)
@@ -561,7 +373,7 @@ def test_load_mcmc_samples_round_trip(key):
     for s in range(S):
         if cell.prior == "lengthscale":
             params = {
-                "kernel_var": np.asarray(draws["outputscale"][s]),
+                "outputscale": np.asarray(draws["outputscale"][s]),
                 "kernel_inv_length_sq": np.asarray(draws["lengthscale"][s]) ** -2.0,
             }
         else:
@@ -570,9 +382,9 @@ def test_load_mcmc_samples_round_trip(key):
                 "kernel_ell": np.asarray(draws["kernel_ell"][s]),
             }
         mean_s, noise_s = float(draws["mean"][s]), float(draws["noise"][s])
-        K = np.asarray(kernel(X, X, params, 0.0, False)) + noise_s * np.eye(N)
-        k_star = np.asarray(kernel(X_test, X, params, 0.0, False))  # (n_test, n)
-        k_ss = np.diag(np.asarray(kernel(X_test, X_test, params, 0.0, False)))
+        K = np.asarray(kernel(X, X, params)) + noise_s * np.eye(N)
+        k_star = np.asarray(kernel(X_test, X, params))  # (n_test, n)
+        k_ss = np.diag(np.asarray(kernel(X_test, X_test, params)))
         solved = np.linalg.solve(K, k_star.T)  # (n, n_test)
         mean = mean_s + k_star @ np.linalg.solve(K, z - mean_s)
         var = k_ss + noise_s - np.einsum("ij,ji->i", k_star, solved)

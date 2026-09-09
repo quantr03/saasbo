@@ -40,14 +40,14 @@ def _centered_parts(fitted: FittedGP, s: int) -> tuple[Array, Array, bool]:
     """Sample `s`'s per-coordinate lengthscales, component weights and normalization flag.
 
     The amplitude cell scales the normalized kbar by a_sq_i, so a_sq_i *is* that component's
-    variance under nu; the lengthscale cell scales the *un*normalized k~_i, so shrinking rho_i
-    shrinks the component through v(ell_i).
+    variance under nu; the lengthscale cell scales the *un*normalized k~_i by its outputscale, so
+    shrinking rho_i shrinks the component through v(ell_i).
     """
     params = fitted.params(s)
     if fitted.param_sites()[0] == "a_sq":
         return params["kernel_ell"], params["a_sq"], True
     ell = params["kernel_inv_length_sq"] ** -0.5
-    return ell, params["kernel_var"] * jnp.ones_like(ell), False
+    return ell, params["outputscale"] * jnp.ones_like(ell), False
 
 
 @partial(jit, static_argnums=(5,))

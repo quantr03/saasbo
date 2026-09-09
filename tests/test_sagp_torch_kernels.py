@@ -68,7 +68,7 @@ def _draws(ell: float | None = None) -> dict[str, np.ndarray]:
         "kernel_inv_length_sq": rho,
         "ell_rho": rho**-0.5,
         "a_sq": np.exp(rng.uniform(np.log(1.0e-3), np.log(3.0), (S, D))),
-        "kernel_var": rng.uniform(0.3, 3.0, S),
+        "outputscale": rng.uniform(0.3, 3.0, S),
     }
 
 
@@ -77,7 +77,7 @@ def _jax_params(draws: dict[str, np.ndarray], s: int) -> dict:
     return {
         "a_sq": jnp.asarray(draws["a_sq"][s]),
         "kernel_ell": jnp.asarray(draws["kernel_ell"][s]),
-        "kernel_var": float(draws["kernel_var"][s]),
+        "outputscale": float(draws["outputscale"][s]),
         "kernel_inv_length_sq": jnp.asarray(draws["kernel_inv_length_sq"][s]),
     }
 
@@ -85,16 +85,16 @@ def _jax_params(draws: dict[str, np.ndarray], s: int) -> dict:
 def _torch_kernel(key: tuple[str, str], draws: dict[str, np.ndarray]) -> gpytorch.kernels.Kernel:
     """Cell `key` as one torch kernel carrying all S draws in a leading batch dimension.
 
-    The lengthscale cell's `kernel_var` is an outputscale outside the kernel, which is the whole
-    reason `CenteredAdditiveLengthscaleKernel` has no amplitude of its own; the amplitude cells
-    carry theirs as `a_sq`.
+    The lengthscale cell's `outputscale` sits outside the kernel, which is the whole reason
+    `CenteredAdditiveLengthscaleKernel` has no amplitude of its own; the amplitude cells carry
+    theirs as `a_sq`.
     """
     batch_shape = torch.Size([S])
     if key == ("additive", "lengthscale"):
         base = CenteredAdditiveLengthscaleKernel(ard_num_dims=D, batch_shape=batch_shape)
         base.lengthscale = torch.as_tensor(draws["ell_rho"])[:, None, :]
         kernel = gpytorch.kernels.ScaleKernel(base, batch_shape=batch_shape)
-        kernel.outputscale = torch.as_tensor(draws["kernel_var"])
+        kernel.outputscale = torch.as_tensor(draws["outputscale"])
         return kernel
     amplitude_cls = (
         CenteredAdditiveAmplitudeKernel if key[0] == "additive" else CenteredProductAmplitudeKernel
@@ -164,9 +164,7 @@ def test_torch_cell_matches_the_jax_cell_draw_by_draw(key, ell):
 
     assert K.shape == torch.Size([S, N, M])
     for s in range(S):
-        expected = gp.KERNELS[key][0](
-            jnp.asarray(X), jnp.asarray(Z), _jax_params(draws, s), 0.0, False
-        )
+        expected = gp.KERNELS[key][0](jnp.asarray(X), jnp.asarray(Z), _jax_params(draws, s))
         np.testing.assert_allclose(K[s].numpy(), np.asarray(expected), atol=1.0e-10, rtol=0.0)
 
 
