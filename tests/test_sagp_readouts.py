@@ -19,6 +19,7 @@ a failure ambiguous between the sampler and the code under test.
 enable_x64 is in force for every array below.
 """
 import sagp.gp as gp
+import sagp.readouts as readouts
 from sagp.gp import ACTIVE_EPS, GL_NODES, GL_WEIGHTS, FittedGP, NUTSConfig
 
 import warnings
@@ -96,7 +97,7 @@ def test_exact_product_amplitude_matches_brute_force():
         ("product", "amplitude"), rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples
     )
 
-    sobol_hat, total_var = gp._sobol_exact_product_amplitude(fitted)
+    sobol_hat, total_var = readouts._sobol_exact_product_amplitude(fitted)
     brute_sobol, brute_var = _brute_force_sobol(fitted, D)
 
     assert abs(total_var - brute_var) < 1.0e-10
@@ -125,7 +126,7 @@ def test_exact_additive_matches_brute_force(prior):
         ("additive", prior), rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples
     )
 
-    sobol_hat, total_var = gp._sobol_exact_additive(fitted)
+    sobol_hat, total_var = readouts._sobol_exact_additive(fitted)
     brute_sobol, brute_var = _brute_force_sobol(fitted, D)
 
     assert abs(total_var - brute_var) < 1.0e-10
@@ -150,8 +151,8 @@ def test_qmc_matches_exact_on_product_amplitude():
     }
     fitted = _fitted(("product", "amplitude"), X, y, samples)
 
-    exact, exact_var = gp._sobol_exact_product_amplitude(fitted)
-    estimated, estimated_var = gp._sobol_qmc(fitted, 2048, 0)
+    exact, exact_var = readouts._sobol_exact_product_amplitude(fitted)
+    estimated, estimated_var = readouts._sobol_qmc(fitted, 2048, 0)
 
     assert np.max(np.abs(estimated - exact)) <= 0.02
     assert abs(estimated_var - exact_var) / exact_var <= 0.05
@@ -174,7 +175,7 @@ def test_qmc_skips_coordinates_outside_active():
         "oracle_S", rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples, active=active
     )
 
-    sobol_hat, total_var = gp._sobol_qmc(fitted, 256, 0)
+    sobol_hat, total_var = readouts._sobol_qmc(fitted, 256, 0)
 
     assert np.array_equal(np.delete(sobol_hat, active), np.zeros(D - len(active)))
     assert np.all(sobol_hat[active] > 0.0)
@@ -203,7 +204,7 @@ def test_shares_and_active_rules():
         fixed_noise=0.01,
     )
 
-    cheap = gp.readouts(fitted, compute_sobol=False)
+    cheap = readouts.readouts(fitted, compute_sobol=False)
 
     assert np.array_equal(cheap["native"], a_sq)
     assert np.max(np.abs(cheap["share_hat"] - a_sq / 0.99)) < 1.0e-15
@@ -215,7 +216,7 @@ def test_shares_and_active_rules():
     assert np.all(np.isnan(cheap["sobol_hat"])) and np.isnan(cheap["total_var_hat"])
     assert not cheap["active_neutral"].any()
 
-    full = gp.readouts(fitted)
+    full = readouts.readouts(fitted)
 
     assert abs(full["sobol_hat"].sum() - 1.0) < 1.0e-12
     assert np.array_equal(full["active_neutral"], full["sobol_hat"] > ACTIVE_EPS)
@@ -241,7 +242,7 @@ def test_degenerate_noise_gives_nan_shares():
         ("additive", "amplitude"), rng.uniform(0.0, 1.0, (n, D)), rng.normal(size=n), samples
     )
 
-    out = gp.readouts(fitted, compute_sobol=False)
+    out = readouts.readouts(fitted, compute_sobol=False)
 
     assert np.all(np.isnan(out["share_hat"][3])) and not np.any(np.isnan(out["share_hat"][:3]))
     assert np.array_equal(out["p_active"], [1.0, 0.0, 0.0])
@@ -265,7 +266,7 @@ def test_readouts_lengthscale_cells_have_no_share():
         fixed_noise=0.01,
     )
 
-    out = gp.readouts(fitted, compute_sobol=False)
+    out = readouts.readouts(fitted, compute_sobol=False)
 
     assert out["share_hat"] is None
     assert np.array_equal(out["p_active"], [1.0, 0.0, 0.0])
@@ -292,7 +293,7 @@ def test_readouts_widen_the_oracle_to_full_D():
         active=active,
     )
 
-    out = gp.readouts(fitted, compute_sobol=False)
+    out = readouts.readouts(fitted, compute_sobol=False)
 
     assert out["native"].shape == (S, D)
     assert np.array_equal(out["native"][0], [0.0, 3.0, 0.0, 0.0, 0.4, 0.0])
@@ -314,7 +315,7 @@ def _readout_at_D10():
         samples,
         fixed_noise=0.01,
     )
-    return gp.readouts(fitted), labels
+    return readouts.readouts(fitted), labels
 
 
 def test_manipulation_checks_keys():
@@ -325,7 +326,7 @@ def test_manipulation_checks_keys():
     # what tells "the native readout tracks g" apart from "every readout of this fit does".
     readout, labels = _readout_at_D10()
 
-    checks = gp.manipulation_checks(readout, labels)
+    checks = readouts.manipulation_checks(readout, labels)
 
     assert set(checks) == {
         "spearman_native_vs_s",
@@ -361,7 +362,7 @@ def test_manipulation_checks_state_the_native_readout_without_shares():
     readout, labels = _readout_at_D10()
     readout = readout | {"share_hat": None}
 
-    checks = gp.manipulation_checks(readout, labels)
+    checks = readouts.manipulation_checks(readout, labels)
 
     assert np.array_equal(
         checks["amplitude_vs_realized"][:, 0], readout["native_median"][list(labels.S)]
@@ -391,7 +392,7 @@ def _assert_recovers_shares(D: int, n: int, nuts: NUTSConfig) -> None:
     objective, X, z = _identification_data("aligned3", D, n, 0)
 
     fitted = gp.fit(X, z, jax.random.PRNGKey(0), ("additive", "amplitude"), nuts=nuts)
-    out = gp.readouts(fitted)
+    out = readouts.readouts(fitted)
 
     assert np.max(np.abs(out["sobol_hat"] - objective.labels.s)) <= 0.03
 
@@ -482,7 +483,7 @@ def test_gate1_replication():
             ("additive", "amplitude"),
             fixed_noise=_GATE1_NOISE_SD**2,
         )
-        share_hat = gp.readouts(fitted, compute_sobol=False)["share_hat"]
+        share_hat = readouts.readouts(fitted, compute_sobol=False)["share_hat"]
         exceedance[name] = float(np.mean(share_hat > 0.09))
         median_share[name] = float(np.median(share_hat))
 

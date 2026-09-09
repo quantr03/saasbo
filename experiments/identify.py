@@ -15,7 +15,8 @@ import jax
 import numpy as np
 from scipy.stats import qmc
 
-from sagp.gp import CELLS, CellKey, fit, manipulation_checks, readouts, standardize
+from sagp.gp import CELLS, CellKey, fit, standardize
+from sagp.readouts import manipulation_checks, readouts
 from synthobj.families import noise_rng
 
 

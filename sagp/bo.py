@@ -69,9 +69,9 @@ from sagp.gp import (
     FittedGP,
     NUTSConfig,
     fit,
-    readouts,
     standardize,
 )
+from sagp.readouts import readouts
 from sagp.references import fit_map
 from synthobj.families import make_family, noise_rng
 from synthobj.objective import SyntheticObjective

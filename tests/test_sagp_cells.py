@@ -17,6 +17,7 @@ memory-driven row chunking -- must not change what any of the four cells predict
 enable_x64 is in force for every array below.
 """
 import sagp.gp
+import sagp.readouts
 from sagp.gp import (
     CELLS,
     ELL_PRIOR,
@@ -319,7 +320,7 @@ def test_additive_posterior_mean_is_sum_of_component_means(prior):
     grid = np.linspace(0.05, 0.95, G)
     fitted = _fitted((("additive", prior)), X, y, _hand_made_samples(prior, S, P, seed=14))
 
-    components = sagp.gp.component_means(fitted, grid)
+    components = sagp.readouts.component_means(fitted, grid)
     mean, _ = fitted.posterior(np.tile(grid[:, None], (1, P)))
 
     assert components.shape == (S, P, G)
