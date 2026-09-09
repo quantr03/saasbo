@@ -1,41 +1,30 @@
-"""Tests for `sagp.bo`: the acquisition, the seeded reference optimizer, the design, the loop.
+"""Tests for `sagp.bo`: the acquisition, the seeding, the initial design, the loop.
 
-`log_h` and `log1mexp` are the pieces of LogEI that exist only for numerical reasons, so they are
-checked against the naive formulas where those are accurate and against finiteness where they are
-not, and `log_ei` is checked to be the log of the reference's own EI wherever the reference has not
-underflowed. Then `optimize_ei`, whose five-line departure from `saasbo.optimize_ei` must leave it
-a maximizer under both acquisitions. Then the initial design, whose first `n_init` points must be
-the run's own Sobol sequence -- what makes the Sobol reference a continuation of that design
-rather than a new one. Last `run_bo` itself, the loop the study drives through
-`experiments.run_bo`: here it is driven through its adapters alone, with no run directory and no
-inference at all, which is what the split is for.
+Three things are pinned. First, the acquisition the loop maximizes *is* BoTorch's
+`LogExpectedImprovement` -- checked against the analytic sample-average formula written out in
+numpy/scipy, and against the vendored code's own convention on negated targets, which the sign
+flips make the very same number. Second, every random draw of iteration `t` is a function of
+`(seed, t)` alone: the acquisition optimizer takes two seeds, one for its raw Sobol candidates and
+one for torch's global RNG, and a run that repeats them repeats the point. Third, the two
+fallbacks -- a fit that raises twice, and a proposer that raises -- both query the same seeded
+Sobol point and mark the row "excluded". `run_bo` is driven through its adapters alone, with no
+run directory and no inference at all, which is what the split is for.
 """
 from __future__ import annotations
 
-import warnings
 from functools import partial
 
-import jax
-import jax.numpy as jnp
 import numpy as np
 import pytest
-from scipy.special import erfcx
-from scipy.stats import norm, qmc
+import torch
+from botorch.acquisition.analytic import LogExpectedImprovement
+from botorch.utils.sampling import draw_sobol_samples
+from scipy.special import erfcx, logsumexp
+from scipy.stats import norm
 
-import saasbo
-from sagp.bo import (
-    ACQUISITIONS,
-    BOState,
-    initial_design,
-    log1mexp,
-    log_ei,
-    log_ei_sum,
-    log_h,
-    optimize_ei,
-    propose_ei,
-    run_bo,
-)
-from sagp.gp import FittedGP
+from sagp import bo
+from sagp.bo import BOState, initial_design, iteration_rngs, propose_ei, run_bo
+from sagp.gp import FittedGP, standardize
 from sagp.references import propose_sobol
 from synthobj.families import make_family
 
@@ -43,130 +32,154 @@ from synthobj.families import make_family
 def _hand_made_gp() -> FittedGP:
     """A product/lengthscale `FittedGP` built by hand (S = 3, D = 4, n = 12), no inference involved.
 
-    The acquisition only ever sees `posterior`, so a fitted GP assembled from arbitrary but valid
-    draws exercises it exactly as a real fit would, deterministically and in milliseconds.
+    The acquisition only ever sees the fitted model, so a posterior assembled from arbitrary but
+    valid draws exercises it exactly as a real fit would, deterministically and in milliseconds.
     """
     rng = np.random.default_rng(0)
     X = rng.random((12, 4))
     y = rng.standard_normal(12)
+    rho = rng.gamma(2.0, 1.0, size=(3, 4))
     samples = {
-        "kernel_var": jnp.asarray([1.0, 0.7, 1.3]),
-        "kernel_inv_length_sq": jnp.asarray(rng.gamma(2.0, 1.0, size=(3, 4))),
-        "kernel_noise": jnp.asarray([1.0e-3, 5.0e-3, 2.0e-3]),
+        "outputscale": np.array([1.0, 0.7, 1.3]),
+        "mean": np.array([0.0, 0.2, -0.1]),
+        "noise": np.array([1.0e-3, 5.0e-3, 2.0e-3]),
+        "kernel_inv_length_sq": rho,
+        "lengthscale": rho**-0.5,
     }
-    return FittedGP(
-        cell=("product", "lengthscale"),
-        X_train=X,
-        Y_train=y,
-        samples=samples,
-        fixed_noise=None,
-        active=None,
-        status="ok",
-        status_reason="",
-        attempts=(),
-    )
+    return FittedGP.from_draws(("product", "lengthscale"), X, y, samples)
 
 
 # --- the acquisition ---
 
 
-def _log_h_reference(z: float) -> float:
-    """log h(z) for z < 0 in float64 numpy/scipy: the tail reference `log_h` is checked against.
+def _log_h_reference(z: np.ndarray) -> np.ndarray:
+    """log h(z) for z < 0 in float64 numpy/scipy: the tail reference BoTorch is checked against.
 
     h(z) = phi(z) [1 - (-z) Phi(z)/phi(z)] with the Mills ratio written as
     Phi(z)/phi(z) = sqrt(pi/2) erfcx(-z/sqrt 2), so the bracket is a `log1p` of a quantity that
     never needs the two cancelling O(z^2) terms. `scipy.special.erfcx` and `numpy.log1p` are the
-    only arithmetic here, which is what makes this independent of the JAX code under test.
+    only arithmetic here, which is what makes this independent of the code under test.
     """
+    z = np.asarray(z, dtype=float)
     ratio = -z * np.sqrt(np.pi / 2.0) * erfcx(-z / np.sqrt(2.0))
-    return -0.5 * z * z - 0.5 * np.log(2.0 * np.pi) + float(np.log1p(-ratio))
+    return -0.5 * z * z - 0.5 * np.log(2.0 * np.pi) + np.log1p(-ratio)
 
 
-def test_log_h_matches_naive_and_stays_finite():
-    z = np.linspace(-6.0, 6.0, 200)
-    h = norm.pdf(z) + z * norm.cdf(z)
-    got = np.asarray(log_h(jnp.asarray(z)))
-    assert np.all(np.abs(np.exp(got) - h) <= 1e-12 * np.maximum(1.0, h))
+def _log_h(z: np.ndarray) -> np.ndarray:
+    """log h(z), h(z) = phi(z) + z Phi(z), over all z: naive above -1, the erfcx tail below it.
 
-    # Where h itself underflows, only the log form survives: it must stay finite, keep decreasing,
-    # and keep a finite gradient, since that gradient is what the L-BFGS-B restarts follow.
-    tails = [float(log_h(jnp.asarray(z_far))) for z_far in (-10.0, -20.0, -40.0)]
-    grads = [float(jax.grad(log_h)(z_far)) for z_far in (-10.0, -20.0, -40.0)]
-    assert all(np.isfinite(tails)) and all(np.isfinite(grads))
-    assert tails[0] > tails[1] > tails[2]
-    assert norm.pdf(-40.0) + -40.0 * norm.cdf(-40.0) == 0.0  # the naive form has no value here
-
-    # Five decades of tail against an independent scipy reference (ruling R45). "Finite and
-    # decreasing" is not enough on its own: the form this replaced satisfied all of the above and
-    # was still 0.04 out at z = -5e3, NaN by -3e4 and 3x wrong in the gradient at -1e5, because it
-    # subtracted two O(z^2) terms. `erfcx` is the scaled complementary error function both forms
-    # are written in, so this reference shares no line of code with `log_h` but is exact.
-    for z_far in (-10.0, -100.0, -1000.0, -10000.0, -100000.0):
-        value, grad = float(log_h(jnp.asarray(z_far))), float(jax.grad(log_h)(z_far))
-        assert np.isfinite(value) and np.isfinite(grad)
-        assert value == pytest.approx(_log_h_reference(z_far), rel=1e-8)
-        # Central differences at a relative step: the reference has no closed-form derivative
-        # here that is any better conditioned than the value it differentiates.
-        step = 1e-6 * abs(z_far)
-        finite_difference = (
-            _log_h_reference(z_far + step) - _log_h_reference(z_far - step)
-        ) / (2.0 * step)
-        assert grad == pytest.approx(finite_difference, rel=1e-5)
-
-    x = np.linspace(-30.0, -1.0e-3, 500)
-    naive = np.log(1.0 - np.exp(x))
-    # `1 - exp(x)` cancels as x -> 0 (three digits at x = -1e-3), so the naive reference is only
-    # accurate to its own conditioning; the tolerance is the brief's 1e-14 plus exactly that.
-    conditioning = 4.0 * np.finfo(float).eps * np.exp(x) / (-np.expm1(x))
-    assert np.all(np.abs(np.asarray(log1mexp(jnp.asarray(x))) - naive) <= 1e-14 + conditioning)
+    Each branch runs on inputs clamped into its own domain, because `np.where` evaluates both
+    everywhere and the naive branch's log(0) far into the tail would warn.
+    """
+    z = np.asarray(z, dtype=float)
+    upper = np.maximum(z, -1.0)
+    naive = np.log(norm.pdf(upper) + upper * norm.cdf(upper))
+    return np.where(z > -1.0, naive, _log_h_reference(np.minimum(z, -1.0)))
 
 
-def test_log_ei_equals_log_of_reference_ei():
+def test_log_ei_is_botorchs_ensemble_log_expected_improvement():
+    """What the loop maximizes, written out: logmeanexp over draws of log(sigma) + log h(u).
+
+    BoTorch's `LogExpectedImprovement` clamps the *latent* variance at 1e-12 and its
+    `average_over_ensemble_models` decorator reduces the draw dimension by `logmeanexp`, so the
+    whole acquisition is this one line of numpy over `FittedGP.posterior(..., False)`.
+    """
     gp = _hand_made_gp()
-    rng = np.random.default_rng(7)
-    X_test = rng.random((20, 4))
-    y_target = float(np.asarray(gp.Y_train).min())
+    X_test = np.random.default_rng(7).random((9, 4))
+    best_f = float(np.asarray(gp.Y_train).max())
 
-    reference = np.asarray(saasbo.ei(X_test, y_target, gp))
-    ours = np.asarray(log_ei(X_test, y_target, gp))
-    usable = reference > 1e-100
-    assert usable.sum() == 20
-    assert np.max(np.abs(ours[usable] - np.log(reference[usable]))) < 1e-9
+    acq = LogExpectedImprovement(gp.model, best_f=best_f)
+    ours = acq(torch.as_tensor(X_test)[:, None, :]).detach().numpy()
+    assert ours.shape == (9,)
 
-    # 40 standard deviations below the posterior: every per-sample EI underflows to exactly zero,
-    # so the reference stops distinguishing candidates and stops having a gradient. LogEI does not.
-    mu, var = gp.posterior(X_test)
-    far = float(np.asarray(mu).min() - 40.0 * float(np.sqrt(np.asarray(var)).max()))
-    assert np.all(np.asarray(saasbo.ei(X_test, far, gp)) == 0.0)
-    values = np.asarray(log_ei(X_test, far, gp))
-    assert np.all(np.isfinite(values))
-    grad = np.asarray(jax.grad(lambda x: log_ei_sum(x, far, gp))(jnp.asarray(X_test)))
-    assert np.all(np.isfinite(grad)) and np.abs(grad).max() > 0.0
+    mu, var = (np.asarray(moment) for moment in gp.posterior(X_test, observation_noise=False))
+    sigma = np.maximum(np.sqrt(var), 1e-6)  # BoTorch's min_var = 1e-12 on the variance
+    per_draw = np.log(sigma) + _log_h((mu - best_f) / sigma)
+    expected = logsumexp(per_draw, axis=0) - np.log(sigma.shape[0])
+    np.testing.assert_allclose(ours, expected, atol=1e-10, rtol=0)
+
+    # The vendored convention on the negated targets is the same number: EI of (y_target - (-mu))
+    # against y_target = -best_f is EI of (mu - best_f), both sign flips cancelling. This is what
+    # licenses `standardize` to stop negating without the acquisition changing meaning.
+    y_target = -best_f
+    old = logsumexp(np.log(sigma) + _log_h((y_target - (-mu)) / sigma), 0) - np.log(sigma.shape[0])
+    np.testing.assert_array_equal(old, expected)
+
+    # 40 standard deviations above the posterior: every per-draw EI underflows to exactly zero, so
+    # the reference's own EI would stop distinguishing candidates. The log form does not.
+    far = float(mu.max() + 40.0 * sigma.max())
+    far_acq = LogExpectedImprovement(gp.model, best_f=far)
+    ours_far = far_acq(torch.as_tensor(X_test)[:, None, :]).detach().numpy()
+    per_draw_far = np.log(sigma) + _log_h((mu - far) / sigma)
+    expected_far = logsumexp(per_draw_far, axis=0) - np.log(sigma.shape[0])
+    assert np.all(np.isfinite(ours_far))
+    np.testing.assert_allclose(ours_far, expected_far, rtol=1e-8, atol=0)
 
 
-@pytest.mark.parametrize("acq_name", ["ei", "logei"])
-def test_optimize_ei_reference_acq_is_within_bounds_and_improves(acq_name):
+def test_propose_ei_returns_a_cube_point_with_the_acquisition_value():
     gp = _hand_made_gp()
-    acq = ACQUISITIONS[acq_name]
-    y_target = float(np.asarray(gp.Y_train).min())
+    best_f = float(np.asarray(gp.Y_train).max())
 
-    x_best, value = optimize_ei(
-        gp, y_target, sobol_seed=1, jitter_rng=np.random.default_rng(1), acq=acq
-    )
-    assert x_best.shape == (4,)
-    assert np.all(x_best >= 0.0) and np.all(x_best <= 1.0)
+    x, value = propose_ei(gp, best_f, iteration_rngs(0, 5), 5, raw_samples=64, num_restarts=2)
 
-    # The candidate set the run's seeds define, rebuilt here: L-BFGS-B starts from its best points
-    # and cannot return a worse one, so the reported value is a floor on the whole set's best.
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=UserWarning)
-        candidates = qmc.Sobol(4, scramble=True, seed=1).random(5000)
-    incumbent = np.asarray(gp.X_train)[int(np.asarray(gp.Y_train).argmin())]
-    candidates[0, :] = np.clip(
-        incumbent + 0.001 * np.random.default_rng(1).standard_normal((1, 4)), a_min=0.0, a_max=1.0
-    )
-    best_candidate = float(np.max(np.asarray(acq(jnp.asarray(candidates), y_target, gp))))
-    assert value >= best_candidate - 1e-12
+    assert x.shape == (4,)
+    assert np.all(x >= 0.0) and np.all(x <= 1.0)
+    assert np.isfinite(value)
+    # The reported value is the acquisition at the point returned, not at some other restart's.
+    acq = LogExpectedImprovement(gp.model, best_f=best_f)
+    at_x = float(acq(torch.as_tensor(x)[None, None, :]).detach())
+    assert value == pytest.approx(at_x, rel=1e-8)
+
+
+def test_propose_ei_is_a_pure_function_of_the_iteration_rngs(monkeypatch):
+    """Both seeds matter: `options["seed"]` reaches only the raw Sobol draw, torch's the rest."""
+    gp = _hand_made_gp()
+    best_f = float(np.asarray(gp.Y_train).max())
+    propose = partial(propose_ei, raw_samples=64, num_restarts=2)
+    rngs = iteration_rngs(0, 5)
+
+    x, _ = propose(gp, best_f, rngs, 5)
+    again, _ = propose(gp, best_f, rngs, 5)
+    assert np.array_equal(x, again)
+
+    other_torch, _ = propose(gp, best_f, rngs._replace(torch_seed=rngs.torch_seed + 1), 5)
+    assert not np.array_equal(x, other_torch)
+
+    # `sobol_seed` is checked at the candidate set rather than at the point returned. On a problem
+    # this small both candidate sets lead L-BFGS-B into the same basin, so the two points agree to
+    # about 1e-7 and at some `t` to the bit -- asserting they differ would pin the optimizer's
+    # last bits, which any BoTorch or scipy release may move. What must hold is that the seed is
+    # handed to `optimize_acqf` as `options["seed"]`, and that it changes the raw draw.
+    seen: list = []
+    real_optimize_acqf = bo.optimize_acqf
+
+    def recording(acq, **kwargs):
+        seen.append(kwargs["options"])
+        return real_optimize_acqf(acq, **kwargs)
+
+    monkeypatch.setattr(bo, "optimize_acqf", recording)
+    propose(gp, best_f, rngs, 5)
+    assert seen[0]["seed"] == rngs.sobol_seed
+    bounds = torch.stack([torch.zeros(4, dtype=torch.float64), torch.ones(4, dtype=torch.float64)])
+    drawn = [draw_sobol_samples(bounds=bounds, n=64, q=1, seed=s)
+             for s in (rngs.sobol_seed, rngs.sobol_seed + 1)]
+    assert not torch.equal(*drawn)
+
+
+# --- the seeding ---
+
+
+def test_iteration_rngs_streams_are_distinct_and_deterministic():
+    def seeds(rngs):
+        return (
+            rngs.nuts_seed, rngs.retry_seed, rngs.sobol_seed, rngs.torch_seed, rngs.fallback_seed
+        )
+
+    here = seeds(iteration_rngs(0, 3))
+    assert len(set(here)) == len(here)  # one counter would couple the streams; five salts do not
+    assert here == seeds(iteration_rngs(0, 3))
+    assert not set(here) & set(seeds(iteration_rngs(0, 4)))
+    assert not set(here) & set(seeds(iteration_rngs(1, 3)))
 
 
 # --- the initial design ---
@@ -185,6 +198,21 @@ def _objective():
     return make_family("aligned3", 0, D=5)
 
 
+def _stub_surrogate(X, z, seed):
+    """A valid product/lengthscale posterior over two draws, built without any inference."""
+    samples = {
+        "outputscale": np.ones(2),
+        "mean": np.zeros(2),
+        "noise": np.full(2, 0.01),
+        "kernel_inv_length_sq": np.ones((2, 5)),
+        "lengthscale": np.ones((2, 5)),
+    }
+    return FittedGP.from_draws(("product", "lengthscale"), X, z, samples)
+
+
+_PROPOSE = partial(propose_ei, raw_samples=32, num_restarts=1)
+
+
 def test_run_bo_core_is_a_pure_function_of_seed_state_and_adapters():
     """The loop's whole contract, with the surrogate stubbed and no run directory anywhere.
 
@@ -197,24 +225,15 @@ def test_run_bo_core_is_a_pure_function_of_seed_state_and_adapters():
     obj = _objective()
     seen: list = []
 
-    def surrogate(X, z, key):  # a valid product/lengthscale posterior, no inference
-        S = {
-            "kernel_var": jnp.ones(2),
-            "kernel_inv_length_sq": jnp.ones((2, 5)),
-            "kernel_noise": jnp.full(2, 0.01),
-        }
-        return FittedGP(("product", "lengthscale"), X, z, S, None, None, "ok", "", ())
-
-    propose = partial(propose_ei, num_init=64, num_restarts_ei=1)
-    a = run_bo(obj, surrogate, 0, T=8, n_init=5, propose=propose, on_iteration=seen.append)
+    a = run_bo(obj, _stub_surrogate, 0, T=8, n_init=5, propose=_PROPOSE, on_iteration=seen.append)
     assert [it.t for it in seen] == [5, 6, 7] and a.X.shape == (8, 5) and seen[-1].state.X is a.X
     assert all(it.fit_calls == 1 and it.status == "ok" for it in seen)
 
-    b = run_bo(obj, surrogate, 0, T=8, n_init=5, propose=propose)
+    b = run_bo(obj, _stub_surrogate, 0, T=8, n_init=5, propose=_PROPOSE)
     assert np.array_equal(a.X, b.X) and np.array_equal(a.y, b.y)
 
     c = run_bo(
-        obj, surrogate, 0, T=8, n_init=5, propose=propose,
+        obj, _stub_surrogate, 0, T=8, n_init=5, propose=_PROPOSE,
         state=BOState(a.X[:6], a.y[:6], a.f[:6]),
     )
     assert np.array_equal(c.X, a.X)
@@ -226,3 +245,77 @@ def test_run_bo_core_is_a_pure_function_of_seed_state_and_adapters():
     )
     assert np.array_equal(s.X, initial_design(5, 8, 3))
     assert seen[-1].fit_calls == 0 and np.isnan(seen[-1].fit_wall_s)
+
+
+def test_run_bo_hands_the_proposer_the_standardized_incumbent():
+    """`best_f` is `max(standardize(y))`: the loop maximizes, and the fit sees the same targets."""
+    obj = _objective()
+    seen: list = []
+    incumbents: list = []
+
+    def propose(fitted, best_f, rngs, t):
+        incumbents.append(best_f)
+        return _PROPOSE(fitted, best_f, rngs, t)
+
+    run_bo(obj, _stub_surrogate, 0, T=8, n_init=5, propose=propose, on_iteration=seen.append)
+    expected = [float(np.max(standardize(it.state.y[: it.t])[0])) for it in seen]
+    assert incumbents == expected
+
+
+def test_a_proposer_that_raises_takes_the_seeded_sobol_fallback():
+    obj = _objective()
+    seen: list = []
+    messages: list = []
+
+    def propose(fitted, best_f, rngs, t):
+        raise RuntimeError("boom")
+
+    run_bo(
+        obj, _stub_surrogate, 0, T=8, n_init=5, propose=propose,
+        on_iteration=seen.append, log=messages.append,
+    )
+
+    assert [it.t for it in seen] == [5, 6, 7]
+    for it in seen:
+        assert it.status == "excluded"
+        assert it.reason.startswith("exception: RuntimeError")
+        assert np.isnan(it.acq_value)
+        assert it.fit_calls == 1  # the fit itself was fine, so it is not retried
+        fallback = initial_design(5, 1, iteration_rngs(0, it.t).fallback_seed)[0]
+        assert np.array_equal(it.x, fallback)
+    assert any("the proposer raised" in message for message in messages)
+
+
+def test_a_fit_that_raises_twice_takes_the_seeded_sobol_fallback():
+    obj = _objective()
+    seen: list = []
+
+    def always_raises(X, z, seed):
+        raise RuntimeError("no fit")
+
+    run_bo(
+        obj, always_raises, 0, T=6, n_init=5, propose=_PROPOSE,
+        on_iteration=seen.append, log=lambda message: None,
+    )
+    assert len(seen) == 1
+    assert seen[0].fit_calls == 2 and seen[0].status == "excluded"
+    assert seen[0].fitted is None and np.isnan(seen[0].acq_value)
+    assert np.array_equal(seen[0].x, initial_design(5, 1, iteration_rngs(0, 5).fallback_seed)[0])
+
+    # One failure is retried on the retry seed, not on the seed the first attempt already used.
+    calls: list = []
+
+    def raises_once(X, z, seed):
+        calls.append(seed)
+        if len(calls) == 1:
+            raise RuntimeError("first attempt")
+        return _stub_surrogate(X, z, seed)
+
+    retried: list = []
+    run_bo(
+        obj, raises_once, 0, T=6, n_init=5, propose=_PROPOSE,
+        on_iteration=retried.append, log=lambda message: None,
+    )
+    assert retried[0].fit_calls == 2 and retried[0].status == "ok"
+    rngs = iteration_rngs(0, 5)
+    assert calls == [rngs.nuts_seed, rngs.retry_seed]

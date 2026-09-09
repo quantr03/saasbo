@@ -565,7 +565,7 @@ class CellGP(SaasFullyBayesianSingleTaskGP):
         ell_prior: tuple[float, float] = ELL_PRIOR,
         input_transform: InputTransform | None = None,
     ) -> None:
-        """(n, D) inputs in [0,1]^D and (n, 1) targets already standardized and negated.
+        """(n, D) inputs in [0,1]^D and (n, 1) targets already standardized.
 
         `train_Yvar` None learns the noise. `alpha` None takes the cell's calibrated default, and
         `ell_prior` reaches the amplitude cells only. `input_transform` is BoTorch's own, and the
@@ -608,7 +608,7 @@ def _load_draws(model: CellGP, samples: dict[str, ArrayLike]) -> None:
 
 
 class FittedGP:
-    """One cell's posterior on standardized, negated targets: what `fit` returns.
+    """One cell's posterior on standardized targets: what `fit` returns.
 
     The loop (`sagp.bo`) and the readouts (`sagp.readouts`) consume it, and `references.fit_map`
     builds one for each MAP reference. The training data keeps the reference's names (`X_train`,
@@ -800,7 +800,7 @@ def fit(
     thresholds: DiagThresholds = DiagThresholds(),
     ell_prior: tuple[float, float] = ELL_PRIOR,
 ) -> FittedGP:
-    """NUTS fit of `cell` to (X in [0,1]^D, y already standardized and negated by the caller).
+    """NUTS fit of `cell` to (X in [0,1]^D, y already standardized by the caller).
 
     `seed` is BoTorch's int seed: the chain is driven by `jax.random.PRNGKey(seed)`, so this fit
     reproduces `fit_fully_bayesian_model_nuts(..., seed=seed)` on the same model to the bit. One
@@ -850,10 +850,11 @@ def fit(
 
 
 def standardize(y: ArrayLike) -> tuple[np.ndarray, float, float]:
-    """Standardize `y` to zero mean, unit variance (ddof 0), and negate it: z = -(y - mean) / std.
+    """Standardize `y` to zero mean, unit variance (ddof 0): z = (y - mean) / std.
 
-    `mean` and `std` are plain floats; the negation is the vendored code's minimization convention.
+    `mean` and `std` are plain floats. There is no sign flip: the loop maximizes what the
+    objective maximizes, and `sagp.bo.run_bo`'s incumbent is `max(z)`.
     """
     y = np.asarray(y)
     mean, std = float(y.mean()), float(y.std())
-    return -(y - mean) / std, mean, std
+    return (y - mean) / std, mean, std

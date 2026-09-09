@@ -345,7 +345,7 @@ def test_all_cells_fit_and_predict(cell_key, fixed_noise):
 # --- standardize ---
 
 
-def test_standardize_zero_mean_unit_std_and_sign_flip():
+def test_standardize_zero_mean_unit_std_and_no_sign_flip():
     rng = np.random.default_rng(7)
     y = rng.normal(loc=3.0, scale=2.0, size=50)
 
@@ -353,7 +353,7 @@ def test_standardize_zero_mean_unit_std_and_sign_flip():
 
     assert z.mean() == pytest.approx(0.0, abs=1e-12)
     assert z.std() == pytest.approx(1.0)
-    assert z.argmax() == y.argmin()  # the sign flip: standardize maximizes what y minimizes
+    assert z.argmax() == y.argmax()  # no sign flip: the loop maximizes what the objective does
     assert mean == pytest.approx(y.mean())
     assert std == pytest.approx(y.std())
     assert type(mean) is float and type(std) is float
