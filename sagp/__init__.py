@@ -1,15 +1,15 @@
 """sagp: the thesis's four sparse-GP cells on the SAASBO reference code path.
 
 `sagp.gp` implements the four model cells (additive/product structure x amplitude/lengthscale
-prior; see the plan), NUTS inference, prediction and posterior readouts, following the vendored
-`saasgp.py`/`saasbo.py` reference exactly except where the plan calls for a change. `sagp.bo`
-runs the Bayesian-optimization loop against any cell through `gp.py`'s
-fit/FittedGP/posterior interface alone: `bo.py` must not know how a cell is parameterized, and
-`gp.py` must not know about acquisition or budgets, so importing one must not pull in the other.
-`fit` and `FittedGP` are re-exported here from `sagp.gp`, `readouts` from `sagp.readouts` and
-`run_bo` from `sagp.bo`, but lazily via `__getattr__` (PEP 562) rather than an eager import --
-matching `synthobj/__init__.py`'s reasoning. `import sagp` and `import sagp.gp` therefore import
-neither submodule; only accessing one of these four names imports the module that defines it.
+prior; see the plan), NUTS inference and prediction, following the vendored
+`saasgp.py`/`saasbo.py` reference exactly except where the plan calls for a change.
+`sagp.readouts` holds the posterior readouts and is reached as the submodule it is, like
+`sagp.gp` itself: callers write `from sagp.readouts import readouts`. `sagp.bo` runs the
+Bayesian-optimization loop against any cell through `gp.py`'s fit/FittedGP/posterior interface
+alone: `bo.py` must not know how a cell is parameterized, and `gp.py` must not know about
+acquisition or budgets, so importing one must not pull in the other. `fit` and `FittedGP` are
+re-exported here from `sagp.gp` and `run_bo` from `sagp.bo`, lazily via `__getattr__` (PEP 562)
+rather than eagerly -- matching `synthobj/__init__.py` -- so `import sagp` imports no submodule.
 
 `numpyro.set_platform`/`set_host_device_count`/`enable_x64` run here, at package import, before
 any of this package's code creates a JAX array: every later task depends on float64 and the cpu
@@ -28,10 +28,9 @@ numpyro.enable_x64()
 jax.config.update("jax_enable_x64", True)
 
 _GP_API = ("fit", "FittedGP")
-_READOUTS_API = ("readouts",)
 _BO_API = ("run_bo",)
 
-__all__ = list(_GP_API) + list(_READOUTS_API) + list(_BO_API)
+__all__ = list(_GP_API) + list(_BO_API)
 
 
 def __getattr__(name: str) -> Any:
@@ -39,13 +38,6 @@ def __getattr__(name: str) -> Any:
         from sagp import gp
 
         return getattr(gp, name)
-    if name in _READOUTS_API:
-        # `import sagp.readouts`, not `from sagp import readouts`: the exported name and its
-        # module's name are the same, and the `from` form asks this `__getattr__` for `readouts`
-        # before it falls back to importing the submodule, which recurses.
-        import sagp.readouts
-
-        return getattr(sagp.readouts, name)
     if name in _BO_API:
         from sagp import bo
 
