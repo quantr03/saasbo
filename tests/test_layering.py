@@ -25,6 +25,7 @@ assert _SAGP_FILES and _EXPERIMENT_FILES, "no modules to check: the globs found 
 _ALLOWED_SAGP_IMPORTS: dict[str, set[str]] = {
     "gp": {"sagp.diagnostics"},
     "diagnostics": set(),
+    "kernels_torch": set(),  # torch only, so `gp` can import it without a cycle
     "references": {"sagp.gp"},
     "readouts": {"sagp.gp"},
     "bo": {"sagp.gp"},
