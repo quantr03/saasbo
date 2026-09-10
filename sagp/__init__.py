@@ -14,9 +14,9 @@ is reached as the submodule it is: callers write `from sagp.readouts import read
 imports no submodule.
 
 `numpyro.set_platform`/`set_host_device_count`/`enable_x64` run here, at package import, before
-any of this package's code creates a JAX array: every later task depends on float64 and the cpu
-platform being set before the first array exists, not after. Torch's default dtype and thread
-count are set here for the same reason numpyro's are.
+any of this package's code creates a JAX array: every later task depends on float64 and the
+platform -- a visible GPU first, the CPU otherwise -- being set before the first array exists, not
+after. Torch's default dtype and thread count are set here for the same reason numpyro's are.
 """
 import os
 from typing import Any
@@ -24,8 +24,19 @@ from typing import Any
 import jax
 import numpyro
 import torch
+from jax._src.hardware_utils import has_visible_nvidia_gpu
 
-numpyro.set_platform("cpu")
+# A GPU first, the CPU otherwise. `cuda` is requested only where JAX's own test finds an NVIDIA
+# device, since requesting it makes the CUDA plugin call cuInit, which on a CPU node fails and logs
+# a traceback on every start. Where one is visible the list is explicit, so a GPU that will not
+# start fails loudly instead of the job quietly running on its host's CPU. JAX_PLATFORMS=cpu still
+# forces the CPU.
+numpyro.set_platform(
+    os.environ.get("JAX_PLATFORMS") or ("cuda,cpu" if has_visible_nvidia_gpu() else "cpu")
+)
+# JAX would otherwise claim 75 % of the GPU when its backend starts, leaving too little for torch,
+# which runs the acquisition on the same device (`sagp.gp.fit`); it is read at that start, so here.
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 numpyro.set_host_device_count(1)
 numpyro.enable_x64()
 # Belt-and-suspenders: this is what numpyro.enable_x64() does internally, but a test process may

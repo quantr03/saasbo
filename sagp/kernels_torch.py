@@ -16,6 +16,7 @@ Imports no `sagp` module: `sagp.gp` imports this one.
 """
 from __future__ import annotations
 
+import functools
 import math
 
 import gpytorch
@@ -28,6 +29,16 @@ from torch import Tensor
 _NODES, _WEIGHTS = leggauss(64)
 GL_NODES_T = torch.as_tensor(0.5 * (_NODES + 1))
 GL_WEIGHTS_T = torch.as_tensor(0.5 * _WEIGHTS)
+
+
+@functools.cache
+def _gl(device: torch.device) -> tuple[Tensor, Tensor]:
+    """The nodes and weights on `device`: copied to a GPU once, not on every kernel call.
+
+    On the CPU `.to` returns the tensors themselves, so the CPU path computes exactly what it did.
+    """
+    return GL_NODES_T.to(device), GL_WEIGHTS_T.to(device)
+
 
 _ROOT_FIVE = math.sqrt(5.0)
 
@@ -50,8 +61,9 @@ def v_of_ell_t(ell: Tensor) -> Tensor:
     have any shape -- scalar, (D,), or a (..., 1, 1) block shaped to broadcast against a kernel
     matrix -- and the result has that same shape.
     """
-    r = torch.abs(GL_NODES_T[:, None] - GL_NODES_T) / ell[..., None, None]  # (..., Q, Q)
-    weights = GL_WEIGHTS_T[:, None] * GL_WEIGHTS_T  # (Q, Q)
+    nodes, node_weights = _gl(ell.device)
+    r = torch.abs(nodes[:, None] - nodes) / ell[..., None, None]  # (..., Q, Q)
+    weights = node_weights[:, None] * node_weights  # (Q, Q)
     return 1.0 - (weights * matern52_1d_t(r)).sum(dim=(-2, -1))
 
 
@@ -61,8 +73,9 @@ def quad_mean_t(x: Tensor, ell: Tensor) -> Tensor:
     `sagp.gp._quad_mean` for one coordinate: the component integrated against the constants under
     U[0,1], which is what the centering subtracts off.
     """
-    r = torch.abs(x[..., :, None] - GL_NODES_T) / ell[..., None]  # (..., n, Q)
-    return (GL_WEIGHTS_T * matern52_1d_t(r)).sum(dim=-1)
+    nodes, weights = _gl(x.device)
+    r = torch.abs(x[..., :, None] - nodes) / ell[..., None]  # (..., n, Q)
+    return (weights * matern52_1d_t(r)).sum(dim=-1)
 
 
 def kbar_1d(x1: Tensor, x2: Tensor, ell: Tensor, normalize: bool, diag: bool = False) -> Tensor:

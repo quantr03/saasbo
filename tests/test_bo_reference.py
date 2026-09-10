@@ -11,10 +11,11 @@ the drift changes an argmax and never rejoin.
 
 What the two sides deliberately share is only what is not under test: the seeds
 (`sagp.bo.iteration_rngs`), the initial design (`sagp.bo.initial_design`, a scrambled Sobol
-sequence) and the standardization (`sagp.gp.standardize`, ddof 0). Those three are the run's
-definition, not its implementation -- a hand-written loop that guessed at them would be pinning
-nothing. What the hand-written side shares with `sagp` is nothing else: no `sagp` model, no
-`sagp` acquisition, no `sagp` optimizer call, no `run_bo`. It builds a stock
+sequence), the standardization (`sagp.gp.standardize`, ddof 0) and the device the models live on
+(`sagp.gp.torch_device`). Those four are the run's definition, not its implementation -- a
+hand-written loop that guessed at them would be pinning nothing. What the hand-written side
+shares with `sagp` is nothing else: no `sagp` model, no `sagp` acquisition, no `sagp` optimizer
+call, no `run_bo`. It builds a stock
 `SaasFullyBayesianSingleTaskGP`, fits it with `fit_fully_bayesian_model_nuts`, and maximizes
 `LogExpectedImprovement` with `optimize_acqf` under the protocol's options.
 
@@ -34,7 +35,7 @@ from __future__ import annotations
 
 from sagp.bo import initial_design, iteration_rngs, propose_ei, run_bo
 from sagp.diagnostics import DiagThresholds
-from sagp.gp import NUTSConfig, fit, standardize
+from sagp.gp import NUTSConfig, fit, standardize, torch_device
 
 import botorch.settings
 import gpytorch.settings
@@ -74,17 +75,18 @@ def _botorch_loop(objective, seed, T, n_init, nuts):
     for t in range(n_init, T):
         z, _, _ = standardize(y)
         rngs = iteration_rngs(seed, t)
+        tkwargs = {"dtype": torch.float64, "device": torch_device()}
         with botorch.settings.validate_input_scaling(False):
-            gp = SaasFullyBayesianSingleTaskGP(torch.as_tensor(X), torch.as_tensor(z)[:, None])
+            gp = SaasFullyBayesianSingleTaskGP(
+                torch.as_tensor(X, **tkwargs), torch.as_tensor(z, **tkwargs)[:, None]
+            )
         fit_fully_bayesian_model_nuts(
             gp, max_tree_depth=nuts.max_tree_depth, warmup_steps=nuts.num_warmup,
             num_samples=nuts.num_samples, thinning=nuts.thinning, disable_progbar=True,
             seed=rngs.nuts_seed,
         )
         acq = LogExpectedImprovement(model=gp, best_f=float(z.max()))
-        bounds = torch.stack(
-            [torch.zeros(D, dtype=torch.float64), torch.ones(D, dtype=torch.float64)]
-        )
+        bounds = torch.stack([torch.zeros(D, **tkwargs), torch.ones(D, **tkwargs)])
         options = {
             "batch_limit": 1, "maxiter": 200, "sample_around_best": True,
             "sample_around_best_sigma": 1e-3, "seed": rngs.sobol_seed,
@@ -94,7 +96,7 @@ def _botorch_loop(objective, seed, T, n_init, nuts):
             x, _ = optimize_acqf(
                 acq, bounds=bounds, q=1, num_restarts=5, raw_samples=512, options=options
             )
-        x = x.detach().numpy()[0]
+        x = x.detach().cpu().numpy()[0]
         X = np.vstack([X, x])
         y = np.append(y, float(objective.observe(x[None, :], rngs.noise_rng)[0]))
     return X, y

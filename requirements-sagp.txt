@@ -1,5 +1,6 @@
 jax==0.10.2
 jaxlib==0.10.2
+jax-cuda13-plugin[with-cuda]==0.10.2; sys_platform == "linux"
 numpyro==0.21.0
 scipy==1.17.1
 numpy==2.4.6

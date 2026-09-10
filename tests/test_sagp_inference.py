@@ -24,6 +24,7 @@ from sagp.gp import (
     NUTSConfig,
     fit,
     standardize,
+    torch_device,
 )
 
 import botorch.settings
@@ -60,8 +61,9 @@ def _data(n: int, D: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
 
 def _reference_fit(X, y, fixed_noise, nuts: NUTSConfig, seed: int):
     """BoTorch's own SAAS fit of the same data at the same seed: the pin's other side."""
-    Xt = torch.as_tensor(X)
-    zt = torch.as_tensor(y)[:, None]
+    # On the device `fit` builds its model on, so the two sides load the same draws the same way.
+    Xt = torch.as_tensor(X, device=torch_device())
+    zt = torch.as_tensor(y, device=torch_device())[:, None]
     train_Yvar = None if fixed_noise is None else torch.full_like(zt, fixed_noise)
     with botorch.settings.validate_input_scaling(False):
         ref = SaasFullyBayesianSingleTaskGP(Xt, zt, train_Yvar)
@@ -266,12 +268,13 @@ def _assert_posterior_is_the_models(fitted, X_test) -> None:
         # number of tries is a different jitter, and this comparison is exact.
         with torch.no_grad(), gpytorch.settings.cholesky_max_tries(9):
             post = fitted.model.posterior(
-                torch.as_tensor(X_test)[:, None, :], observation_noise=observation_noise
+                torch.as_tensor(X_test, device=fitted.device)[:, None, :],
+                observation_noise=observation_noise,
             )
         expected_mean = post.mean.reshape(X_test.shape[0], -1).T
         expected_var = post.variance.reshape(X_test.shape[0], -1).T
-        assert np.array_equal(np.asarray(mean), expected_mean.numpy())
-        assert np.array_equal(np.asarray(var), expected_var.numpy())
+        assert np.array_equal(np.asarray(mean), expected_mean.cpu().numpy())
+        assert np.array_equal(np.asarray(var), expected_var.cpu().numpy())
 
 
 def test_posterior_matches_botorch_on_the_same_model():
@@ -311,13 +314,17 @@ def test_posterior_equals_a_stock_botorch_model_loaded_with_the_same_draws():
         X, y, 3, ("product", "lengthscale"), nuts=NUTSConfig(64, 64, 4), thresholds=NEVER_FAILS
     )
 
+    # On `fitted`'s device: the same arithmetic on another device is not the same to the bit.
+    device = fitted.device
     with botorch.settings.validate_input_scaling(False):
-        stock = SaasFullyBayesianSingleTaskGP(torch.as_tensor(X), torch.as_tensor(y)[:, None])
+        stock = SaasFullyBayesianSingleTaskGP(
+            torch.as_tensor(X, device=device), torch.as_tensor(y, device=device)[:, None]
+        )
     stock.load_mcmc_samples(
         {
             # `np.array`, not `np.asarray`: a jnp array is read-only, and torch warns on wrapping
             # one without copying.
-            site: torch.as_tensor(np.array(draws))
+            site: torch.as_tensor(np.array(draws), device=device)
             for site, draws in fitted.samples.items()
             if site in ("mean", "outputscale", "noise", "lengthscale")
         }
@@ -328,13 +335,14 @@ def test_posterior_equals_a_stock_botorch_model_loaded_with_the_same_draws():
         mean, var = fitted.posterior(X_test, observation_noise=observation_noise)
         with torch.no_grad(), gpytorch.settings.cholesky_max_tries(9):
             post = stock.posterior(
-                torch.as_tensor(X_test)[:, None, :], observation_noise=observation_noise
+                torch.as_tensor(X_test, device=device)[:, None, :],
+                observation_noise=observation_noise,
             )
         assert np.array_equal(
-            np.asarray(mean), post.mean.reshape(X_test.shape[0], -1).T.numpy()
+            np.asarray(mean), post.mean.reshape(X_test.shape[0], -1).T.cpu().numpy()
         )
         assert np.array_equal(
-            np.asarray(var), post.variance.reshape(X_test.shape[0], -1).T.numpy()
+            np.asarray(var), post.variance.reshape(X_test.shape[0], -1).T.cpu().numpy()
         )
 
 
