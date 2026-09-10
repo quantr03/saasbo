@@ -185,7 +185,7 @@ Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 | `iterations.csv` | one row per iteration: `y`, `f`, `best_obs`, `best_f`, `regret`, the acquisition value (a log EI, so it is negative whenever the improvement is small), wall times, `status`, the fit's diagnostics, `y_mean`/`y_std`, and the query point |
 | `coords.csv` | long format, `t, i, native_median, p_active, sobol_hat` -- the per-coordinate readouts (absent for `sobol` runs, which fit no model) |
 | `samples/t{t:03d}.npz` | that iteration's retained posterior draws (16 for a cell, 1 for a MAP reference), keyed by BoTorch's own site names, plus its `status`, `nuts_attempts` and `schema_version` (2) |
-| `manifest.json` | the resolved `RunConfig` and its hash, the git commit, package versions (torch, gpytorch and botorch among them), thread environment, `acquisition_constants` -- the maximizer's whole operating point -- the objective's labels, and a `resumed` entry per resume |
+| `manifest.json` | the resolved `RunConfig` and its hash, the git commit, package versions (torch, gpytorch and botorch among them), thread environment and JAX device, `acquisition_constants` -- the maximizer's whole operating point -- the objective's labels, and a `resumed` entry per resume |
 | `environment.lock.txt` | every installed distribution as `name==version` |
 | `checkpoint.npz`, `log.txt` | the resume point, and the run's narrative (timings, statuses, tracebacks) |
 
@@ -195,12 +195,21 @@ refuses to continue if the configuration hash differs, truncates the two CSVs an
 to the last complete row, and carries on. `--no-resume` starts over instead. The continuation is
 bit-identical on the same CPU model with the same thread settings; on a different CPU the design
 and the seeds are identical but the floating-point results may differ at the ulp level, which is
-why every resume records its own `env` (machine, processor, thread settings) in `manifest.json`.
+why every resume records its own `env` (machine, processor, thread settings, `jax_device`) in
+`manifest.json`. A GPU gives no such guarantee even on one device: two runs of one seed on one
+H200 drew different posteriors, with or without XLA's determinism flags (checked 2026-09-10), so
+a GPU run reproduces in distribution, not to the bit.
 
 On SLURM, one array task per `(family, seed, method)`; re-submitting the same array resumes every
 run in it. Five arrays, because the four cells and the three references have different budgets:
-one `slurm/sagp_<cell>.sbatch` per cell (40 tasks, one core and 8 GB each, `--time` sized to that
-cell's cost) and `slurm/sagp_refs.sbatch` (120 tasks, 2 h). All index `(family, seed)` from
+one `slurm/sagp_<cell>.sbatch` per cell (40 tasks, one core, 8 GB and one GPU each -- an H200 or an
+H100, whichever partition can start the task first -- `--time` sized to that cell's cost) and
+`slurm/sagp_refs.sbatch` (120 tasks, 2 h, on CPUs). `sagp` takes a visible GPU first and the CPU
+otherwise, for the NUTS chain and a cell's acquisition alike (`sagp/__init__.py`, `sagp.gp.fit`);
+`JAX_PLATFORMS=cpu` forces the CPU. The cell files also set `TORCH_DISABLE_NATIVE_JIT=1`, since
+torch 2.14 JIT-compiles a C launcher for a few CUDA ops and the GPU nodes have no C compiler, and
+`--ntasks=1`, since those nodes hand out CPUs in hyperthread pairs and `srun` would otherwise start
+two copies of each run into one directory. All index `(family, seed)` from
 `$SLURM_ARRAY_TASK_ID`, share the objective grid through `--objective-dir data/objectives`, and
 read `REPO`, `OUT`, `T` (and, for the cells, `NUTS`) from the environment, so a smoke run is
 `sbatch --export=ALL,OUT=runs_smoke/,T=22 --array=0 slurm/sagp_refs.sbatch`. On Aalto's Triton,
@@ -260,3 +269,21 @@ kernel. Reproduce the gradient numbers with `scripts/pilot_sagp.py --stage grad`
 pilot (`docs/superpowers/plans/2026-09-09-botorch-saasbo-pilot.md`) re-measures fit and
 acquisition under BoTorch's scheme, and the 2026-09-07 pilot it supersedes is
 `docs/superpowers/plans/2026-09-07-sagp-pilot.md`.
+
+**On a GPU** (measured 2026-09-10 on one H100, JAX and torch both on it, with
+`scripts/pilot_sagp.py --stage fit --once`) a fit takes 32-55 s at n = 100-200 in every cell --
+13x the CPU pilot's speed for product/lengthscale and 85x for additive/amplitude, the one centered
+cell it reached -- and the budget question above is settled: the study runs 512 / 256 / 16, on
+GPUs. The acquisition is what is left:
+
+| `--cell` | fit, n = 100 / 200 | acquisition, n = 100 / 200 | readout |
+|---|---|---|---|
+| `product/lengthscale` | 41 / 46 s | 4 / 6 s | 9 s |
+| `additive/amplitude` | 41 / 53 s | 267 / 306 s | 2 s |
+| `additive/lengthscale` | 32 / 47 s | 214 / 206 s | 1 s |
+| `product/amplitude` | 39 / 55 s | 225 / 297 s | 5 s |
+
+The centered cells' torch kernels accumulate the D coordinates one at a time, so on a GPU their
+acquisition is bound by kernel launches and only 2-3x faster than on the host CPU. A `T = 200` run
+is therefore about 2.5 h for product/lengthscale and 12-17 h for a centered cell, most of it
+acquisition.
