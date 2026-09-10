@@ -43,7 +43,9 @@ def test_pinned_versions_match_installed_stack(repo_root: Path) -> None:
     assert numpyro.__version__ == pins["numpyro"]
     assert scipy.__version__ == pins["scipy"]
     assert np.__version__ == pins["numpy"]
-    assert torch.__version__ == pins["torch"]
+    # torch wheels carry a build local version segment (+cu130 from PyPI, +cpu from the
+    # PyTorch index), so the pin can only be matched against the public version.
+    assert torch.__version__.split("+")[0] == pins["torch"]
     assert gpytorch.__version__ == pins["gpytorch"]
     assert linear_operator.__version__ == pins["linear_operator"]
     assert botorch.__version__ == pins["botorch"]
