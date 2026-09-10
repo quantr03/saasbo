@@ -36,3 +36,50 @@ run ended.
 | product/lengthscale | 100 | 1 | 98.11 | ok | 1.048 | 42.8 | 0 | 62.62 | 1.815 | 152.9 |
 | product/lengthscale | 200 | 1 | 586.8 | ok | 1.047 | 30.14 | 0 | 62.75 | 3.274 | 247.1 |
 | additive/amplitude | 100 | 1 | 3489 | excluded | 1.471 | 5.506 | 0 | 63 | 393.9 | 0.7564 |
+| additive/amplitude | 200 | 1 | 9994 | excluded | 1.51 | 5.432 | 0 | 63 | 685.3 | 0.6581 |
+
+## Comparison with the 2026-09-08 pilot (four rows; stopped by the user 2026-09-10 12:20)
+
+"then" is the 2026-09-08 fit stage in `docs/superpowers/plans/2026-09-07-sagp-pilot.md`; `n/a`
+marks a (cell, n) that stage did not fit. `readout_s` is new -- the 2026-09-08 pilot had no
+readout stage.
+
+| cell | n | wall_s (now) | wall_s (then) | num_steps_mean (now) | num_steps_mean (then) | acq_s (now) | acq_s (then) | readout_s | status | r_hat_max | n_eff_min |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| product/lengthscale | 100 | 98.11 | n/a | 62.62 | n/a | 1.815 | n/a | 152.9 | ok | 1.048 | 42.8 |
+| product/lengthscale | 200 | 586.8 | 69.97 / 75.93 | 62.75 | 51 / 52.62 | 3.274 | 15.05 / 13.22 | 247.1 | ok | 1.047 | 30.14 |
+| additive/amplitude | 100 | 3489 | 1241 / 2811 | 63 | 15 / 15.31 | 393.9 | 58.92 / 62.82 | 0.7564 | excluded | 1.471 | 5.506 |
+| additive/amplitude | 200 | 9994 | n/a | 63 | n/a | 685.3 | n/a | 0.6581 | excluded | 1.51 | 5.432 |
+
+Under `dense_mass=True` the sampler took 63 leapfrog steps per iteration on every row -- the
+tree-depth-6 cap -- where the vendored path took 51-53 on the reference cell and 15 on
+additive/amplitude; on additive/amplitude the single chain did not converge at 512/256/16 at
+either n (`r_hat_max` 1.47 / 1.51, `n_eff_min` 5.5 / 5.4), so under the one-attempt policy those
+fits are `excluded`.
+
+The reference cell's fit is 8x the 2026-09-08 wall at n = 200 (587 vs 70-76 s): 4x from
+BoTorch's `compute_dists` arithmetic (an (n, n, D) difference tensor, which the bit-for-bit pin
+against `fit_fully_bayesian_model_nuts` makes untouchable) and 1.2x from the extra leapfrog
+steps; additive/amplitude is 2.8x (3489 vs 1241 s at n = 100), i.e. the 63/15 step ratio.
+
+The maximizer: 1.8-3.3 s on the reference cell, 394 / 685 s on additive/amplitude --
+`batch_limit=1` implies `init_batch_limit=1`, so BoTorch scores its 1024 raw candidates one at a
+time through the coordinate-looped torch kernels, and each L-BFGS-B restart differentiates
+through that loop.
+
+The readout: 153 / 247 s on the reference cell (the QMC Sobol estimator, about 408 posterior
+calls at the 64-row chunk), under 1 s on additive/amplitude (the exact additive index).
+
+Implied cost per T = 200 run, `62 x t_fit + 180 x t_acq + 8 x t_readout` at the n = 200 row:
+product/lengthscale about 10.8 h; additive/amplitude about 206 h -- against 1.7-2.6 h and 24-37 h
+in README's 2026-09-07 table.
+
+Two caveats. The run was not thread-pinned (no `OMP_NUM_THREADS`; 56 threads on 8 cores, load
+about 130-220), so the walls are an upper bound relative to the study's one-core SLURM tasks,
+where the 2026-09-07 single-thread re-measurement found the gradient effectively
+single-threaded already. And the laptop slept twice overnight (clamshell, 01:35 and 02:41) --
+`perf_counter` stops during sleep, so the per-row timings are unaffected, but the run's elapsed
+time is not a sum of them.
+
+Not measured: additive/lengthscale and product/amplitude at both n -- the user stopped the run
+at 12:20 on 2026-09-10 before row 5 finished.
