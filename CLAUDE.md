@@ -12,9 +12,15 @@ When durable repo context, decisions, workflows, file roles, or non-obvious fixe
 
 - `Sparse_Additive_HDBO`
 
-Use AgentMemory REST as a fallback when MCP memory tools are unavailable. In this environment, the reachable host is usually `agentmemory-google:3111`; `localhost:3111` may be unavailable from Codex. When `AGENTMEMORY_SECRET` is set, include `Authorization: Bearer $AGENTMEMORY_SECRET`.
+Use AgentMemory REST as a fallback when MCP memory tools are unavailable. In this environment, the reachable host is usually `agentmemory-google:3111`; `localhost:3111` may be unavailable from Codex. Every endpoint except `/agentmemory/livez` requires `Authorization: Bearer $AGENTMEMORY_SECRET`.
 
 Preferred endpoint: `https://banter-supermom-overpay.ngrok-free.dev` (ngrok tunnel to the `agentmemory-server` GCE VM). Try this first for REST calls. Note: ngrok free-tier URLs are ephemeral and can rotate when the tunnel restarts — if it stops responding (connection refused / ngrok interstitial / different repo's data), ask the user for the current URL rather than assuming AgentMemory is down, then fall back to `agentmemory-google:3111` or the SSH tunnel below.
+
+Auth: `AGENTMEMORY_SECRET` is exported from `~/.bashrc` (mode 600). Only `/agentmemory/livez` is unauthenticated — with no header, or an empty variable, every other endpoint returns `HTTP 401 {"error":"unauthorized"}`. **A 401 is not an outage.** Never report AgentMemory as unreachable on a 401: test `[ -n "$AGENTMEMORY_SECRET" ]` first, and never echo the value (`${VAR:-...}` expands to it). Shells that skip `~/.bashrc` get no secret — notably an sbatch script with a plain `#!/bin/bash` shebang; use `#!/bin/bash -l`.
+
+From Triton login nodes the ngrok URL is the only endpoint that works: `agentmemory-google` does not resolve there (no Tailscale), and `localhost:3211`/`:3111` are refused unless you started the tunnel yourself. Four failures in a row is the expected signature of a missing secret, not of a dead service.
+
+The `/remember` payload field is `content`, not `text` — `text` returns `HTTP 400 {"error":"content is required"}`. The server derives its own `title` from the content and ignores a supplied one, and there is no fetch-by-id route; read back with `smart-search`.
 
 Special case: when the user is connected to Aalto VPN / Cisco AnyConnect, `agentmemory-google:3111` may time out because AnyConnect can hijack Tailscale `100.x.x.x` routes. In that case, treat the SSH tunnel URL as the primary AgentMemory endpoint:
 
