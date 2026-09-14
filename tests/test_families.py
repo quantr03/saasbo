@@ -13,7 +13,7 @@ brief warns about).
 *Statistical design* tests cover the two families whose defining property only shows up in
 aggregate over draws: `decoupled`'s cell ordering (10/10 seeds, wide margin) and `anti_aligned`'s
 reversed variance ranking (ruling R13 replaces the plan's flaky per-seed Spearman test with a
-deterministic design check plus a pooled, rank-aligned realized check). Both are `slow` per the
+deterministic design check plus a seed-averaged, rank-aligned realized check). Both are `slow` per the
 brief's instruction, even though neither takes anywhere near the pytest.ini 10 s threshold on this
 machine -- the brief asks for the marker regardless of measured cost.
 
@@ -314,11 +314,13 @@ def test_anti_aligned_theoretical_slope_shares_reverse_the_variance_ranking() ->
 
 
 @pytest.mark.slow
-def test_anti_aligned_realized_slope_share_pooled_over_seeds_is_reversed() -> None:
-    """Realized assertion (R13), pooled over the study's own seeds 0-9. A single draw's slope
-    energy is high-variance (R13 struck the per-seed rule for exactly this reason), so this pools
-    `g` across seeds instead -- but *by rank*, never by coordinate: `Labels.g[S]` is ordered by
-    sorted coordinate index and every seed selects a different S, so averaging by position would
+def test_anti_aligned_realized_slope_share_seed_averaged_is_reversed() -> None:
+    """Realized assertion (R13) on the seed-mean shares over the study's own seeds 0-9: the
+    seed-averaged realized slope shares, rank-aligned, are reversed against the prescribed ones. A
+    single draw's slope energy is high-variance (R13 struck the per-seed rule for exactly this
+    reason), so this takes the mean of `g` across seeds instead -- but *by rank*, never by
+    coordinate: `Labels.g[S]` is ordered by sorted coordinate index and every seed selects a
+    different S, so averaging by position would
     average incomparable quantities (the brief's rank-alignment trap). Sorting each seed's own
     `s[S]` descending recovers the design vector exactly, which doubles as a free correctness
     check on the alignment itself."""

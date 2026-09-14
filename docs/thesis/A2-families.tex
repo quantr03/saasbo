@@ -2,4 +2,617 @@
 % Heading and label are fixed; a later task adds subsections beneath and
 % never renames the heading or the label.
 \SOlevelB{The fourteen study variants}\label{app:so:a2}
-% filled by Task N
+
+The construction in~\ref{app:so:a1} builds one component; this section names
+the $\SOnumVariants$ assembled objectives the thesis actually measures on. Each is
+one entry of the \SOcode{FAMILIES} registry in \SOfile{synthobj/families.py} ---
+a frozen \SOcode{FamilySpec} giving the number of active coordinates, their
+shares and lengthscales, and whether they carry an interaction, a rotation, a
+non-default generator or the monotone rejection wrapper --- and
+\SOcode{STUDY\_GRID} lists them in the order the entries below follow. Ten
+seeds per variant give the $\SOnumFiles$-file archived grid
+(\ref{app:so:a3:files}); every regret curve in the thesis is measured on one
+row of Table~\ref{app:so:a2:tab:families}.
+
+A variant fixes shape, never position. \SOcode{select\_active} takes a fresh
+permutation of the $D$ coordinates from the seed's own selection stream and
+keeps the first $|S|$ of them, so which coordinates are active is redrawn per
+seed and index position cannot leak into any result. Because that permutation
+is a pure function of the stream and does not depend on $|S|$, truncating it to
+different lengths at one seed \emph{nests}: \SOcode{aligned3}'s coordinates are
+the first three of \SOcode{aligned10}'s at the same seed. Pairs are drawn the
+same way one level down, by \SOcode{select\_pairs}, which cuts disjoint pairs of
+\emph{ranks} from a permutation of the active ranks and leaves the caller to map
+them through $S$; at a fixed
+$(D, \text{seed}, \SOcode{n\_active}, \SOcode{n\_pairs})$ they are drawn
+identically whether they go on to become interactions or rotations. The
+qualifier is the whole of the claim: the $\gamma$ sweep and the $\theta$ sweep
+carry different \SOcode{n\_active} and \SOcode{n\_pairs}, so each holds its own
+pairs fixed across its own members without sharing any pair with the other
+sweep. The full seeding scheme, and what this does \emph{not} say, are
+in~\ref{app:so:a3:seeding}.
+
+Two places in the thesis's design brief have been overtaken by the
+implementation, and in both the code is authoritative.
+Table~\ref{app:so:a2:tab:families} is generated from \SOcode{FAMILIES} and
+\SOcode{STUDY\_GRID} themselves, so what it prints is what the study ran; the
+one variant whose parameters the brief's own family table no longer matches
+says so in its entry. The second is a definition rather than a parameter: the
+brief defines a coordinate as active when its share exceeds
+$\activeeps=\SOnumActiveEps$, but \SOcode{Labels.active} in the package is set
+membership, $s_i>0$, and $\activeeps$ is recorded alongside it in
+\SOcode{Labels.active\_eps} for downstream scoring rather than enforced at build
+time. The brief's rule is the scoring definition; the label is the ground truth
+about which coordinates the objective actually varies in. Only
+\SOcode{dense\_weak} makes the two disagree, and that disagreement is its point.
+
+Each entry below has three paragraphs: the parameters, read off
+Tables~\ref{app:so:a2:tab:families}
+and~\ref{app:so:a2:tab:families-flags}; what the variant isolates, in the
+design brief's own terms; and what the archived grid measured on it.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The study variants: main effects]{
+  The $\SOnumVariants$ study variants, main effects: which coordinates carry
+  one and how the variance budget is split among them. The same variants'
+  structural switches --- pairs, $\gamma$, $\theta$, generator, monotone,
+  $\knots$, noise --- are in
+  Table~\ref{app:so:a2:tab:families-flags}; the two halves are one twelve-column
+  table cut in two so that each fits a text block, and are generated together
+  from the same rows. Generated from
+  \SOcode{FAMILIES} and \SOcode{STUDY\_GRID} by \SOfile{regen\_tables.py}, so
+  no parameter printed here can drift from the specification the study built.
+  Exact: the variant and family names are \SOcode{STUDY\_GRID}'s own; $|S|$ and
+  the equal-split share are read off the built objective's \SOcode{Labels.S} and
+  \SOcode{Labels.s}, and $\knots$ off its first component's grid; every
+  remaining column is a field of the \SOcode{FamilySpec} the registry returns.
+  No draw enters any of them. Protocol, from the file's own header comment:
+  built at $D=\SOnumTableD$ per variant, ``family shape is $D$-invariant;
+  \SOcode{dense\_weak}'s $|S|$ equals $D$ here''. Every row but
+  \SOcode{dense\_weak}'s is therefore the study's configuration verbatim at its
+  own $D=\SOnumStudyD$; \SOcode{dense\_weak}'s $|S|$ and its share scale with
+  $D$, as its entry explains.}\label{app:so:a2:tab:families}
+  \small\setlength{\tabcolsep}{3pt}
+  \input{\SOroot/tables/tab_families}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption[The study variants: structural switches]{
+  The same $\SOnumVariants$ variants, structural switches: the number of
+  interaction pairs, the interaction budget $\gamma$, the rotation angle
+  $\theta$ (``---'' where there is no rotation), the component generator,
+  whether the monotone-rejection wrapper was used, the knot count $\knots$ ---
+  the length of the grid that variant's components are drawn on --- and the
+  observation noise. Same source, same generator and same
+  $D=\SOnumTableD$ protocol as
+  Table~\ref{app:so:a2:tab:families}, whose caption states them
+  once.}\label{app:so:a2:tab:families-flags}
+  \small\setlength{\tabcolsep}{3pt}
+  \input{\SOroot/tables/tab_families_flags}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption[The archived grid, variant by variant]{
+  What the archived grid measures on each variant: $\knots$, the spread of
+  $\fstar$ over the seeds, and the two assembly invariants ---
+  $\Varnu f=1$ and $\Enu f=0$ --- checked per objective. Draw-dependent:
+  $\fstar$ and both moment columns move with the draw, so the numbers are those
+  of this archive and not of a re-run elsewhere. Measured on the archived grid,
+  seeds $0$--$9$, $D=\SOnumStudyD$, this machine's BLAS\@. Protocol, from the
+  file's own header comment: the $\Varnu$ and $\Enu$ columns are QMC estimates
+  of the \emph{true} $\refnu$-moments --- a fresh scrambled Sobol' sample per
+  objective --- ``not the $64$-node $\nuhat$ quadrature ($\Varhat$/$\Ehat$)
+  \SOcode{tab\_orthogonality} uses''. Across the whole grid the worst deviation
+  of $\Varnu f$ from one is \SOnumWorstVar{} and the worst $|\Enu f|$ is
+  \SOnumWorstMean. The column headers are abbreviated: $\knots$ is the knot
+  count, ``$\fstar$ med.\ [min, max]'' the median of $\fstar$ over the ten
+  seeds with their range beside it, and the last three columns those QMC
+  estimates over the same ten seeds. The final row repeats one rotated
+  objective --- \SOcode{rotated\_t45} at seed $6$ --- at a
+  sixteen-fold larger Sobol' sample, so the residual visible in the
+  \SOcode{rotated\_t45} row above can be read as sampling error rather than a
+  defect in the objective.}\label{app:so:a2:tab:grid}
+  \footnotesize\setlength{\tabcolsep}{3pt}
+  \input{\SOroot/tables/tab_grid_summary}
+\end{table}
+
+\SOlevelC{\SOcode{aligned3}}\label{app:so:a2:aligned3}
+
+\textbf{Parameters.} Three active coordinates carrying equal shares $1/|S|$,
+one lengthscale for all of them, no pairs, $\gamma=0$, no rotation, the
+Mat\'ern generator, no monotone rejection, and the unit-interval grid
+($\knots=\SOnumKnotsUnit$); Tables~\ref{app:so:a2:tab:families}
+and~\ref{app:so:a2:tab:families-flags} give the values. $S$ is a fresh random
+subset at each seed, and its three coordinates
+are the first three \SOcode{aligned10} activates at the same seed, in the rank
+order shares and lengthscales are assigned in --- the nesting
+of~\ref{app:so:a3:seeding}. So the pair \SOcode{aligned3}/\SOcode{aligned10} is
+a within-seed comparison of two sparsity levels over a shared coordinate set,
+not two unrelated problems.
+
+\textbf{What it isolates.} The design brief's ``positive control: both columns
+should agree''. With one lengthscale shared by every active coordinate the
+slope factor $5/(3\ell_i^2\vell{\ell_i})$
+of~\eqref{app:so:a1:eq:slopeshare} is the same for all $i$ and cancels in the
+normalization, so the theoretical slope share is \emph{equal} to the variance
+share, coordinate by coordinate --- the two senses of relevance the thesis
+contrasts do not merely correlate here, they coincide. A prior whose two
+columns disagree on this variant is disagreeing about nothing, so it is the
+variant that says whether a difference seen elsewhere is a real effect of the
+ground truth or an artefact of the readout.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid} gives the spread of $\fstar$ across the seeds
+and the two invariants. Having the smallest active set in the study, it has the
+lowest $\fstar$ median in the table.
+
+\SOlevelC{\SOcode{aligned10}}\label{app:so:a2:aligned10}
+
+\textbf{Parameters.} As \SOcode{aligned3} in every field of the specification
+except $|S|$: ten active coordinates, equal shares $1/|S|$, the same single
+lengthscale, no pairs, $\gamma=0$, Mat\'ern, not monotone, unit grid. Its
+active set at a seed contains \SOcode{aligned3}'s.
+
+\textbf{What it isolates.} The same positive control at the sparsity level the
+rest of the study uses --- ten active coordinates out of
+$D=\SOnumStudyD$ --- so it is the baseline every other ten-coordinate variant
+below is read against. Because the shares are equal, no coordinate is easier to
+find than another, and a model's recovered support can be scored as a set
+without weighting.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid}: with ten components rather than three its
+$\fstar$ median is the higher of the two, even though both objectives carry the
+same total variance. $\fstar$ sums a per-component maximum
+over the active set (\eqref{app:so:a1:eq:fstar}) and each component's
+amplitude scales with $\sqrt{s_i}$ by~\eqref{app:so:a1:eq:rescale}, so
+spreading one unit of variance over more coordinates raises the sum.
+
+\SOlevelC{\SOcode{aligned10\_sin}}\label{app:so:a2:aligned10-sin}
+
+\textbf{Parameters.} Identical to \SOcode{aligned10} in every field but one:
+same $|S|$, same shares, same lengthscale, no pairs, $\gamma=0$, not monotone,
+same unit grid --- and the generator is \SOcode{sinusoid} rather than
+\SOcode{matern}. The identity goes further than the specification. The
+selection stream does not see the generator, so $S$ is the same set at the same
+seed, and \SOcode{build} spawns one child stream per active rank the same way
+for both, so each component is drawn from the same stream as its
+\SOcode{aligned10} counterpart. Only the draw function differs. Its labels
+record \SOcode{generator} as \SOcode{sinusoid}, which is how a downstream
+analysis tells the two apart.
+
+\textbf{What it isolates.} It is the brief's ``one family generated from
+rescaled sinusoids rather than a GP'', one of the two out-of-family checks the
+brief names. In every other variant the components are Mat\'ern draws and the
+models the study fits are Mat\'ern too, so the additive cells are in-family by
+construction and a prior could look good for the wrong reason; this variant
+breaks that coincidence while holding everything else fixed. Since
+$S$, the shares, the lengthscale and the random stream are all shared with
+\SOcode{aligned10}, any difference in a model's behaviour between the two is
+attributable to the generator alone.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid}. One caveat belongs with it. The sinusoid
+frequency $\omega(\ell)$ of~\eqref{app:so:a1:eq:omega} is chosen to match the
+Mat\'ern slope energy per unit variance, but that identity needs at least one
+full cycle on the unit interval, $\omega(\ell)\ge1$, and the $\omega$ column of
+Table~\ref{app:so:a1:tab:tab_v_ell} puts this variant's lengthscale below that
+crossing. For the study's only sinusoid variant the frequency match is
+therefore approximate, not exact (\ref{app:so:a1:generators}; design decision
+R11,~\ref{app:so:a4}), and its slope shares are read off the recorded label
+$g$, a realized quantity, never inferred from~\eqref{app:so:a1:eq:omega}. Its
+variance share is unaffected: the rescale of~\eqref{app:so:a1:eq:rescale} is
+applied to whatever raw values the generator returns, so $\Varhat f_i=s_i$
+holds exactly for it too, by~\eqref{app:so:a1:eq:exactshare}.
+
+\SOlevelC{\SOcode{decoupled}}\label{app:so:a2:decoupled}
+
+\textbf{Parameters.} Eight active coordinates, two to a cell of a
+strength-by-roughness grid: two variance shares crossed with two lengthscales,
+the four cells Table~\ref{app:so:a2:tab:decoupled} names weak-rough,
+weak-smooth, strong-rough and strong-smooth. The four strong and the four weak
+shares together sum to one, so $\Varhat f=1$ with no interaction budget to
+subtract; there are no pairs, $\gamma=0$, the generator is Mat\'ern, there is no
+monotone rejection, and the grid is the unit-interval one.
+Table~\ref{app:so:a2:tab:families} gives the shares and lengthscales per rank
+rather than as one broadcast value, because a cell needs a specific share paired
+with a specific lengthscale and not merely the right multiset. The check is at
+build time rather than in the specification: \SOcode{FamilySpec} is a plain
+frozen record that validates nothing, and it is
+\SOcode{families.\_resolve\_shares}, called from \SOcode{build}, that rejects a
+shares tuple whose length does not match $|S|$. Since shares and lengthscales are assigned by rank, cell membership
+is fixed while the coordinates filling the cells are redrawn at every seed.
+
+\textbf{What it isolates.} The design brief's ``the two senses of relevance
+disagree''. Variance ranks the coordinates strong above weak and nothing else;
+theoretical slope share, by~\eqref{app:so:a1:eq:slopeshare}, weights each share
+by $1/(\ell_i^2\vell{\ell_i})$, and at the rough lengthscale that factor is
+large enough to lift the weak coordinates over the strong-smooth ones. The
+resulting order --- strong-rough, then weak-rough, then strong-smooth, then
+weak-smooth --- is the one Table~\ref{app:so:a2:tab:decoupled} prints, and it
+crosses the share order: a weak-rough coordinate outranks a strong-smooth one on
+slope while the strong-smooth one outranks it on variance. That crossing is the
+whole point of the variant. A model that reads relevance off inverse
+lengthscales and one that reads it off signal variance cannot both be right
+here, so their recovered rankings must separate, and this is the variant where
+the thesis expects the two prior families to order the coordinates differently.
+
+\textbf{Measured on the archived grid.} Table~\ref{app:so:a2:tab:decoupled}
+gives the theoretical and realized slope shares cell by cell; its row of
+Table~\ref{app:so:a2:tab:grid} gives $\fstar$ and the invariants. The realized
+column follows the theoretical order across all four cells, which is the check
+the design asks of it: the disagreement it manufactures survives the draw.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The four cells of \SOcode{decoupled}]{
+  The four cells of \SOcode{decoupled}: each cell's share and lengthscale, its
+  unnormalized theoretical slope energy $s\cdot5/(3\ell^2\vell{\ell})$, the
+  theoretical slope share that energy normalizes to over all eight active
+  coordinates, and the realized slope share label $g$ averaged over the seeds.
+  Mixed check class. Every column but the last is closed form --- a
+  deterministic function of the specification and of the
+  quadrature~\eqref{app:so:a1:eq:vell} --- and no draw enters it. The last
+  column is draw-dependent: measured on
+  the archived grid, seeds $0$--$9$, $D=\SOnumStudyD$, this machine's BLAS\@. The
+  cell list is derived from the specification's own distinct $(s,\ell)$ pairs,
+  so a cell added to the family cannot be silently dropped from the
+  table.}\label{app:so:a2:tab:decoupled}
+  \small\setlength{\tabcolsep}{3pt}
+  \input{\SOroot/tables/tab_decoupled}
+\end{table}
+
+\SOlevelC{\SOcode{anti\_aligned}}\label{app:so:a2:anti-aligned}
+
+\textbf{Parameters.} Six active coordinates with shares given per rank in
+decreasing order and lengthscales decreasing alongside them --- the brief's
+``weak ones rough'', taken to its limit, with one distinct lengthscale per
+coordinate. No pairs, $\gamma=0$, Mat\'ern, not monotone, unit grid;
+Tables~\ref{app:so:a2:tab:families-flags} and~\ref{app:so:a2:tab:anti-aligned}
+give the values.
+
+This is the one variant whose parameters the design brief's own family table no
+longer matches, and here the code is authoritative: the shipped lengthscales are
+those the tables print, and the brief's row predates the decision that replaced
+them. The reason for the replacement is visible in what the two sets achieve.
+With the brief's lengthscales the theoretical slope shares
+of~\eqref{app:so:a1:eq:slopeshare} come out neither monotone in rank nor
+reversed --- their Spearman correlation against the variance shares is far from
+$-1$, and the profile is closer to flat than to reversed --- so the family would
+not have delivered the reversal it exists to deliver. The shipped lengthscales
+are chosen so that it does, exactly.
+
+\textbf{What it isolates.} The brief's ``sharpest version: share and slope
+rankings reversed''. Where \SOcode{decoupled} inverts a single pair of cells ---
+weak-rough over strong-smooth --- this variant makes the two senses
+anti-correlated over the whole active set: the coordinate with the largest
+variance share has the
+smallest theoretical slope share and the coordinate with the smallest share has
+the largest, with Spearman exactly $-1$ between the two rankings
+(Table~\ref{app:so:a2:tab:anti-aligned}). A prior that infers relevance from
+inverse lengthscales and one that infers it from signal variance will therefore
+rank the coordinates in opposite orders, and a BO loop guided by the wrong one
+should spend its budget on the coordinates that matter least. It is the variant
+that most sharply separates the thesis's two hypotheses, and the one where the
+two are most likely to differ in regret.
+
+\textbf{Measured on the archived grid.}
+Table~\ref{app:so:a2:tab:anti-aligned} carries three summary rows, and they are
+three different statistics; the entry is worth reading carefully, because they
+do not all say the same thing.
+
+The first, the Spearman of the theoretical slope shares against the variance
+shares, is a closed-form property of the specification --- no draw enters it ---
+and it is exactly $-1$: the design achieves the reversal by construction.
+
+The second is the Spearman of the \emph{seed-mean} realized $g$ against the
+shares, the vector of per-rank means over the archived grid's seeds correlated
+against $s$. On this grid it is also exactly reversed. This is the statistic the
+family's acceptance criterion is stated on.
+
+The third is the Spearman over \emph{all} individual (seed, rank) realized
+pairs, pooled into one sample. It is much weaker in magnitude than either of the
+others, and that is not a defect in the archive: it is the honest measure of how
+well a \emph{single} draw reproduces the design. Realized slope energy is a
+draw-level quantity with substantial variance, and this family puts exactly one
+coordinate at each lengthscale, so within one seed there is nothing to average
+over --- a single unlucky component can invert a neighbouring pair of ranks. The
+per-seed realized ranking is therefore unreliable, and no analysis in the thesis
+should treat a single seed's realized $g$ order as the family's ground truth;
+the reversal is a property of the design and of the seed-averaged behaviour, not
+of every draw. This is precisely why the family's acceptance criterion is
+stated on the theoretical shares plus the seed-averaged realized check rather
+than per seed (design decision R13,~\ref{app:so:a4}). Its row of
+Table~\ref{app:so:a2:tab:grid} gives $\fstar$ and the invariants.
+
+\begin{table}[htbp]
+  \centering
+  \caption[\SOcode{anti\_aligned}: theoretical and realized slope shares]{
+  \SOcode{anti\_aligned} rank by rank: the variance share, the lengthscale,
+  $\vell{\ell_i}$, the slope factor $5/(3\ell_i^2\vell{\ell_i})$
+  of~\eqref{app:so:a1:eq:slopefactor}, the theoretical slope share
+  of~\eqref{app:so:a1:eq:slopeshare}, and the realized slope share label $g$
+  averaged over the seeds. Mixed check class. Every column but the last is
+  closed form, a deterministic function of the specification and of the
+  quadrature~\eqref{app:so:a1:eq:vell}, and so is the first summary row. The
+  mean realized column and the two remaining summary rows are draw-dependent:
+  measured on the archived grid, seeds $0$--$9$, $D=\SOnumStudyD$, this
+  machine's BLAS\@. The last two rows are deliberately \emph{different}
+  statistics --- the seed-mean vector correlated against $s$, and every
+  individual (seed, rank) pair pooled into one sample --- and the second is not
+  recoverable from the mean realized column
+  alone.}\label{app:so:a2:tab:anti-aligned}
+  \small\setlength{\tabcolsep}{3pt}
+  \input{\SOroot/tables/tab_anti_aligned}
+\end{table}
+
+\SOlevelC{\SOcode{interaction\_g0.00}}\label{app:so:a2:interaction-g0-00}
+
+\textbf{Parameters.} Five active coordinates at one shared lengthscale, plus
+two disjoint pairs drawn from inside $S$; Mat\'ern, not monotone, unit grid.
+The interaction budget is $\gamma=0$, so each pair carries
+$s_{ij}=\gamma/n_{\text{pairs}}=0$ and the main shares are the equal split
+$(1-\gamma)/|S|$ of the whole budget. This is the first member of the sweep,
+and the four that follow differ from it only in $\gamma$.
+
+It is important that this is \emph{not} simply a five-coordinate aligned
+variant. \SOcode{select\_pairs} runs whenever the specification asks for pairs,
+irrespective of $\gamma$, so at every seed \SOcode{labels.pairs} records two
+pairs; two \SOcode{Interaction} objects are built, each with coefficient
+$c_{ij}=\sqrt{s_{ij}}=0$ and each with its own two unit-variance factor draws;
+and $\fstar$ is assembled by the two-dimensional block search over those pairs
+rather than by the per-component maximum, since the assembly treats a
+coordinate in any pair as part of a block. The variant is the sweep's control,
+sharing the sweep's code path and its random stream exactly, and its recorded
+labels look like an interacting objective whose interactions happen to have
+zero weight.
+
+\textbf{What it isolates.} The sweep as a whole is the design brief's
+``additivity failing''; this member is its additive end, the reference the
+other four are read against. Because it runs the same machinery at zero
+strength, any difference between it and a member with $\gamma>0$ is
+attributable to the interaction budget alone --- not to a change of code path,
+of active set, of pair choice, or of random stream. It is also the variant that
+tells the study whether a purely additive model pays any price merely for the
+possibility of interaction.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid}. It is the only member of the sweep whose QMC
+$\Varnu$ minimum and maximum agree to the printed precision: with $\gamma=0$
+every $c_{ij}$ is zero, so the objective is exactly additive and the pair
+blocks the other four rows sample over contribute nothing.
+
+\SOlevelC{\SOcode{interaction\_g0.10}}\label{app:so:a2:interaction-g0-10}
+
+\textbf{Parameters.} The same shape as \SOcode{interaction\_g0.00} --- five
+active coordinates, one lengthscale, two disjoint pairs, Mat\'ern, not
+monotone, unit grid --- with the interaction budget $\gamma$ raised to the
+value Table~\ref{app:so:a2:tab:families-flags} prints, split equally between the two
+pairs as $s_{ij}=\gamma/n_{\text{pairs}}$ with $c_{ij}=\sqrt{s_{ij}}$
+(\eqref{app:so:a1:eq:hshare}). The main shares fall to $(1-\gamma)/|S|$ so that
+$\sum_i s_i+\gamma=1$ and $\Varhat f$ is still one
+(\eqref{app:so:a1:eq:budget}). At a given seed the active set, the two pairs
+and every raw draw are the same as in every other member of the sweep; only the
+shares and the pair coefficients move.
+
+\textbf{What it isolates.} ``Additivity failing'', at the sweep's smallest
+nonzero dose. A tenth of the variance sitting outside the additive
+decomposition is the regime where an additive model is still nearly right, so
+this is where the thesis expects a well-calibrated sparsity prior to lose
+little: the mismatch should show up as a small, systematic gap rather than a
+failure of support recovery.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid}.
+
+\SOlevelC{\SOcode{interaction\_g0.25}}\label{app:so:a2:interaction-g0-25}
+
+\textbf{Parameters.} As \SOcode{interaction\_g0.10} with $\gamma$ at the next
+value in Table~\ref{app:so:a2:tab:families-flags}: five active coordinates, one
+lengthscale, two disjoint pairs sharing $\gamma$ equally, main shares
+$(1-\gamma)/|S|$. Active set, pairs and raw draws are again unchanged from the
+rest of the sweep at the same seed.
+
+\textbf{What it isolates.} ``Additivity failing'' at a quarter of the variance.
+This is the middle of the sweep, where the interaction is large enough that an
+additive surrogate must misfit somewhere but small enough that the main effects
+still dominate the ranking; it is the member most likely to separate a model
+that degrades gracefully under misspecification from one that does not.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid}.
+
+\SOlevelC{\SOcode{interaction\_g0.50}}\label{app:so:a2:interaction-g0-50}
+
+\textbf{Parameters.} As the rest of the sweep, with $\gamma$ at the value
+Table~\ref{app:so:a2:tab:families-flags} prints: half the variance budget in the two
+pairs and half spread equally over the five main effects, each of which now
+carries a smaller share than its pair does.
+
+\textbf{What it isolates.} ``Additivity failing'' at the point where the two
+halves of the decomposition are balanced. Beyond here the additive part of the
+objective is no longer the larger part, so a model that can only represent main
+effects is fitting a minority of the signal --- and, because the pairs sit
+inside $S$, it is fitting it on coordinates that are genuinely relevant, which
+is the failure mode the sweep is built to grade.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid}.
+
+\SOlevelC{\SOcode{interaction\_g0.75}}\label{app:so:a2:interaction-g0-75}
+
+\textbf{Parameters.} The sweep's largest interaction budget, again split
+equally between the same two pairs, with the five main shares reduced to
+$(1-\gamma)/|S|$ accordingly; every other field is as
+\SOcode{interaction\_g0.00}.
+
+\textbf{What it isolates.} ``Additivity failing'' taken to the point where most
+of the variance is in the pairs. An additive model is now badly misspecified by
+construction, and the question the variant asks is not whether it fits but
+whether the sparsity prior still recovers the right \emph{support} --- the
+first-order shares $s_i$ remain equal and nonzero, so the active set is
+unchanged even though most of the function is no longer additive.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid}, and, read together with the four rows above it,
+the sweep's trend: the median $\fstar$ rises monotonically with $\gamma$ and
+the spread between the smallest and largest $\fstar$ across seeds widens
+monotonically with it, this variant having the widest of the five. Both follow
+from the product form of~\eqref{app:so:a1:eq:hdef}: a pair block's maximum is
+the largest value of $c_{ij}u_i u_j$ over the square, so moving budget into the
+pairs both raises the attainable maximum and makes it depend on the shape of
+two draws at once rather than one.
+
+\SOlevelC{\SOcode{rotated\_t0}}\label{app:so:a2:rotated-t0}
+
+\textbf{Parameters.} Ten active coordinates with equal shares at one
+lengthscale, arranged in five disjoint pairs, each pair rotated by $\theta$ in
+its own plane (\ref{app:so:a1:rotation}); Mat\'ern, not monotone. There is no
+explicit interaction: $\gamma$ is exactly zero and no \SOcode{Interaction}
+object is built at all, because with $\theta$ set the pairs are what the
+rotation acts on and the shares alone already sum to one. Every component sits
+on the extended grid, $\knots=\SOnumKnotsExt$ rather than $\SOnumKnotsUnit$
+(Table~\ref{app:so:a2:tab:families-flags}), since a rotated coordinate's argument
+runs outside the unit interval (\eqref{app:so:a1:eq:next}).
+
+That last point has a consequence worth stating plainly, because it is easy to
+assume otherwise: at $\theta=0$ the rotation is the identity and the objective
+\emph{is} exactly additive and axis-aligned, but it is not the same objective
+as \SOcode{aligned10} at the same seed. \SOcode{build} chooses the draw domain
+and the grid size per coordinate according to whether that coordinate sits in a
+rotation pair, so every component here is drawn on the extended grid instead of
+the unit one --- a different eigen factor and a different number of variates ---
+and the delivered functions differ. The active set is the same; the draws are
+not.
+
+\textbf{What it isolates.} The rotated family is the design brief's ``axis
+alignment failing''; this member is its aligned end, the control that separates
+the effect of rotating from the effect of being built for rotation. Comparing it
+with \SOcode{rotated\_t15} and \SOcode{rotated\_t45} isolates the angle, since
+those three differ in $\theta$ and in nothing else; comparing it with
+\SOcode{aligned10} does not, because that comparison confounds the angle with
+the change of draw domain described above.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid} and the $\theta=0$ row of
+Table~\ref{app:so:a1:tab:tab_rotation_angle}, where $\kappa$ is exactly one at
+every seed and $\gaxis$ is zero up to floating-point epsilon --- never a
+genuinely negative quantity; that table's own header comment records the
+per-seed residuals. Both repairs the rotation needs, the recentering $\mu$ and
+the renormalization $\kappa$, are therefore inactive here.
+
+\SOlevelC{\SOcode{rotated\_t15}}\label{app:so:a2:rotated-t15}
+
+\textbf{Parameters.} As \SOcode{rotated\_t0} in every field but $\theta$, which
+Tables~\ref{app:so:a2:tab:families}
+and~\ref{app:so:a2:tab:families-flags} give: ten coordinates, equal shares,
+one lengthscale, five disjoint rotated pairs, $\gamma$ exactly zero, extended grid.
+
+\textbf{What it isolates.} ``Axis alignment failing'' at a small angle. The
+function is still additive in a rotated basis and still exactly the same
+function of that basis; what fails is only the assumption that the relevant
+directions are coordinate axes. This is the variant where an axis-aligned
+sparsity prior is mildly wrong, and the thesis's hypothesis is that the two
+prior families differ in how gracefully they absorb that: a small rotation
+leaks a little variance into pairwise structure that no per-coordinate
+lengthscale can represent.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid} and the $\theta=15^\circ$ row of
+Table~\ref{app:so:a1:tab:tab_rotation_angle}. Two things there deserve care.
+First, $\kappa$ straddles one at this angle: the table's count of seeds with
+$\kappa>1$ is nonzero here, so the sign of $\kappa-1$ is seed-dependent at
+$15^\circ$ --- as it also is at $60^\circ$, and as it is not at $30^\circ$ or
+$45^\circ$, where every seed has $\kappa<1$. Second, the angle does not index
+the misspecification; see the entry for \SOcode{rotated\_t45}.
+
+\SOlevelC{\SOcode{rotated\_t45}}\label{app:so:a2:rotated-t45}
+
+\textbf{Parameters.} As \SOcode{rotated\_t0} and \SOcode{rotated\_t15} but at
+the largest of the study's three angles: ten coordinates, equal shares, one
+lengthscale, five disjoint rotated pairs, $\gamma$ exactly zero, extended grid.
+
+\textbf{What it isolates.} ``Axis alignment failing'' at the diagonal, where a
+pair's two rotated directions are equal mixtures of its two coordinates and the
+axis-aligned decomposition has least to work with. Of the six angles
+Table~\ref{app:so:a1:tab:tab_rotation_angle} reports, this one has the largest
+median $\gaxis$. It is the rotated family's worst case, and the natural partner
+to \SOcode{anti\_aligned}: both ask what happens when the structure the prior
+assumes is not the structure the objective has.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid} and the $\theta=45^\circ$ row of
+Table~\ref{app:so:a1:tab:tab_rotation_angle}. Its QMC $\Varnu$ minimum is the
+lowest in the grid summary; the final row of that table repeats this variant at
+one seed with a sixteen-fold larger Sobol' sample, and both moment columns
+tighten, so that residual reads as sampling error rather than a defect in the
+objective.
+
+The analysis rule for the whole rotated family (\ref{app:so:a1:rotation},
+ruling R28) is best stated here, since this is the angle at which it bites.
+$\gaxis$ vanishes at every multiple of $90^\circ$ and is largest near the
+diagonal, so it is not monotone in $\theta$; and the $\gaxis$ ranges at the
+$30^\circ$, $45^\circ$ and $60^\circ$ rows overlap one another, so among those
+rows the nominal angle does not determine $\gaxis$ --- restricted to those three
+rows, the spread across seeds within one angle exceeds the gap between the
+medians of adjacent angles. The study therefore conditions its analysis on the
+recorded \SOcode{gamma\_axis} label of each objective, never on $\theta$. The
+nominal angle names the variant; it does not measure it.
+
+\SOlevelC{\SOcode{dense\_weak}}\label{app:so:a2:dense-weak}
+
+\textbf{Parameters.} Every one of the $D$ coordinates is active, each with the
+same share $1/D$, all at one large lengthscale; no pairs, $\gamma=0$, Mat\'ern
+generator, and --- alone among the fourteen --- the monotone rejection wrapper
+is on, so each component is redrawn until its grid values are monotone
+(\ref{app:so:a1:generators}). The direction is drawn per coordinate, so a
+component is as likely to be decreasing as increasing. A component whose grid
+values rise or fall monotonically is expected to take its largest value at an
+end of the interval, though the rejection alone does not guarantee it: what is
+stored is a not-a-knot cubic spline through those values, which may overshoot
+between knots, and the rejection constrains only the knots. On the archived grid
+it nevertheless holds without exception --- at every seed the maximizer
+$x^\star$ the labels record is a corner of the cube, every coordinate at exactly
+$0$ or $1$, and both endpoints occur --- which is the measurement
+\SOtest{test\_dense\_weak\_x\_star\_is\_a\_corner\_on\_the\_archived\_grid}
+pins. The explicit direction draw is in fact redundant in law, as shown
+in~\ref{app:so:a1:generators} --- the rejection already accepts either direction
+--- so the mix of endpoints is a property of the rejection, not of the coin.
+
+This is the one variant whose row in Table~\ref{app:so:a2:tab:families} is not
+the study's own configuration: $|S|$ and the share both track $D$, and that
+table is built at $D=\SOnumTableD$ rather than at the study's
+$D=\SOnumStudyD$. The shape is the same at either dimension --- every
+coordinate active with share $1/D$ --- but the numbers in that one row are not
+the study's, and the next paragraph turns on the difference.
+
+\textbf{What it isolates.} The design brief's ``sparsity failing
+(Lasso-DNA-like); all shares below $\activeeps$ by design''. It is the arm where
+the sparse prior's central assumption is false: there is no small relevant
+subset to find, only many weak coordinates. The thesis's hypothesis is that a
+prior which shrinks aggressively toward sparsity should pay here, while one
+that can express many weak relevances should not --- and, because every
+coordinate is monotone at a large lengthscale, the objective remains easy for a
+method that simply follows the gradient of the mean, so a failure on this
+variant is a failure of the prior and not of the problem's difficulty.
+
+The ``below $\activeeps$'' half of the brief's description is worth stating
+exactly, because it is a property of $D$ and not of the family. The share is
+$1/D$, so $1/D<\activeeps$ exactly when $D>1/\activeeps$: at the study's
+$D=\SOnumStudyD$ every share is below the threshold, which is the design point,
+while at the $D=\SOnumTableD$ Table~\ref{app:so:a2:tab:families} is built at,
+no share is. Either way \SOcode{Labels.active} is all-true, at every $D$: the
+label is set membership, $s_i>0$, and $\activeeps$ is recorded separately in
+\SOcode{Labels.active\_eps} for scoring rather than enforced. The variant is
+built precisely so that the brief's scoring rule and the objective's own notion
+of an active coordinate disagree at the study's dimension.
+
+\textbf{Measured on the archived grid.} Its row of
+Table~\ref{app:so:a2:tab:grid}. It has by a wide margin the largest $\fstar$ in
+the table and the narrowest spread of $\fstar$ across seeds --- both direct
+consequences of its shape: $\fstar$ sums a maximum over all $D$ coordinates
+rather than a handful, and averaging that many independent per-component maxima
+leaves little seed-to-seed variation.

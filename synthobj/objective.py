@@ -21,9 +21,12 @@ Which quantities are exact and which are quadrature:
   piecewise-quadratic spline derivative in closed form). Per paired block (`block_argmax` for an
   interaction, `rotated_block_argmax` for a rotated pair) it is not closed form: both scan a grid
   and refine with L-BFGS-B. Re-optimizing from the returned point with far tighter tolerances
-  moves the value by exactly 0.0, so it is a converged optimum of the spline surface; see
-  `interaction.block_argmax`'s and `rotation.rotated_block_argmax`'s docstrings, which also
-  explain why a gap against a finite reference grid bounds the reference rather than the method.
+  does not improve the value beyond floating-point roundoff -- exactly 0.0 on every interaction
+  block and on all but one rotated block of the archived grid; see the appendix's table
+  (`docs/thesis/tables/tab_fstar_reopt.tex`) for the counts, which are not restated here -- so it
+  is a converged optimum of the spline surface; see `interaction.block_argmax`'s and
+  `rotation.rotated_block_argmax`'s docstrings, which also explain why a gap against a finite
+  reference grid bounds the reference rather than the method.
   Two earlier figures here -- "accurate to about 1e-10" and "within 5.2e-8" -- were wrong, the
   first never measured and the second measured on blocks other than the ones it named. Pairs are disjoint, so
   each block is an independent function of its own two coordinates and the maximum separates
@@ -140,10 +143,11 @@ class SyntheticObjective:
     default noise sd of 0.1; a spec that is present must carry `name`, `noise_sd`, `generator` and
     `monotone`, and a missing one raises `AttributeError` (ruling R27). `labels` is for the
     save/load path: when it is given it is stored verbatim and `f_star` is taken from it, so
-    loading never re-runs the block maximizations; `scale` and `mu` are likewise never computed in
-    that case (set to inert `1.0`/`0.0` placeholders instead) rather than computed and immediately
-    discarded, since `load` overwrites both right after construction regardless -- measured 67% of
-    `load`'s own cost at D=100 on `rotated_t45` (fix-round finding).
+    loading never re-runs the block maximizations: only `_compute_labels`, where the real cost
+    sits, is skipped unconditionally. `scale` is then taken from `labels`, where it is already
+    stored and exactly right, and `mu` -- which has no home in `Labels` -- is computed, cheaply
+    (`_compute_mu` early-returns 0.0 without a rotation). `load` restores `scale`, `mu` and
+    `noise_sd` from the file right after construction anyway.
 
     An Interaction and a rotation cannot both be present (ruling R39): `raise`s `ValueError` at
     construction, since `s_axis` (see `_compute_labels`) has no defined meaning for an
@@ -413,10 +417,11 @@ class SyntheticObjective:
         point. `Labels` is passed through to `__init__` verbatim (`labels=labels`), so `_compute_labels`
         never runs at all.
 
-        `__init__` sets `scale`/`mu` to inert placeholders (`1.0`/`0.0`) whenever `labels` is given,
-        rather than computing them just to discard them (fix-round finding: `_compute_scale`/
-        `_compute_mu` measured 67% of this method's own cost at D=100 on `rotated_t45`) -- so the
-        two assignments below are not "immediately overwriting a recompute" any more. `noise_sd` is
+        `__init__` takes `scale` from the supplied `labels` and computes `mu` (only
+        `_compute_labels` is skipped unconditionally, since that is where the real cost sits), so
+        the two assignments below overwrite a stored value and a cheap quadrature, never a block
+        maximization -- and a supplied-`labels` caller that is not `load` still gets a usable
+        `scale`/`mu` pair rather than an inert one. `noise_sd` is
         the one field `__init__` still genuinely computes (cheap: a `spec` field lookup, no block
         maximization) and this method still overwrites it anyway: the stored `labels.f_star` was
         computed with the *original* `scale`, and `observe` reads `noise_sd` directly -- a future
@@ -546,9 +551,10 @@ class SyntheticObjective:
         coordinates and the maximum separates: `f_star` is `(sum - self.mu) * self.scale`, where
         `sum` is the raw total of the per-block maxima (`block_argmax` for an interaction,
         `rotated_block_argmax` for a rotated pair -- both converged optima, in the sense that
-        re-optimizing from the returned point does not improve it; see the module docstring) and the per-component maxima from `Component.argmax` (exact to
-        floating point) -- matching `__call__`, which recenters and scales the whole sum once
-        rather than each block (ruling R30: `rotated_block_argmax`'s own `phi` is never
+        re-optimizing from the returned point does not improve the value beyond floating-point
+        roundoff; see the module docstring) and the per-component maxima from `Component.argmax`
+        (exact to floating point) -- matching `__call__`, which recenters and scales the whole
+        sum once rather than each block (ruling R30: `rotated_block_argmax`'s own `phi` is never
         recentered, since L-BFGS-B's relative
         `ftol` would otherwise see a shifted stopping denominator and the maximizer's last bits
         could move). `x_star` records the achieving coordinates, with every coordinate carrying no

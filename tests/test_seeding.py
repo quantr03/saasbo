@@ -5,9 +5,10 @@ the separability this buys is the point of the whole scheme: changing one part o
 must never perturb a component or a coordinate selection it has no business touching. Each test
 below isolates one such independence claim rather than re-deriving it from `build`'s own bookkeeping:
 
-- a gamma sweep at one seed must move only the share scaling, never S, the pairs, or a component's
+- a gamma sweep at one seed must move only the share scaling, never S, the pairs, a component's
   underlying shape (checked via `values / sqrt(share)`, an independent renormalization the
-  implementation is not simply asked to echo back);
+  implementation is not simply asked to echo back), or the interaction factors, which are
+  bit-identical because they are drawn at `share = 1`;
 - changing one coordinate's lengthscale must leave every other rank's raw draw bit-identical, not
   merely close;
 - `select_active` truncating one permutation is what makes `aligned3`'s S a *prefix* of
@@ -40,6 +41,11 @@ def test_gamma_sweep_keeps_S_pairs_and_component_shapes_identical() -> None:
     stays correct (and the two gammas differ) even when `_resolve_shares` is broken. The
     `labels.gamma` checks are not tautological and are kept, but the two-sidedness this docstring
     used to attribute to them belongs to the per-component share comparison instead.
+
+    The interaction factors are asserted bit-identical rather than close: they are drawn with
+    `share = 1` regardless of gamma, so gamma moves `Interaction.c` alone and nothing rescales
+    their stored values. This is the assertion behind the appendix's gamma row claiming the
+    interaction factors bit-identical (final-review Minor 9).
     """
     seed = 42
     base = dict(name="t", D=20, n_active=5, ells=0.5, n_pairs=2)
@@ -58,6 +64,15 @@ def test_gamma_sweep_keeps_S_pairs_and_component_shapes_identical() -> None:
         v0 = c0.values / np.sqrt(c0.share)
         v5 = c5.values / np.sqrt(c5.share)
         assert np.allclose(v0, v5, atol=1e-12, rtol=0.0)
+
+    assert len(obj0.interactions) == len(obj5.interactions) == 2
+    for h0, h5 in zip(obj0.interactions, obj5.interactions):
+        assert (h0.i, h0.j) == (h5.i, h5.j)
+        assert h0.c != pytest.approx(h5.c)
+        for u0, u5 in ((h0.u_i, h5.u_i), (h0.u_j, h5.u_j)):
+            assert u0.share == u5.share == 1.0
+            np.testing.assert_array_equal(u0.grid, u5.grid)
+            np.testing.assert_array_equal(u0.values, u5.values)
 
 
 def test_changing_one_coordinates_ell_leaves_the_others_bit_identical() -> None:

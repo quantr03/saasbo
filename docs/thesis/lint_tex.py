@@ -17,16 +17,35 @@ Scans every ``.tex`` file in this directory and in ``tables/`` and checks:
   5. No ``\\documentclass``, ``\\begin{document}``, ``\\usepackage`` or
      ``\\cite`` in a fragment or a table.
   6. No raw ``\\mathrm{Var}``, ``\\mathrm{E}``, ``\\mathbb{E}``, ``\\sigma``
-     or ``\\lambda`` in a fragment -- the notation-drift guard; these must
-     go through the macros in synthobj-notation.sty instead.
-  7. Every notation macro (``\\SO...`` or one of the fixed Design-brief/
-     appendix macro names) that a fragment uses is defined either in
-     synthobj-notation.sty or in tables/numbers.tex.
+     or ``\\lambda`` in a fragment or a table -- the notation-drift guard;
+     these must go through the macros in synthobj-notation.sty instead. This
+     also catches the subscripted/decorated forms (``\\sigma_i^2``,
+     ``\\lambda_{\\max}``): matching stops only at a following letter, not
+     at ``_`` or a digit.
+  7. Every ``\\SO...`` macro a fragment or a table uses is defined in
+     synthobj-notation.sty (``\\newcommand``/``\\renewcommand``/
+     ``\\DeclareMathOperator``) or as ``\\SOnum...`` in tables/numbers.tex.
+     Deliberately scoped to the SO namespace only (fix-round 2, ruling
+     R14): standard LaTeX/amsmath commands (``\\frac``, ``\\toprule``,
+     ``\\le``, ...) and this file's own non-SO notation macros (``\\Enu``,
+     ``\\fstar``, ...) are NOT checked here, because no finite allowlist of
+     "legitimate standard LaTeX" can avoid false positives once fragments
+     have real content -- fix-round 1 tried exactly that (KNOWN_STANDARD_
+     MACROS) and it would have broken on the first booktabs table or the
+     first derivation. Any undefined command, SO-prefixed or not, is still
+     caught: by the compile. ``make pdf`` runs latexmk with
+     ``-halt-on-error``, which fails on "Undefined control sequence".
 
 "Fragment" means appendix-synthobj.tex and A1-construction.tex through
 A4-design-decisions.tex. "Table" means a file under tables/. "The wrapper"
 means standalone_main.tex, which is exempt from checks 4-7 since it is
 allowed (and needs) \\documentclass, \\usepackage, etc.
+
+Checks 6 and 7 cover tables as well as fragments (task-6 item 0a): every
+generated table is \\input into a fragment, so raw notation or an undefined
+\\SO macro emitted by regen_tables.py lands in the appendix exactly as if it
+had been typed into the fragment by hand, and scoping the two checks to
+fragments alone left that path unguarded.
 
 Exits 1 and prints one "path:line: message" line per failure; exits 0 and
 prints a one-line summary if everything passes.
@@ -41,18 +60,37 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 WRAPPER_NAME = "standalone_main.tex"
 
-FRAGMENT_MACRO_RE = re.compile(
-    r"\\(SO[A-Za-z]*|Enu|Varnu|vell|kbar|ktil|kl|fstar|Ehat|Varhat|"
-    r"nuhat|Rtheta|phip|saxis|gaxis|knots|nExt|activeeps)\b"
+# check_macros_defined only tests names starting with SO (fix-round 2,
+# ruling R14): that is the one namespace this project fully controls, so it
+# is the only one a closed allowlist can check without false positives.
+# Everything else -- standard LaTeX/amsmath commands and this file's own
+# non-SO notation macros alike -- is left to the compile (make pdf,
+# latexmk -halt-on-error), which fails on any genuinely undefined command.
+# No trailing \b (task-6 item 0c): Python's \b treats a digit and "_" as word
+# characters, so "\SOnumTypo2" and "\SOnumTypo_i" -- where [A-Za-z]* has
+# already stopped at TeX's own control-word boundary, leaving the digit or
+# underscore as ordinary following text -- were not word boundaries and the
+# undefined name went unreported. [A-Za-z]* is the boundary TeX itself uses,
+# so no further anchor is needed or correct.
+SO_MACRO_RE = re.compile(r"\\(SO[A-Za-z]*)")
+DEFINE_RE = re.compile(
+    r"\\(?:newcommand|renewcommand|DeclareMathOperator)\*?\{?\\([A-Za-z]+)\}?"
 )
-DEFINE_RE = re.compile(r"\\(?:newcommand|renewcommand)\*?\{?\\([A-Za-z]+)\}?")
 BEGIN_RE = re.compile(r"\\begin\{([^}]*)\}")
 END_RE = re.compile(r"\\end\{([^}]*)\}")
 INPUT_RE = re.compile(r"\\input\{([^}]*)\}")
 LABEL_RE = re.compile(r"\\label\{([^}]*)\}")
 REF_RE = re.compile(r"\\(eqref|ref)\{([^}]*)\}")
 BANNED_HOST_RE = re.compile(r"\\(documentclass|begin\{document\}|usepackage|cite)\b")
-RAW_NOTATION_RE = re.compile(r"\\mathrm\{Var\}|\\mathrm\{E\}|\\mathbb\{E\}|\\sigma\b|\\lambda\b")
+# No trailing \b on \sigma/\lambda: Python's \b treats "_" as a word
+# character, so it would let "\sigma_i^2" and "\lambda_{\max}" -- the
+# standard way either symbol is decorated -- through uncaught. A negative
+# lookahead for a following letter still blocks matching as a prefix of an
+# unrelated longer command name, while correctly catching "_", a digit, "^"
+# or "{" immediately after.
+RAW_NOTATION_RE = re.compile(
+    r"\\mathrm\{Var\}|\\mathrm\{E\}|\\mathbb\{E\}|\\sigma(?![A-Za-z])|\\lambda(?![A-Za-z])"
+)
 
 failures: list[str] = []
 
@@ -159,8 +197,8 @@ def check_raw_notation(path: Path, lines: list[str]) -> None:
             fail(
                 path,
                 lineno,
-                f"raw notation {m.group(0)!r} in a fragment; use a macro from "
-                f"synthobj-notation.sty instead",
+                f"raw notation {m.group(0)!r} in a fragment/table; use a macro "
+                f"from synthobj-notation.sty instead",
             )
 
 
@@ -188,7 +226,7 @@ def collect_macro_defs(*paths: Path) -> set[str]:
 def check_macros_defined(path: Path, lines: list[str], defined: set[str]) -> None:
     for lineno, raw in enumerate(lines, start=1):
         line = strip_comments(raw)
-        for m in FRAGMENT_MACRO_RE.finditer(line):
+        for m in SO_MACRO_RE.finditer(line):
             name = m.group(1)
             if name not in defined:
                 fail(
@@ -230,14 +268,14 @@ def main() -> int:
             check_banned_host_commands(path, lines)
 
     for path, lines in file_lines.items():
-        if category(path) == "fragment":
+        if category(path) in ("fragment", "table"):
             check_raw_notation(path, lines)
 
     defined_macros = collect_macro_defs(
         HERE / "synthobj-notation.sty", HERE / "tables" / "numbers.tex"
     )
     for path, lines in file_lines.items():
-        if category(path) == "fragment":
+        if category(path) in ("fragment", "table"):
             check_macros_defined(path, lines, defined_macros)
 
     if failures:

@@ -4,16 +4,763 @@
 \SOlevelB{API and file format}\label{app:so:a3}
 
 \SOlevelC{Public surface}\label{app:so:a3:api}
-% filled by Task N
+
+\textbf{The package root exports lazily.} \SOfile{synthobj/\_\_init\_\_.py}
+defines no eager imports at all: its thirteen public names are served by a
+PEP~562 module \SOcode{\_\_getattr\_\_}, which imports \SOcode{synthobj.families}
+or \SOcode{synthobj.objective} only when a name is first read off the root. Ten
+come from the family registry --- \SOcode{FAMILIES}, \SOcode{STUDY\_GRID},
+\SOcode{FamilySpec}, \SOcode{Streams}, \SOcode{build}, \SOcode{make\_family},
+\SOcode{noise\_rng}, \SOcode{select\_active}, \SOcode{select\_pairs} and
+\SOcode{streams} --- and three from the assembled objective:
+\SOcode{SyntheticObjective}, \SOcode{Labels} and \SOcode{load}, which is
+\SOcode{SyntheticObjective.load} itself rather than a wrapper around it. The
+consequence that matters to a user is that a bare \SOcode{import synthobj}
+imports neither submodule, and so imports neither torch nor botorch. The one
+module that imports them is the adapter of~\ref{app:so:a3:botorch}, and nothing
+reaches it implicitly. That is pinned in a
+\emph{subprocess} by
+\SOtest{test\_import\_synthobj\_does\_not\_import\_torch}, which asserts on the
+output of a fresh interpreter running \SOcode{import sys, synthobj}: an
+in-process check would be vacuous, since the test module has already imported
+torch to test the adapter.
+
+\textbf{Building one objective.} \SOcode{make\_family} takes a variant
+\SOcode{name} and a \SOcode{seed} positionally, an optional \SOcode{D}
+defaulting to $\SOnumStudyD$, and arbitrary keyword overrides. It looks
+\SOcode{name} up in \SOcode{FAMILIES}, applies \SOcode{D} and the overrides to
+the variant's \SOcode{FamilySpec}, and hands the result to \SOcode{build} with
+the seed. An unknown \SOcode{name} raises \SOcode{KeyError};
+an override naming a field \SOcode{FamilySpec} does not have raises
+\SOcode{TypeError} from the dataclass constructor. Renaming a variant through
+an override is impossible rather than merely discouraged: \SOcode{name} is
+already \SOcode{make\_family}'s own first positional parameter, so passing it
+again as a keyword raises \SOcode{TypeError} before any spec is
+built. Two further guards keep an override from producing a valid-looking
+objective with an invalid variance budget. A \SOcode{shares} or \SOcode{ells}
+tuple whose length differs from the resolved \SOcode{n\_active} raises
+\SOcode{ValueError} naming both counts --- the case that matters is an
+\SOcode{n\_active} override applied to a variant whose registry entry carries an
+explicit tuple, which would otherwise zip the first \SOcode{n\_active} shares
+against the first \SOcode{n\_active} lengthscales and build a real objective
+silently --- and a \SOcode{shares} tuple whose entries plus $\gamma$ do not sum
+to one raises \SOcode{ValueError} too. Together they are what makes
+$\Varhat f=1$ a property of every object this registry can produce, not merely
+of the fourteen it is asked for.
+
+\textbf{\SOcode{FamilySpec}.} The frozen, hashable description of one variant's
+shape, twelve fields: \SOcode{name}, the variant name recorded as
+\SOcode{Labels.family}; \SOcode{D}, the ambient dimension; \SOcode{n\_active},
+the size of $S$, or \SOcode{None} for dense (every coordinate active, which is
+what \SOcode{dense\_weak} needs); \SOcode{shares}, the per-rank variance shares,
+or \SOcode{None} for an equal split of $1-\gamma$; \SOcode{ells}, one
+lengthscale per rank or a scalar broadcast to all of them; \SOcode{n\_pairs},
+how many disjoint rank pairs to draw; \SOcode{gamma}, the interaction budget
+$\gamma$; \SOcode{theta\_deg}, the rotation angle $\theta$, or \SOcode{None} for
+no rotation --- which is also the switch deciding whether the drawn pairs
+become interactions or rotations; \SOcode{generator}, \SOcode{matern} or
+\SOcode{sinusoid}; \SOcode{monotone}, whether the monotone-rejection wrapper is
+used; \SOcode{noise\_sd}, the observation-noise standard deviation; and
+\SOcode{grid\_n}, the draw-grid size for a component not part of a rotated
+pair. Unlike \SOcode{Labels} and \SOcode{Component} it keeps the dataclass's
+generated \SOcode{\_\_eq\_\_} (\SOcode{eq=True}), since every field is a plain
+hashable value and a save/load round trip compares two specs directly.
+\textbf{Ruling R27}: \SOcode{SyntheticObjective} reads exactly four fields off a
+spec --- \SOcode{noise\_sd}, \SOcode{generator}, \SOcode{monotone} and
+\SOcode{name} --- with a bare \SOcode{getattr}, so a spec that is
+\emph{present} but missing one raises \SOcode{AttributeError} at construction
+instead of quietly taking a default. The defaults exist only for
+\SOcode{spec is None}, which yields \SOcode{family='custom'} and the study's own
+noise standard deviation. A default firing on a real spec whose fields had been
+renamed would put the wrong noise level on every regret curve and the wrong
+generator on the sinusoid variant, and nothing downstream would notice.
+
+\textbf{\SOcode{SyntheticObjective}: evaluation.} \SOcode{\_\_call\_\_(X)}
+accepts a batch of shape $(n,D)$ and returns $(n,)$, or a single point of shape
+$(D,)$ and returns a 0-d array --- an array, not a numpy scalar, so the
+single-point case has the same contract as the batch one. A zero-row batch is
+legal and returns shape $(0,)$. It raises \SOcode{ValueError} on an $X$ that is
+not $D$ coordinates wide, on any non-finite entry (checked before the box test,
+since every comparison against NaN is false), and on a point lying more than
+\SOcode{BOX\_TOL} $=10^{-9}$ outside ${[0,1]}^D$; a point inside that tolerance
+is clipped onto the face rather than rejected, because the components do not
+extrapolate and $1+10^{-12}$ would otherwise evaluate to NaN instead of to
+$f(1)$. \SOcode{observe}, given the same $X$ and a generator, returns $f(X)$
+plus independent zero-mean
+Gaussian noise of standard deviation \SOcode{noise\_sd}, one draw per row,
+taken \emph{entirely} from the caller's generator: the objective holds no
+random state of its own, which is what lets a paired run reproduce an
+observation stream by re-seeding (\ref{app:so:a3:seeding}). Its return shape is
+\SOcode{\_\_call\_\_}'s. The attributes a user reads are \SOcode{D},
+\SOcode{f\_star}, \SOcode{labels}, \SOcode{scale}, \SOcode{mu} and
+\SOcode{noise\_sd}. \SOcode{component\_variances} returns one entry per block,
+main effects in rank order followed by the interactions; each is that block's
+own $\Varhat$ by the 64-node quadrature, so it is a \emph{measurement} that
+equals the prescribed \SOcode{Labels.s} and \SOcode{Labels.s\_pairs} to
+roundoff exactly when the block was built to the share it claims. Ruling R31:
+those values are \textbf{pre-rotation and pre-scale}. Under a rotation each
+component's quadrature is still taken on its own coordinate, so the vector is
+neither the realized axis-aligned variance --- that is \SOcode{Labels.s\_axis}
+--- nor anything \SOcode{scale} has touched.
+
+\textbf{\SOcode{SyntheticObjective}: construction guards.} All five raise at
+construction rather than at the first evaluation, because each one would
+otherwise yield an objective whose $\fstar$ or whose labels are silently wrong.
+Three of the five protect the separability that makes $\fstar$ a sum of
+per-block maxima (\ref{app:so:a1:fstar}) rather than a joint search; the first
+and the last protect the labels instead. An empty
+\SOcode{components} raises \SOcode{ValueError} (an objective with no $S$ has
+nothing to label); two components on one coordinate raise \SOcode{ValueError}
+(\SOcode{\_\_call\_\_} would sum both, but only one would reach the $\fstar$
+assembly); interaction or rotation pairs that are not disjoint raise
+\SOcode{ValueError}, or \SOcode{NotImplementedError} under
+\SOcode{allow\_overlap=True}, since the joint-grid fallback for overlapping
+pairs is not built and no family needs it; and a paired coordinate carrying no
+main effect raises \SOcode{ValueError}, since a block maximum is taken over
+$f_i+f_j+h_{ij}$ and there is no block without the main effects. The fifth is
+\textbf{ruling R39}: an \SOcode{Interaction} and a rotation on one objective
+raise \SOcode{ValueError} even when their pairs are disjoint, because
+\SOcode{Labels.s\_axis} is assigned back only to rotation-paired and unpaired
+coordinates, so an interaction-paired coordinate under a rotation would keep
+$\saxis{i}=0$ forever and its true first-order share would silently move into
+$\gaxis$ --- the combination is rejected rather than mislabelled.
+
+\textbf{\SOcode{Labels}.} Table~\ref{app:so:a3:tab:labels} lists the fields.
+Five points of its semantics regularly trip readers. First, $S$ is
+\emph{sorted}: \SOcode{Labels.S} is the sorted tuple of main-effect
+coordinates, not the rank order the
+components were built in --- a distinction with real consequences for the file
+format of~\ref{app:so:a3:files}. Second, \SOcode{active} is \emph{membership},
+$s_i>0$, not a comparison against \SOcode{active\_eps}. Ruling~R29
+(\ref{app:so:a4:r29}) keeps $\activeeps=\SOnumActiveEps$ on the record only so
+that downstream scoring reads one number instead of re-deriving it; the design
+brief's ``active iff share
+$>\activeeps$'' is that scoring rule, while \SOcode{active} is the ground truth
+about which coordinates $f$ actually varies in, and only \SOcode{dense\_weak}
+makes the two disagree, as~\ref{app:so:a2:dense-weak} explains. Third,
+\SOcode{s}, \SOcode{ell} and \SOcode{g} are $(D,)$ \emph{by coordinate}, not
+$(|S|,)$ by rank:
+off $S$ they are $0$, NaN and $0$ respectively, and \SOcode{g} sums to one over
+$S$. Fourth, in each of the pairs \SOcode{s}/\SOcode{s\_axis} and
+\SOcode{gamma}/\SOcode{gamma\_axis} the first is the pre-rotation quantity and
+the second the axis-aligned one, and without a rotation they are equal:
+\SOcode{s\_axis} is a copy of \SOcode{s} and \SOcode{gamma\_axis} is
+\SOcode{gamma}. On the rotated variants \SOcode{gamma} is $0$, since those
+families carry no explicit \SOcode{Interaction} at all, while
+\SOcode{gamma\_axis} is the strictly positive axis-misspecification remainder
+$1-\sum_i\saxis{i}$ of~\eqref{app:so:a1:eq:gammaaxis}. Fifth, \SOcode{f\_star}
+is the \emph{maximum}, and \SOcode{x\_star} is $(D,)$ by coordinate, frequently
+with active entries exactly on a face of the cube; every coordinate outside $S$ is
+left at the cube's midpoint, since $f$ ignores it. Finally, \SOcode{Labels} is
+declared \SOcode{eq=False} (ruling R4 of the code plan): the generated
+\SOcode{\_\_eq\_\_} of a frozen dataclass compares the fields as a tuple, which
+raises on the six ndarray fields, so equality falls back to identity and two
+independently built but numerically identical records compare \emph{unequal}.
+Compare them field by field.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The \SOcode{Labels} record]{
+  The \SOcode{Labels} record: the ground truth a posterior is scored against.
+  Generated from the \SOcode{Labels} dataclass itself, so the field list cannot
+  drift from the code. Shapes are given in terms of the ambient dimension $D$;
+  the six array fields written $(D,)$ are indexed \emph{by coordinate}, which
+  is what distinguishes them from the same-named, rank-ordered members of the
+  npz (Table~\ref{app:so:a3:tab:npz}). \SOcode{active\_eps} is recorded, never
+  enforced.}\label{app:so:a3:tab:labels}
+  \footnotesize\setlength{\tabcolsep}{3pt}
+  \input{\SOroot/tables/tab_labels_fields}
+\end{table}
+
+\textbf{The three building blocks.} A \SOcode{Component} is one coordinate's
+main effect: a not-a-knot cubic spline through stored \SOcode{values} on a
+fixed knot vector \SOcode{grid}, with \SOcode{extrapolate=False}, so
+$(\SOcode{grid}, \SOcode{values})$ alone rebuilds it with no draw involved.
+Because \SOcode{from\_raw} solved the centre-and-rescale at exactly the 64
+Gauss-Legendre nodes that are then knots of the spline, \SOcode{nu\_var}
+returns \SOcode{share} to floating-point roundoff rather than to interpolation
+error, and \SOcode{nu\_mean} returns zero the same way; \SOcode{slope\_energy}
+is the realized $\Ehat[{(f_i')}^2]$ behind \SOcode{Labels.g}. \SOcode{argmax}
+is closed form (\ref{app:so:a1:fstar}) and raises \SOcode{ValueError} on bounds
+outside the knot range or in the wrong order --- without that guard the spline's
+NaN outside its knots would win the comparison and a silently wrong maximum
+would be returned. An \SOcode{Interaction} is $c\,u_i(x_i)u_j(x_j)$ on a
+coordinate pair, its two factors being \SOcode{Component}s built with
+$\text{\SOcode{share}}=1$, so $c=\sqrt{s_{ij}}$ makes $\Varhat h_{ij}$ exactly
+the prescribed pair share and the orthogonality identities
+of~\ref{app:so:a1:interaction} hold to machine precision. A
+\SOcode{PairRotation} carries \SOcode{theta\_deg} and a tuple of disjoint
+\SOcode{pairs}; its \SOcode{forward} maps each pair by
+$z=\tfrac12+\Rtheta(x-\tfrac12)$ and returns a copy with every other coordinate
+untouched, accepting a $(D,)$ point or an $(n,D)$ batch alike, since it works
+on the last axis. Disjointness of its pairs is checked by
+\SOcode{SyntheticObjective}, not by the class itself. All three are frozen
+dataclasses with \SOcode{eq=False}, for \SOcode{Labels}'s reason.
+
+\begin{sloppypar}
+\textbf{Code / Test.} \SOfile{synthobj/families.py} holds \SOcode{FamilySpec},
+\SOcode{build} and \SOcode{make\_family}; \SOfile{synthobj/objective.py} holds
+\SOcode{Labels} and \SOcode{SyntheticObjective}. The registry guards are pinned
+by \SOtest{test\_make\_family\_unknown\_name\_raises\_key\_error},
+\SOtest{test\_make\_family\_unknown\_override\_raises\_type\_error},
+\SOtest{test\_mismatched\_n\_active\_override\_raises\_instead\_of\_silently\_truncating}
+and \SOtest{test\_shares\_not\_summing\_to\_one\_minus\_gamma\_raises}. The
+evaluation contract is pinned by
+\SOtest{test\_a\_single\_point\_returns\_a\_scalar\_array},
+\SOtest{test\_an\_empty\_batch\_returns\_an\_empty\_result},
+\SOtest{test\_call\_rejects\_points\_outside\_the\_cube},
+\SOtest{test\_call\_accepts\_points\_inside\_the\_box\_tolerance},
+\SOtest{test\_call\_rejects\_non\_finite\_input},
+\SOtest{test\_call\_rejects\_the\_wrong\_number\_of\_coordinates},
+\SOtest{test\_observe\_adds\_noise\_of\_the\_right\_sd},
+\SOtest{test\_observe\_consumes\_only\_the\_callers\_generator} and
+\SOtest{test\_observe\_keeps\_the\_shape\_of\_call}; that
+\SOcode{component\_variances} measures rather than echoes is pinned by
+\SOtest{test\_component\_variances\_measure\_rather\_than\_echo\_the\_share}.
+The five construction guards are
+\SOtest{test\_an\_objective\_needs\_at\_least\_one\_component},
+\SOtest{test\_duplicate\_component\_coordinates\_are\_rejected},
+\SOtest{test\_overlapping\_pairs\_are\_rejected},
+\SOtest{test\_a\_paired\_coordinate\_needs\_a\_main\_effect} and
+\SOtest{test\_rotation\_combined\_with\_an\_interaction\_is\_rejected}; ruling
+R27 is \SOtest{test\_a\_present\_spec\_missing\_a\_field\_raises} against
+\SOtest{test\_spec\_none\_gives\_the\_custom\_defaults}, and the label
+semantics above are
+\SOtest{test\_active\_is\_membership\_in\_S\_not\_a\_cutoff},
+\SOtest{test\_labels\_record\_the\_shares\_and\_lengthscales},
+\SOtest{test\_labels\_carry\_the\_no\_rotation\_defaults},
+\SOtest{test\_gamma\_and\_gamma\_axis\_are\_distinct} and
+\SOtest{test\_labels\_is\_frozen\_and\_compares\_by\_identity}.
+\end{sloppypar}
 
 \SOlevelC{Seeding}\label{app:so:a3:seeding}
-% filled by Task N
+
+Design decision D6 (\ref{app:so:a4}) fixes the whole scheme, and its point is
+separability: changing one part of a \SOcode{FamilySpec} must never perturb a
+draw or a coordinate selection it has no business touching. One seed spawns
+three independent sequences: \SOcode{streams} calls
+\SOcode{SeedSequence.spawn} on the seed for three children and returns them as
+the named tuple \SOcode{Streams}, whose fields are \SOcode{select},
+\SOcode{main} and \SOcode{inter}.
+
+\textbf{\SOcode{select}: which coordinates are active.} $S$ is a full
+\SOcode{permutation} of the $D$ coordinates, drawn from a
+\SOcode{default\_rng} on the \SOcode{select} sequence and truncated to its
+first \SOcode{n\_active} entries. Because
+\SOcode{default\_rng} is a pure function of the sequence and the permutation is
+drawn before any truncation, the full ordering does not depend on
+\SOcode{n\_active} at all --- so truncating it to different lengths at one
+$(D,\text{seed})$ \emph{nests}: \SOcode{aligned3}'s three coordinates are the
+first three of \SOcode{aligned10}'s, in the same rank order shares and
+lengthscales are assigned in. That is what makes the pair
+\SOcode{aligned3}/\SOcode{aligned10} a within-seed comparison of two sparsity
+levels on a shared coordinate set (\ref{app:so:a2:aligned3}) rather than two
+unrelated problems. \SOcode{Labels.S} sorts the result; the components keep the
+unsorted rank order, and~\ref{app:so:a3:files} is where that distinction bites.
+
+\textbf{\SOcode{main}: one child per rank.} Spawning \SOcode{n\_active}
+children off \SOcode{main}
+gives rank $k$ its own sequence, and rank $k$'s component is drawn from that
+child alone. So changing one coordinate's lengthscale --- or its share, or the
+generator's parameters at that rank --- leaves every other rank's raw draw
+bit-identical, not merely close; a rank's draw depends on its own child stream
+and its own lengthscale, never on any share. A scheme that drew every rank from
+one generator in sequence would instead reshuffle every component after the first
+edited one, and no variant-to-variant comparison at a fixed seed would mean
+anything.
+
+\textbf{\SOcode{inter}: pairs, and what they become.} When a spec asks for
+pairs, \SOcode{inter} spawns two children of its own: one sequence the pairs
+are selected from, and one they are drawn from. \SOcode{select\_pairs} cuts
+\SOcode{n\_pairs}
+disjoint pairs of \emph{ranks} from a permutation of the active ranks (raising
+\SOcode{ValueError} if there are not enough ranks to pair up), and the caller
+maps them through $S$ to coordinates. The selection happens \emph{before}, and
+independently of, the decision \SOcode{theta\_deg} makes about what the pairs
+become: at one seed and one $(D,\text{\SOcode{n\_active}},
+\text{\SOcode{n\_pairs}})$ the same pairs are produced whether they go on to
+carry \SOcode{Interaction}s or to be rotated. The draw sequence is consumed
+only on the interaction path, where each pair spawns two further children for
+its two unit-variance factors. Two consequences the study relies on follow: the
+$\gamma$ sweep (\SOcode{interaction\_g0.00} through
+\SOcode{interaction\_g0.75}) holds $S$, the pairs and every underlying draw
+fixed at a seed and moves only the shares, and the $\theta$ sweep
+(\SOcode{rotated\_t0}, \SOcode{rotated\_t15}, \SOcode{rotated\_t45}) does the
+same and moves only the angle. Note what this does \emph{not} say: the two
+sweeps do not share pairs with \emph{each other}, since they are configured
+with different \SOcode{n\_active} and \SOcode{n\_pairs}, and a permutation of a
+different number of ranks is a different permutation. Their active sets nest,
+as every pair of variants at one seed does; their pairs do not coincide.
+
+\textbf{\SOcode{noise\_rng}: observation noise, off to one side.}
+\SOcode{noise\_rng} takes a seed and a
+\SOcode{run} index, and builds a \SOcode{default\_rng} on a
+\SOcode{SeedSequence} whose entropy is the triple of the seed, a fixed salt and
+the run index. That salt is what
+keeps it clear of the seed's own three children, so a run that uses
+\SOcode{seed} for both its objective and its noise is not silently reusing one
+stream for two purposes; \SOcode{run} gives one objective as many independent
+noise sequences as a repeated-run protocol needs. Noise is deliberately not
+part of the objective at all --- \SOcode{observe} takes the caller's generator
+(\ref{app:so:a3:api}) --- so a paired BO run reproduces its observation stream
+by re-seeding, without the objective holding any state that could drift between
+repetitions.
+
+\begin{table}[htbp]
+  \centering
+  \caption[What each seeding stream isolates]{
+  What each part of the scheme isolates: for a change made at a fixed seed, what
+  is allowed to move and what is bit-identical. ``Bit-identical'' is meant
+  literally --- these are equalities of stored floating-point arrays, not
+  tolerances --- with the exception noted in the \SOcode{n\_active} and
+  $\gamma$ rows, where it is the \emph{main effects'} raw draw that is
+  bit-identical and their stored values differ from it by the new share's
+  rescale alone. The $\gamma$ row's interaction factors carry no such exception:
+  they are drawn at $\text{\SOcode{share}}=1$, so $\gamma$ moves $c$ alone and
+  their stored values are bit-identical outright. The Code / Test
+  paragraph below names the test behind each row, with two caveats a reader
+  should not have to discover: the first row is pinned only for the
+  coordinates, its test comparing coordinate sets and never draws, and the fifth
+  is a property of \SOcode{build}'s control flow --- it selects the pairs before
+  it reads \SOcode{theta\_deg} --- that no test asserts
+  directly.}\label{app:so:a3:tab:seeding}
+  \footnotesize\setlength{\tabcolsep}{4pt}
+  \begin{tabular}{p{2.5cm}p{3.6cm}p{4.4cm}}
+    \toprule
+    change at one seed & what moves & what is bit-identical \\
+    \midrule
+    \SOcode{n\_active} & the ranks appended past the old end of $S$, and the
+      equal split of $1-\gamma$ over all of them &
+      every earlier rank's coordinate, and its raw draw up to that rescale \\
+    one entry of \SOcode{ells} & that rank's component alone &
+      every other rank's grid and values \\
+    \SOcode{gamma} & the pair coefficients $c_{ij}$ and the main shares &
+      $S$, the pairs, the interaction factors, and every main effect's raw
+      draw \\
+    \SOcode{theta\_deg} & the rotation applied to the pairs &
+      $S$, the pairs, and every component's values \\
+    \SOcode{theta\_deg} set versus \SOcode{None} & whether the pairs become
+      rotations or interactions & the pairs themselves \\
+    \SOcode{run} of \SOcode{noise\_rng} & the observation-noise sequence &
+      the objective, which holds no random state \\
+    \SOcode{seed} & everything: $S$, the pairs, every draw & nothing \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{sloppypar}
+\textbf{Code / Test.} \SOcode{streams}, \SOcode{select\_active},
+\SOcode{select\_pairs} and \SOcode{noise\_rng} are all in
+\SOfile{synthobj/families.py} and all exported from the package root. Nesting is
+\SOtest{test\_n\_active\_nests\_across\_ranks}, which checks it at the
+\SOcode{select\_active} primitive and again through the
+\SOcode{aligned3}/\SOcode{aligned10} registry entries; per-rank isolation is
+\SOtest{test\_changing\_one\_coordinates\_ell\_leaves\_the\_others\_bit\_identical};
+the $\gamma$ sweep's invariance is
+\SOtest{test\_gamma\_sweep\_keeps\_S\_pairs\_and\_component\_shapes\_identical},
+which compares each component's values divided by the square root of its own
+share rather than trusting the implementation to report that the shape did not
+move, and asserts that the interaction factors' stored values are equal
+exactly, not merely closely, across the sweep; the $\theta$ sweep's is
+\SOtest{test\_rotated\_variants\_share\_S\_and\_pairs\_across\_theta}. That the
+seed controls everything is
+\SOtest{test\_different\_seeds\_give\_different\_S} and
+\SOtest{test\_same\_seed\_gives\_a\_bit\_identical\_objective}; the noise
+stream's \SOcode{run} independence is
+\SOtest{test\_noise\_rng\_streams\_are\_independent\_of\_run}.
+\end{sloppypar}
 
 \SOlevelC{Files}\label{app:so:a3:files}
-% filled by Task N
+
+\SOcode{save} takes an extensionless stem, writes \SOfile{<stem>.npz} and
+\SOfile{<stem>.json}, and returns both paths;
+\SOcode{load} takes the same stem back.
+Table~\ref{app:so:a3:tab:npz} is the layout. The npz holds the numbers a spline
+needs --- one shared knot vector and the values on it --- and the JSON holds
+everything else, including the entire \SOcode{Labels} record.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The saved npz and JSON layout]{
+  What \SOcode{SyntheticObjective.save} writes. Generated by saving two real
+  objects and reading the files back, so no shape or type printed here is
+  asserted rather than observed: \SOcode{interaction\_g0.25} and
+  \SOcode{rotated\_t45}, both at seed $0$ and $D=\SOnumTableD$ --- a variant
+  with interactions and one with a rotation, which between them exercise every
+  member. Shapes therefore scale with $D$, $|S|$ and the knot count, not with
+  anything fixed; the two columns differ in exactly the places where those
+  differ. The empty-shaped members of the rotated column are the interaction
+  members of a variant that has no interactions, written at length zero rather
+  than omitted, so a reader can index them unconditionally. Note:
+  \SOcode{active}, \SOcode{s} and \SOcode{ell} in the npz are ordered by
+  component \emph{rank} (build order), one entry per active coordinate --- not
+  by coordinate index the way the JSON-side \SOcode{Labels.active},
+  \SOcode{Labels.s} and \SOcode{Labels.ell} are (length $D$, $0$/NaN off
+  $S$).}\label{app:so:a3:tab:npz}
+  \footnotesize\setlength{\tabcolsep}{4pt}
+  \input{\SOroot/tables/tab_npz_json_layout}
+\end{table}
+
+\textbf{Rank order versus coordinate order.} This is the one thing to get right
+before opening an npz with numpy alone. The members \SOcode{active},
+\SOcode{s} and \SOcode{ell} are $(|S|,)$ in \emph{rank} order --- the order
+\SOcode{self.components} was built in, which is the truncated permutation
+\SOcode{select\_active} returned and therefore in general not sorted. They
+share their names with $(D,)$ \SOcode{Labels} fields that are indexed by
+\emph{coordinate}, and the
+names collide where the arrays do not. Concretely: \SOcode{npz['active']} is
+the rank-to-coordinate map, and it is the file's only record of that map;
+\SOcode{npz['s'][k]} and \SOcode{npz['ell'][k]} are rank $k$'s share and
+lengthscale, whereas \SOcode{Labels.s[c]} and \SOcode{Labels.ell[c]} are
+coordinate $c$'s ($0$ and NaN when $c\notin S$). Since \SOcode{Labels.S} is
+sorted and \SOcode{npz['active']} is not, the tempting join --- pairing
+\SOcode{npz['s'][k]} with \SOcode{Labels.S[k]} --- attaches a share to the
+wrong coordinate wherever the two orders differ, and does so silently, with a
+plausible number in every slot. The correct join is always through
+\SOcode{npz['active']}: rank $k$'s coordinate is \SOcode{npz['active'][k]}.
+Equally, indexing \SOcode{npz['s']} by a coordinate index reads a different
+coordinate's share unless $S$ happens to be the first $|S|$ integers, which for
+a random permutation subset it generally is not. The same rank ordering governs
+the rest of the file: \SOcode{main\_values} row $k$ is rank $k$'s component,
+\SOcode{pairs} row $p$ and \SOcode{c\_pairs[p]} are interaction $p$, and
+\SOcode{inter\_values} holds \emph{two} rows per pair --- rows $2p$ and $2p+1$
+are pair $p$'s two unit-variance factors, so its row count is twice the pair
+count and never equals the pair count. \SOcode{x\_star} is the one exception:
+it is stored straight from \SOcode{Labels.x\_star} and so \emph{is} $(D,)$ by
+coordinate.
+
+\textbf{The JSON side.} \SOcode{version} is $1$ and is checked on load, which
+raises \SOcode{ValueError} on anything else. \SOcode{spec} is the
+\SOcode{FamilySpec} as a field-to-value dictionary, or \SOcode{null} for an
+objective built without one. \SOcode{labels} is the whole \SOcode{Labels}
+record: its array fields become JSON arrays and its tuple fields do too, and
+\SOcode{load} converts both back --- ruling R9, driven off \SOcode{Labels}'s own
+declared annotations rather than a hardcoded field list, so \SOcode{S} returns
+as a tuple and \SOcode{pairs}/\SOcode{rotation\_pairs} as tuples of pairs. One
+consequence for a non-Python reader: \SOcode{Labels.ell} is NaN off $S$, and
+Python's \SOcode{json} module writes that as the bare token \SOcode{NaN}, which
+is not standard JSON\@. Python's own \SOcode{json.loads} round-trips it exactly;
+any other reader needs a NaN-tolerant parser (ruling R6). \SOcode{rotation} is
+\SOcode{null} or the angle and pairs of the \SOcode{PairRotation}. \SOcode{mu}
+is the rotation recentering offset, stored beside the labels' \SOcode{scale}
+because \SOcode{load} must read it back rather than re-derive it (ruling R30
+follow-on). The last three, \SOcode{grid\_lo}, \SOcode{grid\_hi} and
+\SOcode{grid\_draw\_n}, are written for a human or an external reader and are
+never read by \SOcode{load}: it takes the knot vector itself from
+\SOcode{npz['grid']}, so a file with those three keys removed still loads and
+still evaluates identically.
+
+\textbf{What \SOcode{load} does not do.} It never draws --- not through the
+Mat\'ern path's \SOcode{kernel.eigen\_factor}, nor through the sinusoid or
+monotone-rejection paths, which never touch that function at all --- and it
+never recomputes ground truth: \SOcode{f\_star}, \SOcode{x\_star},
+\SOcode{g}, \SOcode{s}, \SOcode{ell}, \SOcode{s\_axis} and \SOcode{gamma\_axis}
+all come from the file, and the stored \SOcode{Labels} is passed into the
+constructor verbatim so that \SOcode{\_compute\_labels}, and with it both block
+maximizations, never runs. Components are rebuilt through the plain
+\SOcode{Component} constructor from the stored knots and values, \emph{not}
+through \SOcode{from\_raw}: the stored values are already centred and rescaled,
+and pushing them back through that path would be a no-op only in exact
+arithmetic. Finally, \SOcode{scale}, \SOcode{mu} and \SOcode{noise\_sd} are
+restored from the file rather than recomputed (ruling R34). That last point is
+what keeps a reloaded objective self-consistent: the stored \SOcode{f\_star}
+was computed with the stored \SOcode{scale} and \SOcode{mu}, so $f$ evaluated
+at \SOcode{Labels.x\_star} still equals $\fstar$ to roundoff after a round
+trip, and a
+future change to either formula cannot silently move a reloaded regret curve
+onto different numbers than the ones its own $\fstar$ was computed against.
+
+\textbf{Determinism.} The npz is written by hand rather than by
+\SOcode{np.savez}: every member's timestamp is fixed at 1~January 1980, the
+compression is \SOcode{ZIP\_STORED}, and members are written in sorted-name
+order (ruling R5). The reason is not timestamps --- \SOcode{np.savez} fixes
+those too --- but the write path: it streams each member through
+\SOcode{zipfile}'s unknown-size-in-advance branch with \SOcode{force\_zip64},
+which adds a 20-byte Zip64 extra field per member that a \SOcode{writestr} of a
+pre-built, known-size payload does not. Every array's size is known here before
+writing, so the streaming layout buys nothing and costs a version-sensitive
+difference in the bytes. The JSON is written with sorted keys, so its key order
+does not depend on dictionary insertion order either. The result is an ordinary
+\SOcode{.npz} that \SOcode{np.load} reads normally.
+
+\textbf{Portability, and why the archive travels with the thesis.} Same seed,
+same variant, same $D$ gives bit-identical files --- \emph{on one platform}.
+Three independent things break that across platforms, and the first two are
+stated in the manifest's own \SOcode{hash\_note}
+(\ref{app:so:a3:cli}): \SOcode{zipfile.ZipInfo.create\_system} is $3$ on POSIX
+and $0$ on Windows and is not normalized by the writer, so the npz bytes differ;
+and \SOcode{Path.write\_text}'s default text-mode newline translation writes
+\SOcode{\textbackslash{}r\textbackslash{}n} line endings on Windows where POSIX
+writes \SOcode{\textbackslash{}n}, so the JSON bytes differ too. The third is deeper than the file format: the draws themselves are
+BLAS-dependent, since the eigendecomposition behind a Mat\'ern component fixes
+its eigenvectors only up to sign and different BLAS builds resolve those signs
+differently, so a regenerated grid can hold genuinely different --- though
+equally valid --- objectives. A grid generated on one machine and hash-checked
+on another will therefore mismatch on every entry with no corruption present.
+The practical consequence is a recommendation, not a caveat: archive
+\SOfile{data/objectives} \emph{itself} alongside the thesis and read the
+objectives back with \SOcode{load}, rather than shipping a seed and expecting a
+regeneration elsewhere to reproduce them. Every draw-dependent number in this
+appendix --- every $\fstar$, every realized moment, every residual --- is a
+number about that archive, produced on the machine
+Table~\ref{app:so:a3:tab:environment} records.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The machine the archived grid was built on]{
+  The machine that built the archived grid: the record of the platform, BLAS
+  and library versions whose draws every draw-dependent table in this appendix
+  describes. It is here because those tables are reproducible only against this
+  environment, for the BLAS reason above. Its two timing rows --- the grid build
+  wall time and the peak resident set size --- are informational: they are
+  regenerated on every \SOcode{make tables} run and are deliberately excluded
+  from \SOcode{make check}'s diff, so they never fail a check by being
+  measured again on a busier
+  machine.}\label{app:so:a3:tab:environment}
+  \footnotesize\setlength{\tabcolsep}{4pt}
+  \input{\SOroot/tables/tab_environment}
+\end{table}
+
+\begin{sloppypar}
+\textbf{Code / Test.} \SOcode{SyntheticObjective.save},
+\SOcode{SyntheticObjective.load} and \SOcode{\_write\_npz\_deterministic} are in
+\SOfile{synthobj/objective.py}; \SOcode{save}'s own docstring is the authority
+on the layout. Byte-level determinism is
+\SOtest{test\_repeated\_save\_is\_byte\_identical} and the sorted-order claim is
+\SOtest{test\_npz\_members\_and\_json\_keys\_are\_written\_in\_sorted\_order};
+the round trip is
+\SOtest{test\_round\_trip\_agrees\_with\_the\_original\_to\_1e\_15} and
+\SOtest{test\_family\_spec\_shares\_and\_ells\_round\_trip\_as\_tuples}, and the
+version guard is \SOtest{test\_version\_is\_present}. That \SOcode{load} really
+reads the file rather than re-deriving what it happens to be able to re-derive
+is pinned by three tests that corrupt a saved value to one no recomputation
+could produce and then check the corruption survives the load ---
+\SOtest{test\_load\_reads\_mu\_from\_the\_file\_rather\_than\_rederiving\_it},
+\SOtest{test\_load\_restores\_scale\_from\_the\_file\_rather\_than\_rederiving\_it}
+and
+\SOtest{test\_load\_restores\_noise\_sd\_from\_the\_file\_rather\_than\_rederiving\_it}
+--- plus
+\SOtest{test\_load\_passes\_stored\_labels\_through\_without\_recomputing}; on
+bit-identical reloaded components a recomputation lands on the same numbers, so
+without the corruption none of these would have any power. That no drawing or
+maximizing happens is pinned by two monkeypatched tests that replace the
+relevant functions with ones that raise:
+\SOtest{test\_load\_does\_not\_redraw\_for\_any\_generator}, over all three
+generators the study uses, and
+\SOtest{test\_load\_does\_not\_call\_the\_block\_maximizers}. The dotted-stem
+hazard is \SOtest{test\_save\_path\_survives\_a\_dotted\_stem} and
+\SOtest{test\_two\_gamma\_variants\_in\_one\_directory\_do\_not\_collide}, and
+the shared-grid requirement is
+\SOtest{test\_save\_rejects\_components\_that\_do\_not\_share\_one\_knot\_grid}.
+\end{sloppypar}
 
 \SOlevelC{Command line and manifest}\label{app:so:a3:cli}
-% filled by Task N
+
+\textbf{Invocation.} The generator runs as
+\SOcode{python -m synthobj.generate}, and it takes six arguments. Only
+\SOcode{--out} is required. The others are
+\SOcode{--D}, the ambient dimension, default $\SOnumStudyD$;
+\SOcode{--seeds}, default $0$--$9$;
+\SOcode{--families}, default \SOcode{all}; and the two flags
+\SOcode{--dry-run} and \SOcode{--overwrite}. \SOcode{--seeds}
+takes either an inclusive \SOcode{a-b} range or a comma-separated list of
+integers --- two alternative forms, not combinable into one string.
+\SOcode{--families} takes \SOcode{all} or a comma-separated list of
+\emph{variant} names, the entries of \SOcode{STUDY\_GRID}, not the coarser
+family labels that group them; an unrecognized name is reported with the full
+list of valid ones. The defaults are exactly the study's grid: $\SOnumVariants$
+variants at ten seeds, the $\SOnumFiles$ files of~\ref{app:so:a3:files} --- a
+``file'' throughout this appendix being one \emph{objective}, which is the npz
+and JSON pair \SOcode{save} writes together, so $\SOnumFiles$ counts objectives
+and twice that many files sit on disk.
+
+\textbf{Layout, and the dotted name.} An objective's two files are named
+\SOfile{<out>/<variant>/seed<seed>\_D<D>.npz}
+and its \SOfile{.json} twin, the seed zero-padded to two digits. Note where the variant name sits: it is a
+\emph{directory} component, never part of the file stem. That is what makes it
+safe for a variant to carry a decimal point.
+\SOcode{Path.with\_suffix} applied to a dotted stem rewrites
+\SOcode{interaction\_g0.25} into \SOcode{interaction\_g0.npz}, which once
+collapsed all five $\gamma$ variants onto one file; the stems this module
+builds contain no dot of their own, and both the stem and its two
+extensions are assembled by plain path joining and string concatenation ---
+never by \SOcode{with\_suffix}, never through a \SOcode{Path.stem}/\SOcode{.suffix}
+round trip --- so the collision cannot recur even if that invariant were to
+change. A stem whose \SOcode{.npz} and \SOcode{.json} both already exist is
+skipped unless \SOcode{--overwrite} is given; a skipped stem is still loaded, and
+if that load fails the exception reaches the user rather than being swallowed,
+with \SOcode{--overwrite} as the stated repair. \SOcode{--dry-run} prints one
+row per \SOcode{(variant, seed)} pair and touches nothing at all --- it does not
+even create \SOcode{--out}.
+
+\textbf{The manifest describes the directory, not the run} (rulings R35 and
+R36). After generation finishes, the output directory is scanned from scratch and its
+\SOfile{manifest.json} is rebuilt from what is actually on disk, not from
+the pairs this invocation was asked to produce. So two runs into one directory
+with different \SOcode{--D}, \SOcode{--seeds} or \SOcode{--families} leave a
+manifest describing both, where one built from ``what this run touched'' would
+silently drop the earlier one. Two consequences follow. The top-level
+\SOcode{Ds} and \SOcode{seeds} are plural and are the sorted \emph{unions} over
+the entries found, since a directory populated by two differently-scoped runs
+can hold more than one of each and a scalar could not honestly describe that;
+the per-entry \SOcode{D} and \SOcode{seed} are the authoritative values, and the
+manifest says so itself in \SOcode{scope\_note}. And \SOcode{created} is when
+the manifest was written, not when the files it describes were generated: a
+partial rerun re-stamps it while leaving older, untouched files exactly as they
+were. Entry order is canonical rather than scan order --- \SOcode{STUDY\_GRID}
+index, then \SOcode{D}, then seed --- so two manifests describing the same
+directory contents compare equal regardless of what order the filesystem
+happened to list things in. The seven top-level fields are therefore
+\SOcode{version}, \SOcode{created}, \SOcode{Ds}, \SOcode{seeds},
+\SOcode{hash\_note}, \SOcode{scope\_note} and \SOcode{entries}; the first of
+the two notes carries the cross-platform
+caveat of~\ref{app:so:a3:files} into the file itself and into
+\SOcode{--help}'s epilog rather than leaving portability to be assumed.
+
+\textbf{Manifest entries.} Each entry has twelve fields: \SOcode{variant} and
+\SOcode{family}, the variant's name and the group it belongs to;
+\SOcode{overrides}, its \SOcode{STUDY\_GRID} override dictionary, empty for
+every study variant since each registry entry already carries its full
+configuration; \SOcode{seed} and \SOcode{D}; \SOcode{npz} and \SOcode{json},
+the two paths relative to \SOcode{--out}; \SOcode{sha256\_npz} and
+\SOcode{sha256\_json}, hashed from the files as they sit on disk rather than by
+re-serializing the object in memory, so a truncated write is reflected in the
+manifest's own claim about it; and \SOcode{f\_star}, \SOcode{gamma} and
+\SOcode{n\_active} read off the reloaded objective's labels.
+
+\textbf{Exit codes} (ruling R37). The exit code answers whether the manifest is
+incomplete, not whether anything under \SOcode{--out} was ignored. It is $0$ when every
+objective-shaped file under \SOcode{--out} is described; $1$ when something
+objective-shaped was excluded, which means one of three things --- a half-written
+pair with only one of the two extensions present, the state a keyboard interrupt
+between \SOcode{save}'s two sequential writes leaves; a complete pair that
+exists but fails to \SOcode{load}; or a \SOcode{seed<N>\_D<N>}-shaped file
+sitting under a directory whose name is not a known variant, which cannot be
+described because there is no family or override entry to look up for it --- and
+$2$ for a bad argument, which the code never got far enough to act on. Anything
+else under \SOcode{--out} is warned about on standard error but leaves the exit
+code at $0$: an ordinary stray file, a stray directory with nothing
+objective-shaped inside it, or an unrecognized file inside a valid variant
+directory. Dotfiles are ignored \emph{silently}, with no warning at all, because
+this checkout is browsed in a file manager that writes \SOfile{.DS\_Store} into
+any folder it opens, and a warning on every single run is its own kind of noise.
+The earlier behaviour --- exit $1$ on anything excluded --- made the command
+return non-zero on essentially every real run once a directory had been opened
+once, which is exactly the useless signal ruling R35 exists to remove.
+
+\begin{sloppypar}
+\textbf{Code / Test.} \SOfile{synthobj/generate.py}: \SOcode{main} is the whole
+implementation, with \SOcode{\_scan\_directory} building the entries,
+\SOcode{\_manifest\_entry} building one of them, \SOcode{\_entry\_sort\_key}
+imposing the canonical order, and \SOcode{HASH\_NOTE}/\SOcode{SCOPE\_NOTE}
+holding the two caveats. Argument parsing is
+\SOtest{test\_seed\_list\_parses\_range\_and\_comma\_list},
+\SOtest{test\_seed\_list\_rejects\_malformed\_spec},
+\SOtest{test\_unknown\_variant\_exits\_2\_and\_names\_it} and
+\SOtest{test\_missing\_required\_out\_exits\_2}; the path hazard is
+\SOtest{test\_stem\_path\_builds\_expected\_literal\_path},
+\SOtest{test\_npz\_and\_json\_paths\_use\_fstring\_concatenation\_not\_with\_suffix},
+\SOtest{test\_npz\_and\_json\_paths\_are\_literal\_and\_do\_not\_collide\_across\_gamma\_variants}
+and \SOtest{test\_two\_gamma\_variants\_do\_not\_collide\_on\_disk}. The
+generation loop is \SOtest{test\_writes\_stems\_matching\_disk\_hashes\_and\_independent\_rebuild},
+\SOtest{test\_dry\_run\_prints\_full\_grid\_via\_subprocess\_and\_writes\_nothing},
+\SOtest{test\_rerun\_without\_overwrite\_skips\_and\_does\_not\_rebuild},
+\SOtest{test\_overwrite\_actually\_rebuilds\_not\_just\_reruns} and
+\SOtest{test\_overwrite\_produces\_byte\_identical\_files}. The directory-scope
+rulings are
+\SOtest{test\_manifest\_scans\_directory\_across\_differently\_scoped\_runs} and
+\SOtest{test\_rerun\_manifest\_created\_changes\_but\_entries\_stay\_the\_same},
+and the caveat fields are
+\SOtest{test\_manifest\_documents\_hash\_portability\_caveat} and
+\SOtest{test\_help\_exits\_0\_and\_documents\_hash\_portability\_caveat}. Each
+exit-code branch has its own test:
+\SOtest{test\_scan\_ignores\_dotfile\_silently\_and\_exits\_zero},
+\SOtest{test\_scan\_warns\_but\_exits\_zero\_on\_ordinary\_non\_dotfile\_stray},
+\SOtest{test\_scan\_exits\_nonzero\_on\_half\_written\_pair},
+\SOtest{test\_scan\_exits\_nonzero\_on\_corrupt\_pair} and
+\SOtest{test\_scan\_exits\_nonzero\_on\_objective\_shaped\_pair\_under\_unknown\_variant\_dir}.
+\end{sloppypar}
 
 \SOlevelC{BoTorch adapter}\label{app:so:a3:botorch}
-% filled by Task N
+
+The adapter is one class,
+\SOcode{SyntheticObjectiveTestFunction}, in the module
+\SOcode{synthobj.botorch\_adapter}. It presents a
+\SOcode{SyntheticObjective} to BoTorch as a
+\SOcode{SyntheticTestFunction} on ${[0,1]}^D$, taking the objective
+positionally and two optional keywords, \SOcode{noise\_std} and
+\SOcode{negate}, both defaulting off. Import that module by
+name: it is the only one in the package permitted to import torch or
+botorch, nothing else imports it, and the package root does not reach it
+(\ref{app:so:a3:api}), so \SOcode{import synthobj} keeps working on a machine
+with neither installed.
+
+\textbf{What it sets.} \SOcode{dim} is \SOcode{obj.D};
+\SOcode{\_bounds} is the unit cube, one $(0,1)$ pair per coordinate;
+\SOcode{\_optimal\_value} is \SOcode{obj.f\_star}; \SOcode{\_optimizers} is the
+single known maximizer \SOcode{obj.labels.x\_star}, which is frequently on the
+cube's boundary --- harmless here, because the class never passes an explicit
+\SOcode{bounds=} to its superclass and BoTorch's optional
+optimizers-within-bounds check runs only when one is given. The class attribute
+that carries the convention is \SOcode{\_is\_minimization\_by\_default}, set to
+\SOcode{False}: that is the flag BoTorch's own \SOcode{Cosine8} and
+\SOcode{Labs} use for a function whose raw values are naturally
+\emph{maximized}, and this project's objectives are exactly that shape, so there
+is no library-versus-project conflict to reconcile --- botorch's base class
+already accommodates the case. The consequence is that \SOcode{optimal\_value}
+is $+\fstar$ under the default \SOcode{negate=False} and $-\fstar$ under
+\SOcode{negate=True}, and \SOcode{is\_minimization\_problem} is correspondingly
+\SOcode{False} and then \SOcode{True}.
+
+\textbf{Ruling R38: where the sign is applied.} In the installed BoTorch
+(version 0.18.1, the version this behaviour was read and tested against),
+\SOcode{evaluate\_true} is negate-agnostic --- it returns the raw value whether
+or not \SOcode{negate} is set --- and \SOcode{forward} is what applies the sign
+to that result. The adapter follows the stock pattern exactly: it overrides
+\SOcode{\_evaluate\_true} only, and leaves the flip to \SOcode{forward}. Two
+things follow for a caller. The adapter's own tests exercise the flip through
+\SOcode{forward}, not through \SOcode{evaluate\_true}, because that is where it
+happens. And a caller must not double-negate: an override of
+\SOcode{\_evaluate\_true} that also flipped the sign would be negated twice
+under \SOcode{forward}, and no stock botorch test function does that. Input of
+shape $(\dots,D)$ gives output of shape $(\dots)$ in float64, computed by the
+numpy objective and converted back --- so a batched call agrees with
+the numpy objective on the same points bit for bit. \SOcode{noise\_std} adds
+BoTorch's own observation noise inside \SOcode{forward}; it is entirely separate
+from \SOcode{SyntheticObjective.observe}, which uses the caller's own generator
+(\ref{app:so:a3:seeding}), and the two should not be combined without deciding
+which one owns the noise model.
+
+\medskip \noindent\textbf{Sign convention --- the second half.}
+The rule is stated in~\ref{app:so:a1:fstar}; this is where it lands in code. Nothing
+inside \SOcode{synthobj} is ever negated: $\fstar$, \SOcode{Labels.x\_star} and
+every share in this appendix are stated in the maximization convention. The
+SAASBO implementation in this repository \textbf{minimizes}. So a caller wiring
+an objective into it must negate at the call site: negate the numpy objective's
+return value directly, or build the adapter with \SOcode{negate=True}, which
+does exactly that and reports
+$-\fstar$ as its \SOcode{optimal\_value} so the two stay consistent. Negating
+in both places is the error to watch for; so is negating in neither and reading
+a regret curve that runs the wrong way.
+\medskip
+
+\begin{sloppypar}
+\textbf{Code / Test.} \SOfile{synthobj/botorch\_adapter.py}, whose module
+docstring records the reading of \SOfile{botorch/test\_functions/base.py} and
+the direct experiments against two stock functions that established the
+conventions above. Torch-freedom of the rest of the package is the subprocess
+test of~\ref{app:so:a3:api},
+\SOtest{test\_import\_synthobj\_does\_not\_import\_torch}. The attributes are
+\SOtest{test\_bounds\_is\_zero\_one\_tensor} and
+\SOtest{test\_optimizers\_reproduces\_x\_star\_and\_attains\_f\_star}; the
+convention is
+\SOtest{test\_optimal\_value\_and\_minimization\_flag\_follow\_our\_maximization\_convention}
+and \SOtest{test\_negate\_flips\_an\_actual\_evaluated\_value}, which checks the
+flip on a real evaluated point rather than on the recorded optimum alone. Shape,
+dtype and agreement with the numpy objective are
+\SOtest{test\_batched\_input\_shape\_and\_values\_match\_numpy};
+\SOtest{test\_noise\_std\_perturbs\_forward\_with\_the\_given\_scale} pins the
+noise path, and
+\SOtest{test\_evaluate\_true\_accepts\_a\_gradient\_tracked\_input} pins the
+detach that lets a gradient-tracked input through the numpy round trip.
+\end{sloppypar}
