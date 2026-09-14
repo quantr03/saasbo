@@ -4,9 +4,5 @@ saasbo.egg*
 .venv/
 data/
 docs/thesis/*.pdf
-docs/thesis/*.aux
-docs/thesis/*.log
-docs/thesis/*.fls
-docs/thesis/*.fdb_latexmk
-docs/thesis/*.out
-docs/thesis/*.toc
+logs/
+runs_smoke/

@@ -1,0 +1,592 @@
+start method=dsp_map family=interaction_g0.25 seed=4 T=200
+t=20 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.955 acq_wall_s=2.945 acq_value=-1.48311 y=0.183414 best_f=1.7223 regret=1.99806 sobol_computed=0 map_result=mll=-20.1804 fallback=none
+t=21 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.196 acq_wall_s=3.440 acq_value=-2.81363 y=1.39938 best_f=1.7223 regret=1.99806 sobol_computed=0 map_result=mll=-19.3297 fallback=none
+t=22 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.196 acq_wall_s=4.146 acq_value=-2.44976 y=2.00843 best_f=2.10751 regret=1.61285 sobol_computed=0 map_result=mll=-18.4782 fallback=none
+t=23 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.561 acq_wall_s=4.088 acq_value=-2.19749 y=1.56118 best_f=2.10751 regret=1.61285 sobol_computed=0 map_result=mll=-17.676 fallback=none
+t=24 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.452 acq_wall_s=4.583 acq_value=-2.24642 y=1.25323 best_f=2.10751 regret=1.61285 sobol_computed=0 map_result=mll=-16.9474 fallback=none
+t=25 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.509 acq_wall_s=3.454 acq_value=-2.10724 y=2.4967 best_f=2.48115 regret=1.23921 sobol_computed=1 map_result=mll=-16.2977 fallback=none
+t=26 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.735 acq_wall_s=5.001 acq_value=-2.56307 y=2.62539 best_f=2.64963 regret=1.07072 sobol_computed=0 map_result=mll=-15.6589 fallback=none
+t=27 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.250 acq_wall_s=3.776 acq_value=-2.41779 y=2.48443 best_f=2.64963 regret=1.07072 sobol_computed=0 map_result=mll=-15.0444 fallback=none
+t=28 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.164 acq_wall_s=4.782 acq_value=-2.59249 y=2.60844 best_f=2.70914 regret=1.01122 sobol_computed=0 map_result=mll=-14.4738 fallback=none
+t=29 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.664 acq_wall_s=6.217 acq_value=-2.5653 y=2.32829 best_f=2.70914 regret=1.01122 sobol_computed=0 map_result=mll=-13.9464 fallback=none
+t=30 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.135 acq_wall_s=4.270 acq_value=-2.48012 y=2.64831 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-13.4647 fallback=none
+t=31 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.967 acq_wall_s=4.949 acq_value=-2.63984 y=2.37082 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-12.9972 fallback=none
+t=32 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.938 acq_wall_s=3.694 acq_value=-2.42641 y=2.42069 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-12.5756 fallback=none
+t=33 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=14.397 acq_wall_s=11.778 acq_value=-2.01205 y=2.44425 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-16.4113 fallback=none
+t=34 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.083 acq_wall_s=4.388 acq_value=-2.5937 y=2.19648 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-11.7993 fallback=none
+t=35 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.758 acq_wall_s=3.414 acq_value=-2.22665 y=2.3236 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-11.4788 fallback=none
+t=36 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.646 acq_wall_s=3.826 acq_value=-2.0321 y=2.59976 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-11.1491 fallback=none
+t=37 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.600 acq_wall_s=4.277 acq_value=-2.69768 y=2.49348 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-10.8252 fallback=none
+t=38 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.720 acq_wall_s=4.566 acq_value=-2.69917 y=2.69306 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-10.5174 fallback=none
+t=39 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.655 acq_wall_s=8.030 acq_value=-3.03602 y=2.47946 best_f=2.73416 regret=0.986199 sobol_computed=0 map_result=mll=-10.2178 fallback=none
+t=40 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.174 acq_wall_s=5.812 acq_value=-2.89613 y=2.78106 best_f=2.75182 regret=0.968534 sobol_computed=0 map_result=mll=-9.94804 fallback=none
+t=41 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.046 acq_wall_s=11.876 acq_value=-1.83962 y=2.08703 best_f=2.75182 regret=0.968534 sobol_computed=0 map_result=mll=-14.4305 fallback=none
+t=42 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.410 acq_wall_s=4.140 acq_value=-2.57743 y=2.64025 best_f=2.75182 regret=0.968534 sobol_computed=0 map_result=mll=-9.4646 fallback=none
+t=43 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.530 acq_wall_s=8.519 acq_value=-3.21044 y=1.41827 best_f=2.75182 regret=0.968534 sobol_computed=0 map_result=mll=-9.22536 fallback=none
+t=44 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.717 acq_wall_s=6.021 acq_value=-3.01597 y=2.80924 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-9.06868 fallback=none
+t=45 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.694 acq_wall_s=9.878 acq_value=-3.19214 y=2.69119 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-8.84255 fallback=none
+t=46 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.191 acq_wall_s=5.325 acq_value=-2.76603 y=2.7287 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-8.63089 fallback=none
+t=47 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.421 acq_wall_s=10.300 acq_value=-3.27761 y=2.64684 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-8.42 fallback=none
+t=48 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.170 acq_wall_s=6.081 acq_value=-2.96204 y=2.8019 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-8.23635 fallback=none
+t=49 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.482 acq_wall_s=6.183 acq_value=-3.04128 y=2.86339 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-8.04834 fallback=none
+t=50 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.135 acq_wall_s=8.674 acq_value=-3.3353 y=2.61856 best_f=2.76215 regret=0.958212 sobol_computed=1 map_result=mll=-7.86374 fallback=none
+t=51 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.728 acq_wall_s=5.800 acq_value=-2.90994 y=2.63712 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-7.69977 fallback=none
+t=52 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.828 acq_wall_s=4.738 acq_value=-2.86115 y=2.67579 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-7.55124 fallback=none
+t=53 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.381 acq_wall_s=6.233 acq_value=-3.16714 y=2.66184 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-7.37984 fallback=none
+t=54 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.309 acq_wall_s=5.172 acq_value=-2.91873 y=2.80178 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-7.23559 fallback=none
+t=55 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.963 acq_wall_s=7.107 acq_value=-3.26285 y=2.72746 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-7.07849 fallback=none
+t=56 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.759 acq_wall_s=4.153 acq_value=-2.93751 y=2.71831 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.97152 fallback=none
+t=57 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.004 acq_wall_s=5.042 acq_value=-2.94774 y=2.45544 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.79229 fallback=none
+t=58 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.049 acq_wall_s=5.511 acq_value=-2.89886 y=2.58982 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.69009 fallback=none
+t=59 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.022 acq_wall_s=5.692 acq_value=-3.01513 y=2.62953 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.54645 fallback=none
+t=60 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.967 acq_wall_s=12.002 acq_value=-2.40292 y=1.83474 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-9.08598 fallback=none
+t=61 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.854 acq_wall_s=5.237 acq_value=-3.1835 y=2.62768 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.36212 fallback=none
+t=62 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.466 acq_wall_s=11.797 acq_value=-1.12826 y=2.44419 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-9.4423 fallback=none
+t=63 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.293 acq_wall_s=5.867 acq_value=-3.12819 y=2.7523 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.12693 fallback=none
+t=64 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.464 acq_wall_s=6.208 acq_value=-3.42071 y=2.71731 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.03786 fallback=none
+t=65 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.524 acq_wall_s=8.315 acq_value=-3.39678 y=2.5116 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-5.92556 fallback=none
+t=66 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.622 acq_wall_s=6.224 acq_value=-3.12238 y=2.62373 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-5.8151 fallback=none
+t=67 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.607 acq_wall_s=6.614 acq_value=-3.5604 y=2.64639 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-5.72611 fallback=none
+t=68 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=20.615 acq_wall_s=12.069 acq_value=-1.40136 y=0.411697 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-8.25271 fallback=none
+t=69 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.090 acq_wall_s=7.808 acq_value=-3.73196 y=2.91659 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-5.55319 fallback=none
+t=70 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.157 acq_wall_s=11.454 acq_value=-3.72779 y=2.83469 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-5.46293 fallback=none
+t=71 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.775 acq_wall_s=11.302 acq_value=-3.71178 y=2.68385 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-5.37326 fallback=none
+t=72 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.268 acq_wall_s=12.195 acq_value=-1.17759 y=1.96453 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-8.25181 fallback=none
+t=73 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.382 acq_wall_s=5.289 acq_value=-3.11481 y=2.89349 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-5.23044 fallback=none
+t=74 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.718 acq_wall_s=8.617 acq_value=-3.44162 y=2.58538 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-5.14506 fallback=none
+t=75 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.490 acq_wall_s=6.787 acq_value=-2.71871 y=2.84618 best_f=2.76215 regret=0.958212 sobol_computed=1 map_result=mll=-5.07534 fallback=none
+t=76 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.628 acq_wall_s=12.334 acq_value=-1.56081 y=1.90318 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-7.74535 fallback=none
+t=77 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.507 acq_wall_s=5.605 acq_value=-2.87366 y=2.58652 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.94108 fallback=none
+t=78 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.091 acq_wall_s=4.907 acq_value=-2.36673 y=2.73448 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.87467 fallback=none
+t=79 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.378 acq_wall_s=5.513 acq_value=-2.98108 y=2.71678 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.81223 fallback=none
+t=80 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=37.635 acq_wall_s=12.247 acq_value=-0.814849 y=2.35551 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.76264 fallback=none
+t=81 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.210 acq_wall_s=5.864 acq_value=-3.20158 y=2.70167 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.68408 fallback=none
+t=82 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.239 acq_wall_s=12.834 acq_value=-1.28511 y=2.7499 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-7.15193 fallback=none
+t=83 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.067 acq_wall_s=6.406 acq_value=-3.00737 y=2.7845 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.57001 fallback=none
+t=84 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.437 acq_wall_s=7.153 acq_value=-3.50157 y=2.7616 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.50978 fallback=none
+t=85 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.566 acq_wall_s=8.355 acq_value=-3.6453 y=2.65502 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.4456 fallback=none
+t=86 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=35.535 acq_wall_s=5.866 acq_value=-3.45181 y=2.62613 best_f=2.76215 regret=0.958212 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-4.39539 fallback=adam
+t=87 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.026 acq_wall_s=6.007 acq_value=-3.24089 y=2.51782 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.32679 fallback=none
+t=88 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.831 acq_wall_s=9.380 acq_value=-3.84872 y=2.98809 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.28576 fallback=none
+t=89 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.860 acq_wall_s=8.359 acq_value=-3.64109 y=2.66255 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.23757 fallback=none
+t=90 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.657 acq_wall_s=12.142 acq_value=-1.65495 y=2.47382 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-6.48515 fallback=none
+t=91 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.773 acq_wall_s=7.276 acq_value=-2.4111 y=2.45239 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.16141 fallback=none
+t=92 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.221 acq_wall_s=6.313 acq_value=-2.95181 y=2.81851 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.12906 fallback=none
+t=93 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.998 acq_wall_s=10.496 acq_value=-3.71052 y=2.54751 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.08268 fallback=none
+t=94 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.696 acq_wall_s=6.540 acq_value=-3.16987 y=2.72938 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.04543 fallback=none
+t=95 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.721 acq_wall_s=8.436 acq_value=-3.79671 y=2.74722 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.00059 fallback=none
+t=96 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.709 acq_wall_s=9.424 acq_value=-3.87094 y=2.67428 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-3.95287 fallback=none
+t=97 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.944 acq_wall_s=6.723 acq_value=-3.64875 y=2.47941 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-3.91566 fallback=none
+t=98 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.119 acq_wall_s=7.160 acq_value=-3.59369 y=2.75918 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-3.87082 fallback=none
+t=99 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.431 acq_wall_s=12.001 acq_value=-4.21979 y=2.60545 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-3.82901 fallback=none
+t=100 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.153 acq_wall_s=12.535 acq_value=-1.91674 y=1.66632 best_f=2.76215 regret=0.958212 sobol_computed=1 map_result=mll=-5.78465 fallback=none
+t=101 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.451 acq_wall_s=10.191 acq_value=-4.18182 y=2.75778 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-3.75526 fallback=none
+t=102 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.645 acq_wall_s=13.228 acq_value=-4.28241 y=2.80166 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-3.71323 fallback=none
+t=103 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.418 acq_wall_s=10.654 acq_value=-4.40372 y=2.77644 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-3.67169 fallback=none
+t=104 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=55.730 acq_wall_s=12.354 acq_value=-3.41783 y=2.80782 best_f=2.76215 regret=0.958212 sobol_computed=0 map_result=mll=-4.83113 fallback=none
+t=105 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.229 acq_wall_s=12.293 acq_value=-1.10315 y=2.98812 best_f=2.93384 regret=0.786518 sobol_computed=0 map_result=mll=-5.92679 fallback=none
+t=106 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.049 acq_wall_s=7.419 acq_value=-1.01304 y=2.09294 best_f=2.93384 regret=0.786518 sobol_computed=0 map_result=mll=-3.58998 fallback=none
+t=107 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.858 acq_wall_s=4.980 acq_value=-2.63465 y=3.2267 best_f=3.35669 regret=0.363672 sobol_computed=0 map_result=mll=-3.59813 fallback=none
+t=108 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=13.859 acq_wall_s=12.206 acq_value=-1.35265 y=3.26911 best_f=3.38397 regret=0.336387 sobol_computed=0 map_result=mll=-5.43114 fallback=none
+t=109 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.519 acq_wall_s=5.976 acq_value=-2.5512 y=3.6951 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.5489 fallback=none
+t=110 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.519 acq_wall_s=7.397 acq_value=-3.27398 y=3.63966 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.51633 fallback=none
+t=111 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=45.968 acq_wall_s=10.952 acq_value=-3.04397 y=3.46678 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-4.54449 fallback=none
+t=112 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.793 acq_wall_s=6.342 acq_value=-3.30519 y=3.69492 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.43886 fallback=none
+t=113 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.836 acq_wall_s=9.540 acq_value=-3.20435 y=3.71265 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.40032 fallback=none
+t=114 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.157 acq_wall_s=10.387 acq_value=-3.28028 y=3.81906 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.36344 fallback=none
+t=115 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.986 acq_wall_s=12.356 acq_value=-3.61688 y=3.59397 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.33178 fallback=none
+t=116 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.691 acq_wall_s=7.090 acq_value=-3.43267 y=3.56419 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.29211 fallback=none
+t=117 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.319 acq_wall_s=6.921 acq_value=-3.54412 y=3.57043 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.25342 fallback=none
+t=118 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=19.867 acq_wall_s=12.650 acq_value=-1.51892 y=2.66608 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-4.82861 fallback=none
+t=119 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.316 acq_wall_s=6.314 acq_value=-3.4958 y=3.39213 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.19214 fallback=none
+t=120 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.551 acq_wall_s=6.889 acq_value=-3.71655 y=3.48029 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.16986 fallback=none
+t=121: the fit raised; retrying once
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 177, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.nuts_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=121: the retry raised; querying at random
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 182, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.retry_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=121 method=dsp_map status=excluded fit_calls=2 nuts_attempts=0 fit_wall_s=56.300 acq_wall_s=nan acq_value=nan y=-0.711516 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='exception: NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.'
+t=122 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.972 acq_wall_s=8.060 acq_value=-3.57447 y=3.34485 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.10127 fallback=none
+t=123 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.810 acq_wall_s=6.314 acq_value=-3.58512 y=3.50097 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.06705 fallback=none
+t=124 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.597 acq_wall_s=6.024 acq_value=-3.67743 y=3.67114 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.03843 fallback=none
+t=125 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.767 acq_wall_s=8.707 acq_value=-3.97615 y=3.38997 best_f=3.65434 regret=0.0660143 sobol_computed=1 map_result=mll=-3.01253 fallback=none
+t=126 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.396 acq_wall_s=8.014 acq_value=-3.84488 y=3.52432 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.98207 fallback=none
+t=127 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.135 acq_wall_s=7.681 acq_value=-3.92865 y=3.57625 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.95215 fallback=none
+t=128 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.255 acq_wall_s=9.093 acq_value=-4.00359 y=3.54105 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.92461 fallback=none
+t=129 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.347 acq_wall_s=5.443 acq_value=-4.00612 y=3.55578 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.90172 fallback=none
+t=130 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.281 acq_wall_s=7.803 acq_value=-4.15929 y=3.55594 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.87087 fallback=none
+t=131 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.787 acq_wall_s=8.530 acq_value=-4.34791 y=3.60067 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.84373 fallback=none
+t=132 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.968 acq_wall_s=8.972 acq_value=-4.58862 y=3.60345 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.80757 fallback=none
+t=133 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.381 acq_wall_s=12.577 acq_value=-4.6543 y=3.63767 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.78155 fallback=none
+t=134 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.844 acq_wall_s=9.083 acq_value=-4.77363 y=3.574 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.76112 fallback=none
+t=135 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.179 acq_wall_s=11.875 acq_value=-4.7633 y=3.65827 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.73219 fallback=none
+t=136 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=45.536 acq_wall_s=9.577 acq_value=-4.08331 y=3.30694 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-2.71335 fallback=adam
+t=137 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.627 acq_wall_s=7.717 acq_value=-4.06176 y=3.51475 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.68591 fallback=none
+t=138 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=52.574 acq_wall_s=7.476 acq_value=-3.9663 y=3.44367 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-2.67676 fallback=adam
+t=139 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.489 acq_wall_s=9.320 acq_value=-4.36206 y=3.4371 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.63892 fallback=none
+t=140 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.087 acq_wall_s=7.692 acq_value=-4.50593 y=3.56102 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.62348 fallback=none
+t=141 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.111 acq_wall_s=7.016 acq_value=-4.67303 y=3.54874 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.60758 fallback=none
+t=142 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=53.328 acq_wall_s=8.378 acq_value=-4.07714 y=3.72066 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=nan fallback=adam
+t=143 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.578 acq_wall_s=9.963 acq_value=-4.67096 y=3.56518 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.54589 fallback=none
+t=144 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.371 acq_wall_s=6.829 acq_value=-0.280887 y=0.195905 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-4.37256 fallback=none
+t=145 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.471 acq_wall_s=9.895 acq_value=-4.76621 y=3.67367 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.50383 fallback=none
+t=146 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.071 acq_wall_s=7.713 acq_value=-0.931034 y=1.04408 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-4.32587 fallback=none
+t=147 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.821 acq_wall_s=9.761 acq_value=-4.66933 y=3.64397 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.46641 fallback=none
+t=148 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.185 acq_wall_s=12.252 acq_value=-4.75829 y=3.64989 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.4401 fallback=none
+t=149 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.560 acq_wall_s=9.697 acq_value=-4.94655 y=3.58268 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.4194 fallback=none
+t=150 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.050 acq_wall_s=9.517 acq_value=-4.96988 y=3.5476 best_f=3.65434 regret=0.0660143 sobol_computed=1 map_result=mll=-2.39815 fallback=none
+t=151 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=14.340 acq_wall_s=5.811 acq_value=-1.67162 y=2.93949 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-4.18229 fallback=none
+t=152 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.213 acq_wall_s=10.259 acq_value=-4.89048 y=3.64045 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.36385 fallback=none
+t=153 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.252 acq_wall_s=10.945 acq_value=-4.94994 y=3.57503 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.34304 fallback=none
+t=154 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.113 acq_wall_s=8.731 acq_value=-5.0132 y=3.64561 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.31613 fallback=none
+t=155 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.475 acq_wall_s=9.555 acq_value=-4.85768 y=3.42185 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.29831 fallback=none
+t=156 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.065 acq_wall_s=12.271 acq_value=-5.16088 y=3.52111 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.27903 fallback=none
+t=157: the fit raised; retrying once
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 177, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.nuts_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=157: the retry raised; querying at random
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 182, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.retry_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=157 method=dsp_map status=excluded fit_calls=2 nuts_attempts=0 fit_wall_s=144.561 acq_wall_s=nan acq_value=nan y=0.326223 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='exception: NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.'
+t=158 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.939 acq_wall_s=11.926 acq_value=-4.99234 y=3.61527 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.2462 fallback=none
+t=159 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.884 acq_wall_s=12.348 acq_value=-5.28043 y=3.5437 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.22895 fallback=none
+t=160 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.883 acq_wall_s=12.285 acq_value=-5.08516 y=3.51086 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.2159 fallback=none
+t=161 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.446 acq_wall_s=11.036 acq_value=-4.99963 y=3.5987 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.19223 fallback=none
+t=162 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.125 acq_wall_s=10.394 acq_value=-5.1273 y=3.627 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.1743 fallback=none
+t=163 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.993 acq_wall_s=12.730 acq_value=-5.42864 y=3.53127 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.14991 fallback=none
+t=164 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.016 acq_wall_s=11.929 acq_value=-5.21589 y=3.61806 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.13411 fallback=none
+t=165 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.933 acq_wall_s=12.147 acq_value=-5.27264 y=3.55964 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.11729 fallback=none
+t=166 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.387 acq_wall_s=11.665 acq_value=-5.35436 y=3.56022 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.09508 fallback=none
+t=167 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=31.037 acq_wall_s=13.349 acq_value=-2.14229 y=2.94044 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.99588 fallback=none
+t=168 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=35.704 acq_wall_s=13.102 acq_value=-2.87465 y=2.9428 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.30913 fallback=none
+t=169 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.492 acq_wall_s=8.336 acq_value=-5.14352 y=3.78818 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.05332 fallback=none
+t=170 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.629 acq_wall_s=4.798 acq_value=-0.921014 y=3.06258 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.7681 fallback=none
+t=171 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=34.362 acq_wall_s=8.152 acq_value=-1.37337 y=3.0032 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.76143 fallback=none
+t=172 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.252 acq_wall_s=8.367 acq_value=-3.92057 y=3.64564 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.025 fallback=none
+t=173 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=82.914 acq_wall_s=16.883 acq_value=-3.49028 y=3.54886 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-3.01799 fallback=none
+t=174 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=88.701 acq_wall_s=4.994 acq_value=-2.70986 y=3.70332 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=nan fallback=adam
+t=175 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.903 acq_wall_s=10.563 acq_value=-4.0538 y=3.44762 best_f=3.65434 regret=0.0660143 sobol_computed=1 map_result=mll=-1.98245 fallback=none
+t=176 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.896 acq_wall_s=11.392 acq_value=-4.18939 y=3.50269 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.96813 fallback=none
+t=177 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.291 acq_wall_s=10.494 acq_value=-3.94444 y=3.71214 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.95409 fallback=none
+t=178 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=14.305 acq_wall_s=11.268 acq_value=-4.30446 y=3.63155 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.93784 fallback=none
+t=179 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.935 acq_wall_s=11.435 acq_value=-4.54379 y=3.74126 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.92118 fallback=none
+t=180 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=102.958 acq_wall_s=4.457 acq_value=-2.89679 y=3.54633 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-1.96559 fallback=adam
+t=181 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.471 acq_wall_s=12.547 acq_value=-4.16943 y=3.5776 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.90736 fallback=none
+t=182 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=20.521 acq_wall_s=11.697 acq_value=-4.40147 y=3.64183 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.88309 fallback=none
+t=183 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.618 acq_wall_s=11.234 acq_value=-4.84256 y=3.53062 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.87037 fallback=none
+t=184: the fit raised; retrying once
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 177, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.nuts_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=184: the retry raised; querying at random
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 182, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.retry_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=184 method=dsp_map status=excluded fit_calls=2 nuts_attempts=0 fit_wall_s=170.675 acq_wall_s=nan acq_value=nan y=-0.210203 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='exception: NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.'
+t=185: the fit raised; retrying once
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 177, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.nuts_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=185: the retry raised; querying at random
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 182, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.retry_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=185 method=dsp_map status=excluded fit_calls=2 nuts_attempts=0 fit_wall_s=41.180 acq_wall_s=nan acq_value=nan y=0.480134 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='exception: NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.'
+t=186: the fit raised; retrying once
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 177, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.nuts_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=186: the retry raised; querying at random
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 182, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.retry_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=186 method=dsp_map status=excluded fit_calls=2 nuts_attempts=0 fit_wall_s=104.061 acq_wall_s=nan acq_value=nan y=1.79506 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='exception: NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.'
+t=187 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=17.723 acq_wall_s=10.514 acq_value=-4.82319 y=3.90915 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.82266 fallback=none
+t=188 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=52.754 acq_wall_s=4.937 acq_value=-3.39879 y=3.55022 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-1.86852 fallback=adam
+t=189 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=53.241 acq_wall_s=4.139 acq_value=-2.98965 y=3.4362 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-2.14921 fallback=adam
+t=190 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=43.714 acq_wall_s=6.547 acq_value=-3.68486 y=3.62875 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-1.86449 fallback=adam
+t=191 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.480 acq_wall_s=8.319 acq_value=-4.53524 y=3.49797 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.84837 fallback=none
+t=192 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=13.313 acq_wall_s=15.248 acq_value=-5.54862 y=3.59879 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.78662 fallback=none
+t=193 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=79.711 acq_wall_s=9.344 acq_value=-2.78093 y=2.61513 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.63962 fallback=none
+t=194 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=93.401 acq_wall_s=8.307 acq_value=-4.43273 y=3.53837 best_f=3.65434 regret=0.0660143 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-1.82419 fallback=adam
+t=195 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=13.042 acq_wall_s=8.398 acq_value=-5.45292 y=3.68964 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.7586 fallback=none
+t=196 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=14.210 acq_wall_s=8.801 acq_value=-5.68333 y=3.71595 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.74202 fallback=none
+t=197 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=18.141 acq_wall_s=13.048 acq_value=-5.14026 y=3.5256 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-1.72874 fallback=none
+t=198 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=27.527 acq_wall_s=7.934 acq_value=-1.13317 y=2.88386 best_f=3.65434 regret=0.0660143 sobol_computed=0 map_result=mll=-2.85156 fallback=none
+t=199 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=14.123 acq_wall_s=11.032 acq_value=-5.89885 y=3.79862 best_f=3.65434 regret=0.0660143 sobol_computed=1 map_result=mll=-1.70843 fallback=none
+resume at t=200 with T=200 (checkpoint t_done=199, last logged row 199)

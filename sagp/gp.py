@@ -723,6 +723,11 @@ class FittedGP:
         """S, the number of retained draws; every per-draw readout is this long."""
         return int(self.samples["mean"].shape[0])
 
+    @property
+    def device(self) -> torch.device:
+        """Where `model` lives -- a GPU for a cell `fit` ran there -- so where its inputs must go."""
+        return self.model.train_inputs[0].device
+
     def posterior(self, X_test: ArrayLike, observation_noise: bool = True) -> tuple[Array, Array]:
         """Per retained sample, the posterior mean and *noisy* predictive variance at X_test.
 
@@ -730,12 +735,12 @@ class FittedGP:
         uses. Each test point is its own batch entry, so no joint (n_test, n_test) covariance is
         ever formed and GPyTorch's square-input diagonal heuristic cannot fire when S == n_test.
         """
-        X = torch.as_tensor(np.array(X_test, dtype=np.float64))[:, None, :]
+        X = torch.as_tensor(np.array(X_test, dtype=np.float64), device=self.device)[:, None, :]
         with torch.no_grad(), gpytorch.settings.cholesky_max_tries(9):
             post = self.model.posterior(X, observation_noise=observation_noise)
             mean = post.mean.reshape(X.shape[0], -1).T
             variance = post.variance.reshape(X.shape[0], -1).T
-        return jnp.asarray(mean.numpy()), jnp.asarray(variance.numpy())
+        return jnp.asarray(mean.cpu().numpy()), jnp.asarray(variance.cpu().numpy())
 
     def alphas(self) -> Array:
         """(S, n): K^_s^-1 (z - c_s), the weights the posterior mean contracts with k_*, per draw.
@@ -747,7 +752,7 @@ class FittedGP:
         if self.model.prediction_strategy is None:
             self.posterior(np.asarray(self.X_train)[:1])
         cache = self.model.prediction_strategy.mean_cache.detach()
-        return jnp.asarray(cache.reshape(self._num_draws(), -1).numpy())
+        return jnp.asarray(cache.reshape(self._num_draws(), -1).cpu().numpy())
 
     def means(self) -> Array:
         """(S,): the constant mean of each retained draw, the intercept the posterior mean adds."""
@@ -761,7 +766,7 @@ class FittedGP:
         the sampled number and the predicted one need not agree.
         """
         noise = self.model.likelihood.noise.detach().reshape(self._num_draws(), -1)[:, 0]
-        return jnp.asarray(noise.numpy())
+        return jnp.asarray(noise.cpu().numpy())
 
 
 def _run_nuts(model: CellGP, nuts: NUTSConfig, seed: int) -> tuple[MCMC, float]:
@@ -822,8 +827,8 @@ def fit(
             f"to learn the noise, or a variance >= {MIN_INFERRED_NOISE_LEVEL}."
         )
     cell = CELLS[cell] if not isinstance(cell, Cell) else cell
-    Xt = torch.as_tensor(np.array(X, dtype=np.float64))
-    yt = torch.as_tensor(np.array(y, dtype=np.float64))[:, None]
+    Xt = torch.as_tensor(np.array(X, dtype=np.float64), device=torch_device())
+    yt = torch.as_tensor(np.array(y, dtype=np.float64), device=torch_device())[:, None]
     yvar = None if fixed_noise is None else torch.full_like(yt, fixed_noise)
     model = CellGP(Xt, yt, yvar, cell=cell, alpha=alpha, ell_prior=ell_prior)
 
@@ -836,12 +841,23 @@ def fit(
     samples = {site: draws[:: nuts.thinning] for site, draws in samples.items()}
     _load_draws(model, samples)
 
-    retained = {site: jnp.asarray(samples[site].numpy()) for site in cell.sites if site in samples}
+    retained = {
+        site: jnp.asarray(samples[site].cpu().numpy()) for site in cell.sites if site in samples
+    }
     return FittedGP(
         cell=cell.key, X_train=X, Y_train=y, samples=retained, fixed_noise=fixed_noise,
         active=None, status="ok" if diag.passed else "excluded", status_reason=diag.reason,
         attempts=(diag,), model=model,
     )
+
+
+def torch_device() -> torch.device:
+    """Where `fit` builds a cell's model: onto the GPU when JAX runs the chain on one, else the CPU.
+
+    The acquisition and the readouts' predictions go through that model, so they run there too;
+    a test that builds BoTorch's side of a comparison builds it here, so the comparison stays exact.
+    """
+    return torch.device("cuda" if jax.default_backend() == "gpu" else "cpu")
 
 
 # --- standardize ---

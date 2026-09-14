@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import jax
 import numpy as np
 import torch
 
@@ -183,6 +184,9 @@ def _environment() -> dict[str, object]:
     `machine` and `processor` are here because `platform.platform()` names the OS build and
     not the instruction set: a cluster's nodes can share it and still differ in the vector width
     the kernels are compiled to, which is exactly the difference this block has to be able to show.
+    `jax_device` is what the chain runs on -- a GPU's model name, or `cpu` on a node with none
+    visible (`sagp/__init__.py` takes a GPU first) -- because a run continued on the other kind of
+    device is no longer the same computation to the last bit.
     """
     return {
         "XLA_FLAGS": os.environ.get("XLA_FLAGS"),
@@ -192,6 +196,7 @@ def _environment() -> dict[str, object]:
         "processor": platform.processor(),
         "cpu_count": os.cpu_count(),
         "torch_num_threads": torch.get_num_threads(),
+        "jax_device": jax.devices()[0].device_kind,
     }
 
 

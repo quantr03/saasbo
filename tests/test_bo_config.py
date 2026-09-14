@@ -33,6 +33,7 @@ import platform
 from datetime import datetime
 from pathlib import Path
 
+import jax
 import numpy as np
 import pytest
 import torch
@@ -228,7 +229,7 @@ def test_the_manifest_records_the_code_the_environment_and_the_problem(tmp_path)
     }
     assert set(manifest["env"]) == {
         "XLA_FLAGS", "OMP_NUM_THREADS", "platform", "machine", "processor", "cpu_count",
-        "torch_num_threads",
+        "torch_num_threads", "jax_device",
     }
     assert manifest["env"]["machine"] == platform.machine()
     assert manifest["env"]["cpu_count"] == os.cpu_count()
@@ -236,6 +237,9 @@ def test_the_manifest_records_the_code_the_environment_and_the_problem(tmp_path)
     # torch's own thread count, because the acquisition and the MAP references run on it: BoTorch
     # is where this run's linear algebra happens and XLA's thread settings say nothing about it.
     assert manifest["env"]["torch_num_threads"] == torch.get_num_threads()
+    # The device the chain runs on, since sagp takes a GPU when one is visible: a resume on the
+    # other kind of device is not bit-identical to the run it continues.
+    assert manifest["env"]["jax_device"] == jax.devices()[0].device_kind
 
     # What BoTorch holds fixed below every flag, plus the five sizes a flag does reach: together
     # the acquisition maximizer's whole operating point for this run. `prob_perturb` is 1.0 here

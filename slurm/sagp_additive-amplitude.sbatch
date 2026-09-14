@@ -1,13 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=sagp-additive-amplitude
 #SBATCH --array=0-39
+# One task, stated: a node that hands out CPUs in hyperthread pairs (the GPU nodes) gives a task 2,
+# and srun would otherwise start one copy of the run per CPU, both writing the same run directory.
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --time=1-00:00:00
 #SBATCH --output=logs/%x_%A_%a.out
-# Pin one CPU family so a resumed run stays bit-identical to its earlier iterations (README:
-# a resume on a different CPU differs at the ulp level); off by default so any node will do.
-##SBATCH --constraint=csl
+#SBATCH --partition=gpu-h200-141g-short,gpu-h100-80g
+#SBATCH --gpus=1
+# One GPU per task, on whichever of the two partitions can start it first: sagp runs the chain and
+# the acquisition on it (sagp/__init__.py). A GPU run is not bit-identical to itself run again,
+# even on the same device (README), so unlike a CPU run there is no hardware to pin it to.
 #
 # The additive/amplitude cell: one (family, seed) per array task, 4 families x 10 seeds = 40 tasks.
 # Re-submitting the same array resumes every run in it: --time is a checkpoint interval, not a
@@ -27,6 +32,10 @@ FAMILIES=(aligned3 aligned10 decoupled interaction_g0.25)
 # it into torch.set_num_threads) and XLA reads XLA_FLAGS; both must be set before Python starts.
 export OMP_NUM_THREADS=1
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
+# torch 2.14 sends a few CUDA ops (a batched outer product in the acquisition's backward pass) to
+# Triton kernels that compile a C launcher on first use, and the GPU nodes have no C compiler; this
+# keeps torch on its stock CUDA kernels. torch reads it once, so it too is set before Python starts.
+export TORCH_DISABLE_NATIVE_JIT=1
 module load mamba
 source activate saasbo        # conda's activate trips over set -u, hence set -u only afterwards
 set -u

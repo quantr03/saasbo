@@ -107,7 +107,9 @@ def propose_ei(
     belongs to the proposer protocol, for the proposers that walk a sequence.
     """
     D = fitted.X_train.shape[1]
-    bounds = torch.stack([torch.zeros(D, dtype=torch.float64), torch.ones(D, dtype=torch.float64)])
+    # On the model's device, which the candidates `optimize_acqf` draws inside the bounds inherit.
+    tkwargs = {"dtype": torch.float64, "device": fitted.device}
+    bounds = torch.stack([torch.zeros(D, **tkwargs), torch.ones(D, **tkwargs)])
     acq = LogExpectedImprovement(model=fitted.model, best_f=best_f)
     options = {
         "batch_limit": batch_limit, "maxiter": maxiter, "sample_around_best": True,
@@ -119,7 +121,7 @@ def propose_ei(
             acq, bounds=bounds, q=1, num_restarts=num_restarts, raw_samples=raw_samples,
             options=options,
         )
-    return x.detach().numpy()[0], float(value)
+    return x.detach().cpu().numpy()[0], float(value)
 
 
 # --- the loop ---
