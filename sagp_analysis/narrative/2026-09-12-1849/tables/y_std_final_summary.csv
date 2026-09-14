@@ -1,0 +1,17 @@
+family,method,n_runs,mean_y_std,mean_y_std_sq
+aligned10,additive-amplitude,10,1.5436,2.3968
+aligned10,additive-lengthscale,10,1.5628,2.4698
+aligned10,product-amplitude,10,1.5464,2.4143
+aligned10,product-lengthscale,10,1.5176,2.3220
+aligned3,additive-amplitude,10,0.9584,0.9642
+aligned3,additive-lengthscale,10,0.9600,0.9605
+aligned3,product-amplitude,10,0.9800,0.9947
+aligned3,product-lengthscale,10,1.1025,1.2530
+decoupled,additive-amplitude,10,1.3985,1.9771
+decoupled,additive-lengthscale,10,1.3662,1.8944
+decoupled,product-amplitude,10,1.4024,1.9936
+decoupled,product-lengthscale,10,1.3292,1.7789
+interaction_g0.25,additive-amplitude,10,1.3499,1.9011
+interaction_g0.25,additive-lengthscale,10,1.3355,1.8635
+interaction_g0.25,product-amplitude,10,1.3586,1.9020
+interaction_g0.25,product-lengthscale,10,1.5641,2.7128

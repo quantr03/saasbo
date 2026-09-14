@@ -1,0 +1,15 @@
+{
+  "artifact_url": "https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc",
+  "page": "sagp-narrative.html",
+  "published_as": "index.html",
+  "root": "<scratchpad>/pub  (figures copied there from /scratch/work/tranq8/sagp_analysis/latest/figures/)",
+  "files": {
+    "figures/regret_curves.png": "figures/regret_curves.png",
+    "figures/final_regret_strip.png": "figures/final_regret_strip.png",
+    "figures/identification.png": "figures/identification.png",
+    "figures/identification_vs_t.png": "figures/identification_vs_t.png",
+    "figures/diagnostics.png": "figures/diagnostics.png",
+    "figures/cost_vs_t.png": "figures/cost_vs_t.png"
+  },
+  "build": "build_page.py NARRATIVE.md captions.md claims_ledger.csv tables/*.csv -> sagp-narrative.html (run under srun with latest/venv python)"
+}

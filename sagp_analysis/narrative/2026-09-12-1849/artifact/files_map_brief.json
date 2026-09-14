@@ -1,0 +1,13 @@
+{
+  "artifact_url": "https://claude.ai/code/artifact/101e895b-6ede-4e6f-86c0-1b4a40597329",
+  "page": "sagp-brief.html",
+  "published_as": "index.html",
+  "root": "<scratchpad>/pub3  (three figures copied there from /scratch/work/tranq8/sagp_analysis/latest/figures/)",
+  "files": {
+    "figures/final_regret_strip.png": "figures/final_regret_strip.png",
+    "figures/identification.png": "figures/identification.png",
+    "figures/diagnostics.png": "figures/diagnostics.png"
+  },
+  "inputs": ["/scratch/work/tranq8/saasbo/Research Context/research direction/Design-brief.md (read-only)", "NARRATIVE.md", "captions.md", "claims_ledger.csv"],
+  "build": "build_brief.py OUT.html FIGDIR NARRATIVE_URL QUESTIONS_URL (run under srun with latest/venv python)"
+}

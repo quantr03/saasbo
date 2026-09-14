@@ -1,0 +1,41 @@
+family,seed,n_exception_rows,exception_t,n_adam_fallback_rows
+aligned3,00,1,167,0
+aligned3,01,0,,2
+aligned3,02,2,86 148,4
+aligned3,03,0,,0
+aligned3,04,1,174,2
+aligned3,05,0,,2
+aligned3,06,1,199,3
+aligned3,07,0,,1
+aligned3,08,2,188 199,6
+aligned3,09,0,,0
+aligned10,00,0,,4
+aligned10,01,0,,0
+aligned10,02,0,,3
+aligned10,03,2,153 197,0
+aligned10,04,0,,0
+aligned10,05,0,,1
+aligned10,06,0,,0
+aligned10,07,2,154 195,1
+aligned10,08,1,153,1
+aligned10,09,1,175,0
+decoupled,00,0,,2
+decoupled,01,0,,3
+decoupled,02,0,,0
+decoupled,03,0,,8
+decoupled,04,0,,11
+decoupled,05,0,,2
+decoupled,06,0,,1
+decoupled,07,0,,0
+decoupled,08,0,,5
+decoupled,09,0,,0
+interaction_g0.25,00,2,141 180,4
+interaction_g0.25,01,0,,0
+interaction_g0.25,02,3,108 125 138,0
+interaction_g0.25,03,0,,2
+interaction_g0.25,04,5,121 157 184 185 186,10
+interaction_g0.25,05,0,,6
+interaction_g0.25,06,2,96 171,7
+interaction_g0.25,07,0,,0
+interaction_g0.25,08,0,,0
+interaction_g0.25,09,2,151 182,1
