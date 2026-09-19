@@ -1,0 +1,17 @@
+{
+  "artifact_url": "https://claude.ai/code/artifact/1969ef04-11b1-4e15-b32e-f273d4d8d4e0",
+  "page": "sagp-explainer.html",
+  "published_as": "index.html",
+  "root": "<scratchpad>/pub4  (two figures copied there from /scratch/work/tranq8/sagp_analysis/latest/figures/)",
+  "files": {
+    "figures/final_regret_strip.png": "figures/final_regret_strip.png",
+    "figures/identification.png": "figures/identification.png"
+  },
+  "favicon": "🎛️",
+  "versions": {
+    "1": "2026-09-14, lay audience (dials and knobs), 33 footnotes",
+    "2": "2026-09-14, revised for probabilistic-ML researchers who know GP and BO basics, 57 footnotes"
+  },
+  "inputs": ["brief-keyed artifact 101e895b (read via the Artifact tool)", "NARRATIVE.md", "captions.md", "claims_ledger.csv", "/scratch/work/tranq8/saasbo/Research Context/research direction/Design-brief.md (read-only)"],
+  "build": "hand-written HTML (no build script); numbers checked against claims_ledger.csv + NARRATIVE.md under srun with latest/venv python"
+}

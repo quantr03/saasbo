@@ -1,0 +1,339 @@
+<title>sagp in plain words</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Source+Sans+3:ital,wght@0,400;0,600;1,400;1,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{color-scheme:light;--bg:#f3f6f6;--surface:#ffffff;--ink:#1a2426;--muted:#5a6b6e;--line:#d3dcdd;--line-strong:#aebcbe;
+  --accent:#0f6b64;--accent-ink:#0b5a54;--accent-bg:#e1efec;--note-bg:#eaf0ef;--plate:#ffffff;--focus:#0f6b64;
+  --yes-fg:#1b6a3c;--yes-bg:#dcefe3;--maybe-fg:#865508;--maybe-bg:#fbeccc;--no-fg:#9c2d24;--no-bg:#f8dfdc}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#11191a;--surface:#182122;--ink:#e3e9e9;--muted:#9aabad;--line:#2a3637;--line-strong:#3e4d4f;
+  --accent:#6fcabf;--accent-ink:#8fd8cf;--accent-bg:#1a2f2c;--note-bg:#1b2628;--plate:#ffffff;--focus:#6fcabf;
+  --yes-fg:#a3dcb6;--yes-bg:#183828;--maybe-fg:#f0ca8c;--maybe-bg:#423112;--no-fg:#f3a79f;--no-bg:#48231f}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#11191a;--surface:#182122;--ink:#e3e9e9;--muted:#9aabad;--line:#2a3637;--line-strong:#3e4d4f;
+  --accent:#6fcabf;--accent-ink:#8fd8cf;--accent-bg:#1a2f2c;--note-bg:#1b2628;--plate:#ffffff;--focus:#6fcabf;
+  --yes-fg:#a3dcb6;--yes-bg:#183828;--maybe-fg:#f0ca8c;--maybe-bg:#423112;--no-fg:#f3a79f;--no-bg:#48231f}
+@media (prefers-reduced-motion: no-preference){html{scroll-behavior:smooth}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Source Sans 3","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:17px;line-height:1.6;-webkit-text-size-adjust:100%}
+.page{max-width:720px;margin:0 auto;padding-inline:16px;padding-block:0 72px}
+@media (min-width:600px){.page{padding-inline:24px}}
+h1,h2,h3{font-family:Newsreader,Georgia,"Times New Roman",serif;font-weight:500;line-height:1.15;text-wrap:balance;margin:0}
+h1{font-size:clamp(2rem,1.4rem + 2.4vw,2.8rem);letter-spacing:-.01em;margin:.3rem 0 .8rem}
+h2{font-size:1.65rem;margin:0 0 .7rem}
+h3{font-size:1.28rem;margin:0 0 .5rem}
+p{margin:0 0 1rem}
+p,li,dd,figcaption{max-width:68ch}
+a{color:var(--accent-ink);text-decoration-thickness:1px;text-underline-offset:2px}
+a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+i,var{font-style:italic}
+sub,sup.m{font-size:.72em;line-height:0}
+code{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.86em;background:var(--note-bg);padding:.05em .3em;border-radius:3px}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 .5rem}
+header.head{padding-block:40px 20px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.stand{font-family:Newsreader,Georgia,serif;font-size:1.22rem;line-height:1.45;color:var(--muted);max-width:60ch;margin:0 0 1.1rem}
+.inthis{display:flex;flex-wrap:wrap;gap:6px 18px;list-style:none;margin:0;padding:0;font-size:.92rem}
+.inthis a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--line-strong)}
+.inthis a:hover{color:var(--accent-ink);border-color:var(--accent)}
+section.part{padding-top:2.4rem}
+section.part + section.part{margin-top:.6rem}
+.keyterm{font-weight:600}
+ul.plain{padding-left:1.15rem;margin:0 0 1rem}
+ul.plain li{margin:0 0 .55rem}
+ol.steps{padding-left:1.3rem;margin:0 0 1rem}
+ol.steps li{margin:0 0 .55rem}
+.finding{margin-top:2rem;padding-top:1.4rem;border-top:1px solid var(--line)}
+.finding h3{display:flex;gap:14px;align-items:baseline}
+.num{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;color:var(--accent-ink);flex:none;letter-spacing:.04em}
+.grade{display:inline-block;font-family:"Source Sans 3",Arial,sans-serif;font-size:.7rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;padding:1px 7px;border-radius:3px;white-space:nowrap;vertical-align:middle;line-height:1.5;position:relative;top:-1px}
+.g-solid{color:var(--yes-fg);background:var(--yes-bg)}.g-prov{color:var(--maybe-fg);background:var(--maybe-bg)}.g-no{color:var(--no-fg);background:var(--no-bg)}
+.lic{background:var(--note-bg);border-left:3px solid var(--accent);padding:10px 14px;border-radius:0 6px 6px 0;font-size:.95rem;margin:.6rem 0 1.2rem}
+.lic strong{font-weight:600}
+.infer{font-style:italic;color:var(--muted);font-size:.9em}
+sup.fn{font-size:.62em;line-height:0;vertical-align:baseline;position:relative;top:-.55em;margin-left:1px}
+sup.fn a{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;color:var(--muted);text-decoration:none;padding:0 1px}
+sup.fn a:hover{color:var(--accent-ink)}
+.grades{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin:.4rem 0 .6rem;font-size:.95rem}
+figure{margin:1.4rem 0 1.6rem;padding:0}
+figure.diagram{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px 10px 6px}
+figure.diagram svg{display:block;width:100%;max-width:640px;height:auto;margin:0 auto}
+.plate{display:block;background:var(--plate);border:1px solid var(--line);border-radius:4px;padding:6px;cursor:zoom-in}
+.plate img{display:block;width:100%;height:auto;max-width:100%}
+figcaption{font-size:.9rem;line-height:1.5;margin-top:.55rem;color:var(--ink)}
+figcaption .lab{font-weight:600}
+figcaption .fig-links{color:var(--muted);font-size:.85rem}
+.scope{border:1px solid var(--line);background:var(--surface);padding:12px 16px;border-radius:6px;font-size:.95rem;margin:1rem 0}
+.scope p:last-child{margin-bottom:0}
+details.gloss{margin-top:2.6rem;border-top:1px solid var(--line);padding-top:1rem}
+details.gloss summary{cursor:pointer;font-family:Newsreader,Georgia,serif;font-size:1.4rem;font-weight:500;list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+details.gloss summary::-webkit-details-marker{display:none}
+details.gloss summary::after{content:"";width:.5em;height:.5em;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin-left:4px;position:relative;top:-3px}
+details.gloss[open] summary::after{transform:rotate(-135deg);top:2px}
+details.gloss .hint{font-family:"Source Sans 3",Arial,sans-serif;font-size:.9rem;color:var(--muted);font-weight:400}
+dl.terms{margin:1rem 0 0;display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.55rem 1.2rem;font-size:.95rem}
+dl.terms dt{font-weight:600;white-space:nowrap}
+dl.terms dd{margin:0}
+@media (max-width:560px){dl.terms{grid-template-columns:1fr;gap:.2rem}dl.terms dd{margin-bottom:.6rem}}
+section.sources{margin-top:2.6rem;border-top:1px solid var(--line);padding-top:1rem}
+section.sources h2{font-size:1.4rem}
+section.sources .fine{color:var(--muted);font-size:.9rem}
+ol.fnlist{padding-left:1.6rem;margin:.6rem 0 0;font-size:.86rem;line-height:1.5;color:var(--muted)}
+ol.fnlist li{margin:0 0 .3rem;max-width:80ch}
+ol.fnlist li:target{background:var(--accent-bg);color:var(--ink);border-radius:3px;padding:1px 4px}
+.lid{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.8rem;color:var(--accent-ink);margin-right:4px}
+.back{text-decoration:none;margin-left:4px}
+footer.about{margin-top:2.6rem;padding-top:1.1rem;border-top:1px solid var(--line-strong);font-size:.92rem}
+footer.about ul{padding-left:1.15rem;margin:.4rem 0 .8rem}
+footer.about li{margin:0 0 .3rem}
+footer.about .fine{color:var(--muted);font-size:.85rem}
+dialog.lb{border:0;padding:0;margin:0;width:100vw;height:100vh;max-width:100vw;max-height:100vh;background:transparent;color:#fff}
+dialog.lb::backdrop{background:rgba(8,12,18,.88)}
+.lb-inner{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;padding:12px;gap:10px}
+.lb-inner img{max-width:100%;max-height:calc(100vh - 90px);width:auto;height:auto;object-fit:contain;background:#fff;border-radius:3px}
+.lb-bar{display:flex;gap:16px;align-items:center;font-family:"Source Sans 3",Arial,sans-serif;font-size:.9rem;color:#e6e9ee}
+.lb-bar a{color:#e6e9ee}
+.lb-bar button{all:unset;cursor:pointer;border:1px solid rgba(255,255,255,.4);padding:4px 12px;border-radius:4px}
+@media print{figure{break-inside:avoid}}
+</style>
+<div class="page">
+<header class="head">
+<p class="eyebrow">An explainer · sagp study · September 2026</p>
+<h1>Sparse GP surrogates at <i>D</i> = 100, 200 evaluations</h1>
+<p class="stand">What the sagp study asked, how it tested it and what it found, written for researchers in probabilistic machine learning who know Gaussian processes and Bayesian optimisation but not the high-dimensional BO literature. About ten minutes.</p>
+<ul class="inthis"><li><a href="#problem">The problem</a></li><li><a href="#idea">The idea under test</a></li><li><a href="#test">How it was tested</a></li><li><a href="#found">What was found</a></li><li><a href="#next">What it means</a></li><li><a href="#gloss">Terms</a></li><li><a href="#sources">Sources</a></li></ul>
+</header>
+
+<section class="part" id="problem">
+<h2>The problem</h2>
+<p>Bayesian optimisation at <i>D</i> = 100 with a budget of <i>T</i> = 200 noisy evaluations (noise sd 0.1), the first 20 of them a scrambled-Sobol initial design shared by every method within a seed.<sup class="fn"><a href="#n1" id="r1">1</a></sup> A GP with a full ARD kernel cannot learn 100 lengthscales from 200 points, so high-dimensional BO adds an assumption. The one taken here is low effective dimension along the axes: the objective depends on only 3 to 10 of the 100 coordinates, its active set <i>S</i>, and the surrogate has to discover <i>S</i> while optimising.<sup class="fn"><a href="#n2" id="r2">2</a></sup> The question is how the surrogate should encode "coordinate <i>i</i> is irrelevant", and whether that choice changes the optimisation, the identification of <i>S</i>, or both.</p>
+</section>
+
+<section class="part" id="idea">
+<h2>The idea under test</h2>
+<p>SAASBO, the established fully Bayesian method, uses a Matérn-5/2 ARD kernel and puts a sparsity-inducing half-Cauchy scale mixture on the inverse squared lengthscales <i>ρ<sub>i</sub></i> = 1/<i>ℓ<sub>i</sub></i><sup class="m">2</sup>: <i>ρ<sub>i</sub></i> → 0 stretches coordinate <i>i</i> until it is flat. The alternative under test puts the same global-local prior on per-coordinate amplitudes <i>a<sub>i</sub></i><sup class="m">2</sup> of a kernel with one component per coordinate, so that <i>a<sub>i</sub></i><sup class="m">2</sup> → 0 silences coordinate <i>i</i> instead. The two parameterisations encode different senses of relevance: an amplitude is a variance share, a lengthscale is a slope.</p>
+<p>That choice is crossed with kernel structure. A product of per-coordinate factors can represent interactions but must resolve the joint function on <i>S</i>; a sum of centered per-coordinate components is first-order only, but each component is learned from the projection of all <i>n</i> points onto its coordinate. Two by two gives four cells.</p>
+<figure class="diagram">
+<svg viewBox="0 0 640 380" role="img" aria-label="A two-by-two grid. Columns: sparsity on the inverse squared lengthscale, where rho to zero stretches a coordinate's component until it is flat, and sparsity on the amplitude, where a squared to zero shrinks it until it has no size. Rows: additive kernel, a sum of per-coordinate components, and product kernel, where coordinates can interact. Product-lengthscale is SAASBO, Matérn-5/2 ARD; additive-amplitude is the proposal." fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" font-size="12">
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor" stroke="none"/></marker></defs>
+<!-- column headers -->
+<text x="290" y="26" text-anchor="middle" fill="currentColor" stroke="none" font-weight="600" font-size="13">Sparsity on <tspan font-style="italic">ρ</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3"> = 1/</tspan><tspan font-style="italic">ℓ</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-9" font-size="9">2</tspan></text>
+<text x="290" y="44" text-anchor="middle" fill="var(--muted)" stroke="none"><tspan font-style="italic">ρ</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3"> → 0 flattens coordinate </tspan><tspan font-style="italic">i</tspan></text>
+<path d="M200 84 c 7 -13, 13 -13, 20 0 s 13 13, 20 0 s 13 -13, 20 0 s 13 13, 20 0"/>
+<line x1="288" y1="84" x2="306" y2="84" marker-end="url(#arr)"/>
+<path d="M314 84 c 27 -4, 53 -4, 80 0" stroke="var(--accent)" stroke-width="2"/>
+<text x="290" y="110" text-anchor="middle" fill="var(--muted)" stroke="none" font-size="11">stretched: the lengthscale grows without bound</text>
+<text x="526" y="26" text-anchor="middle" fill="currentColor" stroke="none" font-weight="600" font-size="13">Sparsity on <tspan font-style="italic">a</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-9" font-size="9">2</tspan></text>
+<text x="526" y="44" text-anchor="middle" fill="var(--muted)" stroke="none"><tspan font-style="italic">a</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-9" font-size="9">2</tspan><tspan dy="6"> → 0 silences coordinate </tspan><tspan font-style="italic">i</tspan></text>
+<path d="M436 84 c 7 -13, 13 -13, 20 0 s 13 13, 20 0 s 13 -13, 20 0 s 13 13, 20 0"/>
+<line x1="524" y1="84" x2="542" y2="84" marker-end="url(#arr)"/>
+<path d="M550 84 c 7 -1.5, 13 -1.5, 20 0 s 13 1.5, 20 0 s 13 -1.5, 20 0 s 13 1.5, 20 0" stroke="var(--accent)" stroke-width="2"/>
+<text x="526" y="110" text-anchor="middle" fill="var(--muted)" stroke="none" font-size="11">shrunk: the variance share goes to zero</text>
+<!-- row headers -->
+<text x="0" y="164" fill="currentColor" stroke="none" font-weight="600" font-size="13">Additive</text>
+<text x="0" y="182" fill="var(--muted)" stroke="none"><tspan font-style="italic">k</tspan> = Σ<tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3"> </tspan><tspan font-style="italic">k</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3">(</tspan><tspan font-style="italic">x</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3">, </tspan><tspan font-style="italic">x</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3">′)</tspan></text>
+<text x="0" y="198" fill="var(--muted)" stroke="none">first-order only</text>
+<path d="M4 228 c 5 -8, 9 -8, 14 0 s 9 8, 14 0"/>
+<text x="44" y="232" text-anchor="middle" fill="currentColor" stroke="none" font-size="14">+</text>
+<path d="M56 228 c 5 -8, 9 -8, 14 0 s 9 8, 14 0"/>
+<text x="96" y="232" text-anchor="middle" fill="currentColor" stroke="none" font-size="14">+</text>
+<text x="118" y="232" fill="var(--muted)" stroke="none">…</text>
+<text x="0" y="294" fill="currentColor" stroke="none" font-weight="600" font-size="13">Product</text>
+<text x="0" y="312" fill="var(--muted)" stroke="none"><tspan font-style="italic">k</tspan> = Π<tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3"> </tspan><tspan font-style="italic">k</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3">(</tspan><tspan font-style="italic">x</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3">, </tspan><tspan font-style="italic">x</tspan><tspan dy="3" font-size="9" font-style="italic">i</tspan><tspan dy="-3">′)</tspan></text>
+<text x="0" y="328" fill="var(--muted)" stroke="none">interactions representable</text>
+<path d="M4 358 c 5 -8, 9 -8, 14 0 s 9 8, 14 0"/>
+<text x="44" y="362" text-anchor="middle" fill="currentColor" stroke="none" font-size="14">×</text>
+<path d="M56 358 c 5 -8, 9 -8, 14 0 s 9 8, 14 0"/>
+<text x="96" y="362" text-anchor="middle" fill="currentColor" stroke="none" font-size="14">×</text>
+<text x="118" y="362" fill="var(--muted)" stroke="none">…</text>
+<!-- cells -->
+<rect x="176" y="126" width="228" height="118" rx="6" fill="var(--surface)" stroke="var(--line-strong)"/>
+<text x="290" y="180" text-anchor="middle" fill="currentColor" stroke="none" font-weight="600" font-size="13">additive · lengthscale</text>
+<text x="290" y="200" text-anchor="middle" fill="var(--muted)" stroke="none">one amplitude, unnormalised sum</text>
+<text x="290" y="218" text-anchor="middle" fill="var(--muted)" stroke="none">of Matérn-5/2 components</text>
+<rect x="412" y="126" width="228" height="118" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>
+<text x="526" y="180" text-anchor="middle" fill="currentColor" stroke="none" font-weight="600" font-size="13">additive · amplitude</text>
+<text x="526" y="200" text-anchor="middle" fill="var(--muted)" stroke="none">normalised components, one</text>
+<text x="526" y="218" text-anchor="middle" fill="var(--muted)" stroke="none">variance share each</text>
+<text x="526" y="236" text-anchor="middle" fill="var(--accent-ink)" stroke="none" font-style="italic">the proposal</text>
+<rect x="176" y="256" width="228" height="118" rx="6" fill="var(--surface)" stroke="var(--line-strong)"/>
+<text x="290" y="310" text-anchor="middle" fill="currentColor" stroke="none" font-weight="600" font-size="13">product · lengthscale</text>
+<text x="290" y="330" text-anchor="middle" fill="var(--muted)" stroke="none">Matérn-5/2 ARD</text>
+<text x="290" y="350" text-anchor="middle" fill="var(--muted)" stroke="none" font-style="italic">SAASBO itself</text>
+<rect x="412" y="256" width="228" height="118" rx="6" fill="var(--surface)" stroke="var(--line-strong)"/>
+<text x="526" y="310" text-anchor="middle" fill="currentColor" stroke="none" font-weight="600" font-size="13">product · amplitude</text>
+<text x="526" y="330" text-anchor="middle" fill="var(--muted)" stroke="none">product of (1 + normalised</text>
+<text x="526" y="348" text-anchor="middle" fill="var(--muted)" stroke="none">component) factors</text>
+</svg>
+<figcaption><span class="lab">The four cells.</span> Columns are the two parameters the half-Cauchy sparsity prior can sit on; both routes end with a flat component, by different mechanisms. Rows are the two kernel structures. Bottom left is SAASBO; top right is the proposal.</figcaption>
+</figure>
+<p>Everything else is held fixed. The prior is SAASBO's own half-Cauchy scale mixture in all four cells, <i>τ</i><sup class="m">2</sup> ~ HC(0.1) with HC(1) factors on the <i>ρ</i> scale, and on the amplitude scale a global scale <i>α</i> = 0.0131 chosen so that both priors imply the same prior-predictive count of active coordinates, plus a LogNormal(0, 1.5) prior on each <i>ℓ<sub>i</sub></i>.<sup class="fn"><a href="#n3" id="r3">3</a></sup> The amplitude cells normalise each component to unit average variance, so <i>a<sub>i</sub></i><sup class="m">2</sup> is a variance share; the additive-lengthscale cell must stay unnormalised, because there <i>ρ<sub>i</sub></i> → 0 is what removes a component. Inference is one NUTS chain per refit, 512 warm-up and 256 draws thinned to 16, max_tree_depth 6; a fit is flagged excluded when split-R-hat exceeds 1.1, ESS falls below 16 on any site or more than 5 divergences occur, but its draws are still used to choose the next point.<sup class="fn"><a href="#n4" id="r4">4</a></sup> The acquisition is analytic LogEI averaged over the retained draws.<sup class="fn"><a href="#n1" id="r1b">1</a></sup></p>
+</section>
+
+<section class="part" id="test">
+<h2>How it was tested</h2>
+<p>The objectives are generated rather than borrowed, so the ground truth is stated in the units the posteriors are read in: each active coordinate carries a centered one-dimensional GP draw rescaled to an exact variance share, and interaction terms are products of centered draws with their own share. Four families, ten seeds each, with <i>S</i> a random subset per seed:<sup class="fn"><a href="#n2" id="r2b">2</a></sup></p>
+<ul class="plain">
+<li><span class="keyterm">aligned3, aligned10.</span> 3 or 10 active coordinates with equal shares and <i>ℓ</i> = 0.5. The positive controls, where both parameterisations should agree.</li>
+<li><span class="keyterm">decoupled.</span> 8 active coordinates with shares 0.21 ×4 and 0.04 ×4 crossed with <i>ℓ</i> = 1.5 and 0.08, two coordinates per importance-by-roughness class, so that variance share and slope disagree. Built to separate what the two parameterisations track.</li>
+<li><span class="keyterm">interaction_g0.25.</span> 5 active coordinates with main-effect shares 0.15 each and two disjoint pairs carrying 0.125 each as product interactions, so a quarter of the variance is beyond any additive model.</li>
+</ul>
+<p>Three references: sobol (the initial sequence continued), dsp_map (an ARD Matérn-5/2 at the MAP under the dimension-scaled lengthscale prior of Hvarfner et al., the vanilla baseline) and oracle_S (the same MAP GP restricted to the true <i>S</i>, intended as the ceiling for any variable selection).</p>
+<p>Optimisation is scored by simple regret <i>f</i>* − best_<i>f</i> at <i>t</i> = 199. Identification is scored at the last readout in three ways: average precision of ranking the 100 coordinates by the cell's native sparsity parameter (posterior median of <i>ρ<sub>i</sub></i> or <i>a<sub>i</sub></i><sup class="m">2</sup>), by sobol_hat (first-order Sobol indices of the posterior mean under the uniform measure, a parameterisation-neutral readout), and by the thresholded rule <i>p</i><sub>active</sub> &gt; 0.5, where <i>p</i><sub>active</sub> is the fraction of the 16 retained draws with share &gt; 0.02 in the amplitude cells or <i>ρ</i> &gt; 0.152, i.e. <i>ℓ</i> &lt; 2.56, in the lengthscale cells.<sup class="fn"><a href="#n5" id="r5">5</a></sup></p>
+<p>Comparisons are paired within seeds because objectives differ by orders of magnitude in attainable regret: on aligned3 a single method's final regret spans 1e-5 to 0.21 across seeds.<sup class="fn"><a href="#n6" id="r6">6</a></sup> The test is a two-sided Wilcoxon signed-rank over the 10 seeds. 10/10 wins gives <i>p</i> = 0.002, 9/10 gives 0.021, and 8/10 gives 0.11 with an exact 95 % interval on the win probability that contains a coin flip.<sup class="fn"><a href="#n7" id="r7">7</a></sup> 72 such tests were run, so about 3.6 false positives are expected at <i>p</i> &lt; 0.05 if nothing were real; a Holm column is tabulated but not applied to the headline values.<sup class="fn"><a href="#n8" id="r8">8</a></sup> The study grades every claim, and this page keeps the grades:<sup class="fn"><a href="#n9" id="r9">9</a></sup></p>
+<div class="grades"><span class="grade g-solid">Supported</span><span>at least 9 of 10 seeds and <i>p</i> ≤ 0.01.</span></div>
+<div class="grades"><span class="grade g-prov">Suggestive</span><span>the median favours the claim and either <i>p</i> ≤ 0.05 or at least 8 of 10 seeds, but not supported.</span></div>
+<div class="grades"><span class="grade g-no">Not supported</span><span>otherwise. Descriptive claims, with no test, are marked as such.</span></div>
+</section>
+
+<section class="part" id="found">
+<h2>What was found</h2>
+
+<section class="finding" id="f1">
+<h3><span class="num">1</span><span>The cell whose kernel structure matches the objective wins, and every cell beats quasi-random search.</span></h3>
+<p>Every cell beats sobol in 10 of 10 seeds in every family.<sup class="fn"><a href="#n10" id="r10">10</a></sup> <span class="grade g-solid">Supported</span> On the two additive families the additive cells lead. On aligned10, additive-amplitude beats product-lengthscale 10/10<sup class="fn"><a href="#n11" id="r11">11</a></sup> (medians 0.0273 against 0.289)<sup class="fn"><a href="#n12" id="r12">12</a></sup> and beats dsp_map and oracle_S 10/10 as well.<sup class="fn"><a href="#n13" id="r13">13</a></sup> On decoupled, additive-amplitude beats oracle_S and product-lengthscale 10/10 and additive-lengthscale beats product-lengthscale 10/10,<sup class="fn"><a href="#n14" id="r14">14</a></sup> though additive-amplitude against dsp_map is only 7/10, <i>p</i> = 0.049.<sup class="fn"><a href="#n15" id="r15">15</a></sup> <span class="grade g-prov">Suggestive</span> On interaction_g0.25 the order reverses: product-lengthscale 0.000699, product-amplitude 0.00125, oracle_S 0.0119, additive-amplitude 0.0173, additive-lengthscale 0.0214, dsp_map 0.415.<sup class="fn"><a href="#n16" id="r16">16</a></sup> Product-lengthscale beats dsp_map 10/10,<sup class="fn"><a href="#n17" id="r17">17</a></sup> but product against additive is 8/10 in all four pairings (<i>p</i> from 0.0098 to 0.065),<sup class="fn"><a href="#n18" id="r18">18</a></sup> <span class="grade g-prov">Suggestive</span>, and the additive cells tie oracle_S (<i>p</i> = 0.56).<sup class="fn"><a href="#n19" id="r19">19</a></sup> On aligned3 every model-based method reaches a median below 0.004 and no cell is distinguishable from dsp_map:<sup class="fn"><a href="#n20" id="r20">20</a></sup> three active coordinates at this budget do not discriminate surrogate classes.</p>
+<p>The parameterisation contrast within a structure is <span class="grade g-no">Not supported</span> everywhere except decoupled, where additive-amplitude beats additive-lengthscale 9/10 (<i>p</i> = 0.0137), <span class="grade g-prov">Suggestive</span>.<sup class="fn"><a href="#n21" id="r21">21</a></sup></p>
+<p><span class="infer">The study's mechanism, an inference rather than a tested claim.</span> Product-lengthscale's own readout sees only about half of <i>S</i> on the additive families (thresholded recall 0.53 on aligned10 and 0.56 on decoupled, median <i>ρ</i> on the true coordinates 0.19 and 0.29 against the 0.152 cutoff):<sup class="fn"><a href="#n22" id="r22">22</a></sup> an ARD product kernel must resolve the joint 10-dimensional function from 200 points, the SAAS prior shrinks the lengthscales it cannot pin down, and the acquisition optimises the coordinates that remain. The additive kernel learns each component from every point's projection and has no such failure. On interaction_g0.25 the additive posterior mean is the additive projection of <i>f</i>, whose maximiser is not <i>f</i>'s; the regret floor of 0.017 to 0.021 is the price.</p>
+<figure>
+<a class="zoom plate" href="figures/final_regret_strip.png" data-num="A"><img src="figures/final_regret_strip.png" alt="Final regret per seed at t = 199, one panel per family, one column of dots per method, seeds paired across methods." width="2064" height="629" loading="lazy"></a>
+<figcaption><span class="lab">Figure A. Final regret per seed at <i>t</i> = 199.</span> One panel per family; each dot is one seed's final regret for one method on a log scale, the bar the median over the ten seeds; seeds are paired across methods. Look at the two additive cells sitting lowest on aligned10 and decoupled, the two product cells lowest on interaction_g0.25, and sobol highest everywhere. Dots at the floor of the plot reached smaller regret. <span class="fig-links"><a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#fig2">Full caption on the narrative page</a> · <a href="figures/final_regret_strip.png">open the PNG</a></span></figcaption>
+</figure>
+<p class="lic"><strong>Take away:</strong> the structure main effect, which is the brief's prediction P2. That the additive cells still beat dsp_map twenty-fold in median on interaction_g0.25 says a wrong-but-sparse structural prior is worth more than a right-but-vague one at this <i>D</i> and budget. <strong>Do not take away:</strong> a parameterisation main effect, or anything about interaction shares other than <i>γ</i> = 0.25, the single point run of the planned sweep.</p>
+</section>
+
+<section class="finding" id="f2">
+<h3><span class="num">2</span><span>All four cells recover <i>S</i> as a ranking, but the thresholded rule under-recalls, partly because its cutoff is applied in design-deflated units.</span></h3>
+<p>Ranking works in every cell: pooled average precision by the native posterior median is 0.89 to 0.97 across the four cells (dsp_map 0.677), and by sobol_hat 0.935 to 0.976.<sup class="fn"><a href="#n23" id="r23">23</a></sup> The median over runs is 1.0 in all four cells.<sup class="fn"><a href="#n24" id="r24">24</a></sup> <span class="grade g-solid">Supported</span> (descriptive). The thresholded rule is precise, 0.92 to 1.00 in every cell,<sup class="fn"><a href="#n25" id="r25">25</a></sup> but conservative: recall is 0.25 (product-amplitude) and 0.51 (additive-amplitude) on aligned10, 0.39 and 0.54 on decoupled,<sup class="fn"><a href="#n26" id="r26">26</a></sup> against 0.53 and 0.90, then 0.56 and 0.79, for the lengthscale cells.<sup class="fn"><a href="#n27" id="r27">27</a></sup></p>
+<p>Part of that is a units error. The share threshold 0.02 was chosen against the labels, which are variances under the uniform measure of a unit-variance objective, but the cells are fitted to <i>y</i> standardised over the BO design, and a BO design concentrates where <i>f</i> is high: at <i>t</i> = 199 the standardisation std averages 1.52 to 1.56 on aligned10 and 1.33 to 1.40 on decoupled.<sup class="fn"><a href="#n28" id="r28">28</a></sup> In the model's units a share is therefore divided by about two: a 0.10 share on aligned10 becomes 0.042, and a 0.04 share on decoupled becomes 0.020, the threshold itself.<sup class="fn"><a href="#n29" id="r29">29</a></sup> On top of that, the posterior medians of <i>a<sub>i</sub></i><sup class="m">2</sup> on <i>S</i> sit below even the deflated value, 0.021 (additive-amplitude) and 0.011 (product-amplitude) on aligned10 against 0.042.<sup class="fn"><a href="#n30" id="r30">30</a></sup> Ranking survives because the on-<i>S</i> values still exceed the largest off-<i>S</i> <i>a<sub>i</sub></i><sup class="m">2</sup> by one to two orders of magnitude.<sup class="fn"><a href="#n31" id="r31">31</a></sup> The fix is offline: rescale <i>a<sub>i</sub></i><sup class="m">2</sup> by <i>y</i>_std<sup class="m">2</sup> before thresholding.</p>
+<p>The decoupled family also shows what the two parameters measure. The lengthscale cells' native score orders by roughness, as its units dictate: additive-lengthscale's median <i>ρ</i> is 120 on the high-share rough class against 2.2 on the high-share smooth class at the same true share.<sup class="fn"><a href="#n32" id="r32">32</a></sup> The amplitude cells order by importance with roughness leaking in: additive-amplitude's median <i>a<sub>i</sub></i><sup class="m">2</sup> is 0.079 on high-rough against 0.038 on high-smooth.<sup class="fn"><a href="#n33" id="r33">33</a></sup> The neutral readout does what it was built for: sobol_hat's medians for additive-amplitude are 0.23 and 0.20 on the two high-share classes and 0.037 and 0.032 on the low-share ones, against true shares 0.21 and 0.04.<sup class="fn"><a href="#n34" id="r34">34</a></sup> <span class="grade g-solid">Supported</span> (descriptive), and sobol_hat is the readout to report as a share estimate.</p>
+<figure>
+<a class="zoom plate" href="figures/identification.png" data-num="B"><img src="figures/identification.png" alt="Active-set identification at the last readout: average precision by the native sparsity parameter, average precision by sobol_hat, and F1 of the thresholded rule, per seed and cell." width="2059" height="663" loading="lazy"></a>
+<figcaption><span class="lab">Figure B. Active-set identification at <i>t</i> = 199.</span> Per seed and cell: average precision of ranking by the native parameter (left) and by sobol_hat (centre), and F1 of <i>p</i><sub>active</sub> &gt; 0.5 (right); bars are medians. Look at the left and centre panels sitting near the top for all four cells, and the right panel dropping for the amplitude cells on aligned10 and decoupled. The two additive-lengthscale aligned3 seeds near zero in the left panel are the all-active mode of finding 4, which sobol_hat does not see. <span class="fig-links"><a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#fig3">Full caption on the narrative page</a> · <a href="figures/identification.png">open the PNG</a></span></figcaption>
+</figure>
+<p class="lic"><strong>Take away:</strong> ranking by either readout, and sobol_hat as the share estimate. <strong>Do not take away:</strong> recall or F1 at <i>p</i><sub>active</sub> &gt; 0.5 as a property of the cells; the threshold is in the wrong units and, in the amplitude cells, <i>p</i><sub>active</sub> is a sampler artefact (finding 3).</p>
+</section>
+
+<section class="finding" id="f3">
+<h3><span class="num">3</span><span>The amplitude cells' NUTS chains never passed the convergence gate, so their posteriors are not to be trusted, even though their optimisation results are.</span></h3>
+<p>Gate exclusion is 100 % in both amplitude cells, 7,200 of 7,200 iterations each, with r_hat_max median 1.49 and 1.51 and n_eff_min median 6.1 and 5.9 against thresholds of 1.1 and 16.<sup class="fn"><a href="#n35" id="r35">35</a></sup> The failing sites are the amplitudes and lengthscales (median R-hat 1.40 to 1.45, ESS 6.5 to 7); the global sites pass (R-hat 1.04 to 1.05, ESS 36 to 38).<sup class="fn"><a href="#n36" id="r36">36</a></sup> The lengthscale cells fail marginally, in 52.8 % and 59.3 % of fits.<sup class="fn"><a href="#n37" id="r37">37</a></sup> NUTS reaches max_tree_depth in 95.3 to 100 % of fits in every cell, so every trajectory is truncated.<sup class="fn"><a href="#n38" id="r38">38</a></sup> The structural reason the amplitude cells are worse is that they sample 2<i>D</i> + 3 = 203 sites against <i>D</i> + 4 = 104;<sup class="fn"><a href="#n39" id="r39">39</a></sup> the funnel of the amplitude scale mixture at <i>α</i> = 0.013 is the study's hypothesis for the geometric one. <span class="grade g-no">Not supported</span>: that the amplitude cells' posteriors are converged.</p>
+<p>What survives. Regret does, because the loop queried with the draws it had; an unconverged posterior is a worse surrogate, so the amplitude cells are handicapped rather than favoured. Ranking by the native median survives as an empirical fact, since it needs only the order across coordinates. <i>p</i><sub>active</sub> does not: it is a fraction of 16 draws from about 6 effective ones, and on the true aligned10 coordinates its 10th to 90th percentile range is 0.00 to 0.94.<sup class="fn"><a href="#n40" id="r40">40</a></sup> Where both kinds of fit exist, in the lengthscale cells, non-convergence does cost identification: at <i>t</i> ≥ 100 passing fits have mean AP 0.90 and 0.94 against 0.83 and 0.79 for excluded ones, and the amplitude cells' excluded-only means of 0.85 and 0.88 sit in the same band.<sup class="fn"><a href="#n41" id="r41">41</a></sup></p>
+<p class="lic"><strong>Take away:</strong> the regret comparisons and the rankings. <strong>Do not take away:</strong> <i>p</i><sub>active</sub>, any calibration statement, or any per-seed readout from the amplitude cells until the sampler pilot below has run.</p>
+</section>
+
+<section class="finding" id="f4">
+<h3><span class="num">4</span><span>Two things look wrong: oracle_S is a weak reference, and additive-lengthscale flips into an all-active posterior mode after it has converged.</span></h3>
+<p><span class="keyterm">oracle_S is weak.</span> It loses to additive-amplitude 10/10 on aligned10 (median 0.43 against 0.027) and on decoupled (0.44 against 0.058), and 9/10 to additive-lengthscale on both;<sup class="fn"><a href="#n42" id="r42">42</a></sup> on interaction_g0.25 it is third, tied with the additive cells.<sup class="fn"><a href="#n43" id="r43">43</a></sup> <span class="grade g-solid">Supported</span>, but as a statement about the reference. The reason is inductive bias: the oracle knows <i>S</i> but fits one ARD Matérn-5/2 GP at the MAP on it, a full-interaction model that cannot pool information across coordinates on exactly the families where the additive cells can. It also wastes queries: 24, 12, 8 and 10 % of its late queries, by family, are near-copies of an earlier query, against 0 to 1 % for the cells and dsp_map;<sup class="fn"><a href="#n44" id="r44">44</a></sup> the study's hypothesis is that an acquisition exactly flat in the 97 inactive coordinates lets the optimiser's perturbations of the incumbent beat its raw candidates. A fair oracle would share the structural class of the cell under test, or be the cell itself with the prior restricted to <i>S</i>.</p>
+<p><span class="keyterm">The all-active mode.</span> On aligned3, additive-lengthscale declares all 100 coordinates active in five of ten seeds, in 25, 23, 27, 70 and 54 of their 180 readouts, never before <i>t</i> = 73,<sup class="fn"><a href="#n45" id="r45">45</a></sup> and intermittently: seed 02 alternates between 100 and 3 active across its late readouts.<sup class="fn"><a href="#n46" id="r46">46</a></sup> The retained draws say what it is: in the sparse mode the outputscale is 0.48 with <i>ρ</i> 2.3 on <i>S</i> and 7e-5 off <i>S</i>;<sup class="fn"><a href="#n47" id="r47">47</a></sup> in the collapsed mode all 16 draws have 98 to 100 coordinates above the cutoff, the outputscale is 0.0034, <i>τ</i><sup class="m">2</sup> is 82 and <i>ρ</i> is 167 on <i>S</i> and 121 off <i>S</i>.<sup class="fn"><a href="#n48" id="r48">48</a></sup> A second posterior mode, in which every coordinate carries a low-amplitude, short-lengthscale component and the global scale absorbs the difference. It begins only after the run has converged, seed 08's regret having been 0.000019 since <i>t</i> = 60,<sup class="fn"><a href="#n49" id="r49">49</a></sup> so regret is unaffected. Single-chain R-hat is blind to it: six of seven fully collapsed readouts pass the gate with r_hat_max 1.04 to 1.10,<sup class="fn"><a href="#n50" id="r50">50</a></sup> and only the transitions are caught.<sup class="fn"><a href="#n51" id="r51">51</a></sup> sobol_hat is right in both modes, AP 1.00 and 0.92 in the two flagged seeds against 0.02 and 0.04 by <i>ρ</i>.<sup class="fn"><a href="#n52" id="r52">52</a></sup> <span class="infer">The study's hypothesis, medium confidence:</span> the additive-lengthscale kernel is deliberately unnormalised, so <i>ℓ</i> → 0 gives a nearly white additive term that trades against the noise site; the amplitude cells carry a LogNormal <i>ℓ</i> prior put there to guard exactly this corner, and the lengthscale cells have none.<sup class="fn"><a href="#n53" id="r53">53</a></sup></p>
+<p class="lic"><strong>Take away:</strong> score identification by sobol_hat or by a readout pooled over several iterations, never by the last <i>ρ</i> readout; and the oracle rows currently mislead. <strong>Do not take away:</strong> any effect on regret.</p>
+</section>
+</section>
+
+<section class="part" id="next">
+<h2>What it means, and what comes next</h2>
+<p>At <i>D</i> = 100 and <i>T</i> = 200, kernel structure matters more than where the sparsity prior sits; a sparse prior with the wrong structure beats a well-scaled dense prior with the right one; and the rankings are trustworthy while the thresholded readouts and the amplitude posteriors are not. The study's next steps, ordered by information per GPU-hour:<sup class="fn"><a href="#n54" id="r54">54</a></sup></p>
+<ol class="steps">
+<li>Re-score the existing readouts, no GPU: apply the share threshold in the right units and score identification by sobol_hat and by a readout pooled over the last <i>k</i> iterations. Minutes of CPU.</li>
+<li>A sampler pilot on the saved designs, about 1 to 5 GPU-hours: for the amplitude cells, max_tree_depth 8 and 10, 4 chains × 256 draws, and a log-scale or non-centered reparameterisation of the amplitude scale mixture; for additive-lengthscale on aligned3, 4 chains, to make the two modes visible in R-hat. A fit takes 38 to 58 s.<sup class="fn"><a href="#n55" id="r55">55</a></sup></li>
+<li>A fair oracle, about 10 CPU-hours: additive-structured on <i>S</i> for the additive families, product-structured for interaction_g0.25.</li>
+</ol>
+<p>Further out: ten more seeds on decoupled and interaction_g0.25, where verdicts are suggestive, and the families not yet run.</p>
+<div class="scope">
+<p><strong>Scope.</strong> Only aligned3, aligned10, decoupled and interaction_g0.25 were run. The brief also planned anti_aligned, a rotated family, the <i>γ</i> sweep, dense_weak, embedded Hartmann-6, Lasso-DNA and MOPTA08; none of those ran. The four cells totalled 1,944 GPU-hours, 1,584 of them in the acquisition,<sup class="fn"><a href="#n56" id="r56">56</a></sup> because the centered cells' kernels loop over the 100 coordinates: 182 to 471 s per iteration against 8 to 11 s for product-lengthscale.<sup class="fn"><a href="#n57" id="r57">57</a></sup></p>
+</div>
+</section>
+
+<details class="gloss" id="gloss">
+<summary>Terms as this study uses them <span class="hint">twelve entries</span></summary>
+<dl class="terms">
+<dt>SAAS prior</dt><dd>Sparse axis-aligned subspace: a half-Cauchy scale mixture, global scale times per-coordinate scales, that shrinks most parameters to zero and lets a few escape.</dd>
+<dt><i>ρ<sub>i</sub></i></dt><dd>The inverse squared lengthscale 1/<i>ℓ<sub>i</sub></i><sup class="m">2</sup>; the lengthscale cells' native sparsity parameter, larger meaning rougher and more relevant.</dd>
+<dt><i>a<sub>i</sub></i><sup class="m">2</sup></dt><dd>The amplitude of coordinate <i>i</i>'s component after normalisation to unit average variance, so that it equals the component's variance share.</dd>
+<dt>Variance share</dt><dd>The fraction of the objective's variance under the uniform measure carried by one coordinate: its first-order Sobol index; the labels the families are generated with.</dd>
+<dt>Additive kernel</dt><dd>A sum of one-dimensional centered Matérn-5/2 components, one per coordinate; first-order effects only.</dd>
+<dt>Native score</dt><dd>The posterior median of the cell's own sparsity parameter, <i>ρ<sub>i</sub></i> or <i>a<sub>i</sub></i><sup class="m">2</sup>, used to rank coordinates.</dd>
+<dt>sobol_hat</dt><dd>First-order Sobol indices of the posterior mean under the uniform measure; the parameterisation-neutral readout.</dd>
+<dt><i>p</i><sub>active</sub></dt><dd>The fraction of the 16 retained draws in which coordinate <i>i</i> clears the cutoff, share &gt; 0.02 or <i>ρ</i> &gt; 0.152; a coordinate is declared active when it exceeds 0.5.</dd>
+<dt>The gate</dt><dd>A fit is excluded when split-R-hat &gt; 1.1 or ESS &lt; 16 on any sampled site, or more than 5 divergences; excluded draws are still used by the loop.</dd>
+<dt>Simple regret</dt><dd><i>f</i>* minus the best objective value queried so far, on the noiseless objective.</dd>
+<dt>dsp_map</dt><dd>An ARD Matérn-5/2 GP at the MAP under a lengthscale prior scaled with dimension; the vanilla high-dimensional baseline.</dd>
+<dt>oracle_S</dt><dd>The same MAP GP given the true active set through a feature filter, so the acquisition still searches all 100 coordinates.</dd>
+</dl>
+</details>
+
+<section class="sources" id="sources">
+<h2>Sources</h2>
+<p class="fine">Every number on this page is taken as written from the study's claims ledger. Each entry links to the ledger row on the narrative page, where the file and column behind it are named.</p>
+<ol class="fnlist">
+<li id="n1"><span class="lid">L7</span> Design constants: <i>D</i> = 100, <i>T</i> = 200, 20 initial points, noise sd 0.1, LogEI with 512 raw samples and 5 restarts. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L7">ledger row</a><a class="back" href="#r1" aria-label="back to text">↩</a></li>
+<li id="n2"><span class="lid">L10</span> The four families: 3, 10, 8 and 5 active coordinates; decoupled shares 0.21 and 0.04 with lengthscales 1.5 and 0.08; interaction shares 0.15 and two pairs of 0.125. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L10">ledger row</a><a class="back" href="#r2" aria-label="back to text">↩</a></li>
+<li id="n3"><span class="lid">L8</span> Priors: HC(0.1) × HC(1) on <i>ρ</i>; the amplitude mixture with <i>α</i> = 0.0131; LogNormal(0, 1.5) on <i>ℓ</i> in the amplitude cells. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L8">ledger row</a><a class="back" href="#r3" aria-label="back to text">↩</a></li>
+<li id="n4"><span class="lid">L9</span> NUTS 512 / 256 / 16, max_tree_depth 6, one chain; gate R-hat ≤ 1.1, ESS ≥ 16, ≤ 5 divergences; excluded draws still used. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L9">ledger row</a><a class="back" href="#r4" aria-label="back to text">↩</a></li>
+<li id="n5"><span class="lid">L11</span> Readout definitions: share &gt; 0.02, <i>ρ</i> &gt; 0.152 i.e. <i>ℓ</i> &lt; 2.56, scored at <i>t</i> = 199. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L11">ledger row</a><a class="back" href="#r5" aria-label="back to text">↩</a></li>
+<li id="n6"><span class="lid">L12</span> On aligned3 a single method's final regret spans 1e-5 to 0.21 across seeds. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L12">ledger row</a><a class="back" href="#r6" aria-label="back to text">↩</a></li>
+<li id="n7"><span class="lid">L13</span> Sign-test <i>p</i> and exact 95 % interval for 10, 9 and 8 wins of 10. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L13">ledger row</a><a class="back" href="#r7" aria-label="back to text">↩</a></li>
+<li id="n8"><span class="lid">L14</span> 72 paired tests; about 3.6 false positives expected at <i>p</i> &lt; 0.05; Holm column present. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L14">ledger row</a><a class="back" href="#r8" aria-label="back to text">↩</a></li>
+<li id="n9"><span class="lid">§2</span> The grading rule: SUPPORTED, SUGGESTIVE, NOT SUPPORTED. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#s2">narrative section 2</a><a class="back" href="#r9" aria-label="back to text">↩</a></li>
+<li id="n10"><span class="lid">L1</span> Every cell beats sobol 10/10 in every family. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L1">ledger row</a><a class="back" href="#r10" aria-label="back to text">↩</a></li>
+<li id="n11"><span class="lid">L19</span> aligned10: additive-amplitude beats product-lengthscale 10/10. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L19">ledger row</a><a class="back" href="#r11" aria-label="back to text">↩</a></li>
+<li id="n12"><span class="lid">L17</span> aligned10 medians: additive-amplitude 0.0273, product-lengthscale 0.289. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L17">ledger row</a><a class="back" href="#r12" aria-label="back to text">↩</a></li>
+<li id="n13"><span class="lid">L18</span> aligned10: additive-amplitude beats dsp_map and oracle_S 10/10. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L18">ledger row</a><a class="back" href="#r13" aria-label="back to text">↩</a></li>
+<li id="n14"><span class="lid">L23</span> decoupled: additive-amplitude beats oracle_S and product-lengthscale 10/10; additive-lengthscale beats product-lengthscale 10/10. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L23">ledger row</a><a class="back" href="#r14" aria-label="back to text">↩</a></li>
+<li id="n15"><span class="lid">L24</span> decoupled: additive-amplitude against dsp_map 7/10, <i>p</i> = 0.049. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L24">ledger row</a><a class="back" href="#r15" aria-label="back to text">↩</a></li>
+<li id="n16"><span class="lid">L26</span> interaction_g0.25 medians. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L26">ledger row</a><a class="back" href="#r16" aria-label="back to text">↩</a></li>
+<li id="n17"><span class="lid">L27</span> interaction_g0.25: product-lengthscale beats dsp_map 10/10. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L27">ledger row</a><a class="back" href="#r17" aria-label="back to text">↩</a></li>
+<li id="n18"><span class="lid">L30</span> interaction_g0.25: product beats additive 8/10 in all four pairings, <i>p</i> from 0.0098 to 0.065. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L30">ledger row</a><a class="back" href="#r18" aria-label="back to text">↩</a></li>
+<li id="n19"><span class="lid">L28</span> interaction_g0.25: additive cells tie oracle_S, 4/6, <i>p</i> = 0.557. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L28">ledger row</a><a class="back" href="#r19" aria-label="back to text">↩</a></li>
+<li id="n20"><span class="lid">L15</span> aligned3: model-based medians below 0.004; no cell distinguishable from dsp_map. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L15">ledger row</a><a class="back" href="#r20" aria-label="back to text">↩</a></li>
+<li id="n21"><span class="lid">§6</span> Claims 19 (additive-amplitude beats additive-lengthscale on decoupled, 9/10, <i>p</i> = 0.0137, SUGGESTIVE) and 21 (parameterisations differ within a structure elsewhere, NOT SUPPORTED). <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#s6">narrative section 6</a><a class="back" href="#r21" aria-label="back to text">↩</a></li>
+<li id="n22"><span class="lid">L33</span> product-lengthscale thresholded recall 0.53 / 0.56 on aligned10 / decoupled; median <i>ρ</i> on <i>S</i> 0.19 / 0.29. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L33">ledger row</a><a class="back" href="#r22" aria-label="back to text">↩</a></li>
+<li id="n23"><span class="lid">L40</span> Pooled AP by native score and by sobol_hat per cell. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L40">ledger row</a><a class="back" href="#r23" aria-label="back to text">↩</a></li>
+<li id="n24"><span class="lid">L41</span> Median AP 1.0 in all four cells. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L41">ledger row</a><a class="back" href="#r24" aria-label="back to text">↩</a></li>
+<li id="n25"><span class="lid">L45</span> Precision at <i>p</i><sub>active</sub> &gt; 0.5 is 0.92 to 1.00 in every cell. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L45">ledger row</a><a class="back" href="#r25" aria-label="back to text">↩</a></li>
+<li id="n26"><span class="lid">L46</span> Amplitude cells' recall: 0.25 / 0.51 on aligned10, 0.39 / 0.54 on decoupled. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L46">ledger row</a><a class="back" href="#r26" aria-label="back to text">↩</a></li>
+<li id="n27"><span class="lid">L47</span> Lengthscale cells' recall: 0.53 / 0.90 on aligned10, 0.56 / 0.79 on decoupled. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L47">ledger row</a><a class="back" href="#r27" aria-label="back to text">↩</a></li>
+<li id="n28"><span class="lid">L48</span> Final <i>y</i>_std per family: aligned10 1.52 to 1.56, decoupled 1.33 to 1.40. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L48">ledger row</a><a class="back" href="#r28" aria-label="back to text">↩</a></li>
+<li id="n29"><span class="lid">L49</span> Deflated shares: 0.1 becomes 0.042; 0.04 becomes 0.020. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L49">ledger row</a><a class="back" href="#r29" aria-label="back to text">↩</a></li>
+<li id="n30"><span class="lid">L50</span> Median <i>a<sub>i</sub></i><sup class="m">2</sup> on the true coordinates, aligned10: 0.021 (additive-amplitude), 0.011 (product-amplitude). <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L50">ledger row</a><a class="back" href="#r30" aria-label="back to text">↩</a></li>
+<li id="n31"><span class="lid">L55</span> Off-<i>S</i> maximum <i>a<sub>i</sub></i><sup class="m">2</sup>, median over runs, 0.0003 to 0.001 on aligned10 / decoupled. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L55">ledger row</a><a class="back" href="#r31" aria-label="back to text">↩</a></li>
+<li id="n32"><span class="lid">L60</span> additive-lengthscale median <i>ρ</i> 120 (high-rough) against 2.2 (high-smooth); native ranks 1.5 against 5.0. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L60">ledger row</a><a class="back" href="#r32" aria-label="back to text">↩</a></li>
+<li id="n33"><span class="lid">L61</span> additive-amplitude <i>a<sub>i</sub></i><sup class="m">2</sup> 0.079 (high-rough) against 0.038 (high-smooth); product-amplitude detects high-smooth 45 % against high-rough 95 %. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L61">ledger row</a><a class="back" href="#r33" aria-label="back to text">↩</a></li>
+<li id="n34"><span class="lid">L62</span> sobol_hat medians per class against the true shares 0.21 and 0.04. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L62">ledger row</a><a class="back" href="#r34" aria-label="back to text">↩</a></li>
+<li id="n35"><span class="lid">L64</span> Amplitude cells: exclusion 100 %, r_hat_max median 1.49 / 1.51, n_eff_min median 6.1 / 5.9. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L64">ledger row</a><a class="back" href="#r35" aria-label="back to text">↩</a></li>
+<li id="n36"><span class="lid">L65</span> Failing sites <i>a<sub>i</sub></i><sup class="m">2</sup> and <i>ℓ<sub>i</sub></i> (R-hat 1.40 to 1.45, ESS 6.5 to 7); global sites R-hat 1.04 to 1.05, ESS 36 to 38. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L65">ledger row</a><a class="back" href="#r36" aria-label="back to text">↩</a></li>
+<li id="n37"><span class="lid">L67</span> Lengthscale cells: exclusion 52.8 % / 59.3 %, R-hat median 1.10 / 1.11, peak 70 to 75 % at <i>t</i> = 60 to 80. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L67">ledger row</a><a class="back" href="#r37" aria-label="back to text">↩</a></li>
+<li id="n38"><span class="lid">L68</span> Tree cap reached in 95.3 to 100 % of fits. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L68">ledger row</a><a class="back" href="#r38" aria-label="back to text">↩</a></li>
+<li id="n39"><span class="lid">L69</span> Amplitude cells sample 2<i>D</i> + 3 sites, lengthscale cells <i>D</i> + 4. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L69">ledger row</a><a class="back" href="#r39" aria-label="back to text">↩</a></li>
+<li id="n40"><span class="lid">L54</span> <i>p</i><sub>active</sub> on the true aligned10 coordinates: 10th to 90th percentile 0.00 to 0.94 (additive-amplitude). <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L54">ledger row</a><a class="back" href="#r40" aria-label="back to text">↩</a></li>
+<li id="n41"><span class="lid">L71</span> AP by gate status at <i>t</i> ≥ 100: passed 0.90 / 0.94 against excluded 0.83 / 0.79 (lengthscale cells); amplitude cells excluded-only 0.85 / 0.88. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L71">ledger row</a><a class="back" href="#r41" aria-label="back to text">↩</a></li>
+<li id="n42"><span class="lid">L85</span> oracle_S loses 10/10 to additive-amplitude on aligned10 (0.43 against 0.027) and decoupled (0.44 against 0.058); 9/10 to additive-lengthscale on both. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L85">ledger row</a><a class="back" href="#r42" aria-label="back to text">↩</a></li>
+<li id="n43"><span class="lid">L87</span> interaction_g0.25: oracle_S third, tied with the additive cells, beaten 8/10 by product-lengthscale. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L87">ledger row</a><a class="back" href="#r43" aria-label="back to text">↩</a></li>
+<li id="n44"><span class="lid">L88</span> oracle_S near-duplicate late queries 24 / 12 / 8 / 10 %; cells and dsp_map 0 to 1 %. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L88">ledger row</a><a class="back" href="#r44" aria-label="back to text">↩</a></li>
+<li id="n45"><span class="lid">L73</span> All-active mode in aligned3 additive-lengthscale seeds 01, 02, 05, 08, 09: 25 / 23 / 27 / 70 / 54 readouts, never before <i>t</i> = 73. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L73">ledger row</a><a class="back" href="#r45" aria-label="back to text">↩</a></li>
+<li id="n46"><span class="lid">L74</span> Seed 02 alternates between 100 and 3 active coordinates across its late readouts. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L74">ledger row</a><a class="back" href="#r46" aria-label="back to text">↩</a></li>
+<li id="n47"><span class="lid">L77</span> Sparse-mode draws, seed 08 at <i>t</i> = 75: outputscale 0.48, <i>ρ</i> 2.3 on <i>S</i>, 7e-5 off <i>S</i>. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L77">ledger row</a><a class="back" href="#r47" aria-label="back to text">↩</a></li>
+<li id="n48"><span class="lid">L78</span> Collapsed-mode draws, seed 08 at <i>t</i> = 100: 16/16 draws with 98 to 100 active, outputscale 0.0034, <i>τ</i><sup class="m">2</sup> 82, <i>ρ</i> 167 on <i>S</i> and 121 off <i>S</i>, noise 0.014. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L78">ledger row</a><a class="back" href="#r48" aria-label="back to text">↩</a></li>
+<li id="n49"><span class="lid">L80</span> The collapse begins after convergence: seed 08 regret 0.000019 since <i>t</i> = 60. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L80">ledger row</a><a class="back" href="#r49" aria-label="back to text">↩</a></li>
+<li id="n50"><span class="lid">L81</span> 6 of 7 inspected collapsed readouts pass the gate, r_hat_max 1.04 to 1.10. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L81">ledger row</a><a class="back" href="#r50" aria-label="back to text">↩</a></li>
+<li id="n51"><span class="lid">L82</span> Transitions caught: seed 02 at <i>t</i> = 150 and 199, 12/16 collapsed draws, R-hat 1.46 / 1.56, 30 / 22 divergences. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L82">ledger row</a><a class="back" href="#r51" aria-label="back to text">↩</a></li>
+<li id="n52"><span class="lid">L72</span> Flagged seeds 02 / 08 at <i>t</i> = 199: AP by <i>ρ</i> 0.02 / 0.04, AP by sobol_hat 1.00 / 0.92. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L72">ledger row</a><a class="back" href="#r52" aria-label="back to text">↩</a></li>
+<li id="n53"><span class="lid">L83</span> The kernel docstrings: the unnormalised additive-lengthscale kernel and the <i>ℓ</i> prior guarding the amplitude cells. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L83">ledger row</a><a class="back" href="#r53" aria-label="back to text">↩</a></li>
+<li id="n54"><span class="lid">§7</span> What to run next, ordered by information per GPU-hour. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#s7">narrative section 7</a><a class="back" href="#r54" aria-label="back to text">↩</a></li>
+<li id="n55"><span class="lid">L96</span> A fit takes 38 to 58 s (median, by cell and GPU). <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L96">ledger row</a><a class="back" href="#r55" aria-label="back to text">↩</a></li>
+<li id="n56"><span class="lid">L95</span> Median run hours 2.7 / 12.1 / 14.3 / 17.6; cells total 1,944 GPU-hours, acquisition 1,584. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L95">ledger row</a><a class="back" href="#r56" aria-label="back to text">↩</a></li>
+<li id="n57"><span class="lid">L97</span> Acquisition 182 to 471 s per iteration for the centered cells; product-lengthscale 8 to 11 s. <a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc#L97">ledger row</a><a class="back" href="#r57" aria-label="back to text">↩</a></li>
+</ol>
+</section>
+
+<footer class="about">
+<p><strong>For the full account.</strong> This page is a reading of the study's narrative analysis of 12 September 2026 and makes no claims of its own. The three fuller pages:</p>
+<ul>
+<li><a href="https://claude.ai/code/artifact/101e895b-6ede-4e6f-86c0-1b4a40597329">The brief's research questions, answered by the sagp study</a>: start here for the study's own questions and how each was answered.</li>
+<li><a href="https://claude.ai/code/artifact/a46bfb17-5d05-4732-9d27-78013db41cfc">The narrative, section by section</a>: the full account with every number tagged to its ledger row.</li>
+<li><a href="https://claude.ai/code/artifact/b766352e-b961-4847-b493-05d284f34005">The same material by research question</a>.</li>
+</ul>
+<p class="fine">Four cells (product or additive structure, sparsity on lengthscales or on amplitudes) and three references on four synthetic 100-dimensional objectives, ten seeds, 200 evaluations each, 280 of 280 runs complete.</p>
+</footer>
+</div>
+
+<dialog class="lb" id="lightbox" aria-label="Enlarged figure"><div class="lb-inner"><img src="" alt=""><div class="lb-bar"><span class="lb-cap"></span><a class="lb-open" href="#" target="_blank" rel="noopener">Open the PNG</a><button type="button" class="lb-close">Close</button></div></div></dialog>
+<script>
+(function(){var lb=document.getElementById('lightbox'),lbImg=lb.querySelector('img'),lbCap=lb.querySelector('.lb-cap'),lbOpen=lb.querySelector('.lb-open');
+if(typeof lb.showModal==='function'){document.querySelectorAll('a.zoom').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();var img=a.querySelector('img');lbImg.src=img.getAttribute('src');lbImg.alt=img.alt;lbOpen.href=a.getAttribute('href');lbCap.textContent='Figure '+a.dataset.num+'. '+img.alt;lb.showModal();});});
+lb.addEventListener('click',function(e){if(e.target===lb||e.target.classList.contains('lb-inner')){lb.close();}});lb.querySelector('.lb-close').addEventListener('click',function(){lb.close();});}})();
+</script>

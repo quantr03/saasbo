@@ -1,0 +1,3 @@
+family,seed,method_a,method_b,regret,t_best_a,t_best_b,f_best_a,f_best_b,best_f_final_a,best_f_final_b,max_abs_dx_all,max_abs_dx_on_S,n_coords_at_bound_a,n_S_coords_at_bound_a,n_S_coords_at_bound_b
+aligned3,01,product-lengthscale,oracle_S,0.2113769951878188,20,20,4.416103110779225,4.416103110779225,4.416103110779225,4.416103110779225,0.8333996348083019,0.0,47,3,3
+aligned3,08,product-lengthscale,oracle_S,0.0189844172272692,24,20,3.073424440030823,3.073424440030823,3.073424440030823,3.073424440030823,0.9998418437317014,0.0,87,3,3
