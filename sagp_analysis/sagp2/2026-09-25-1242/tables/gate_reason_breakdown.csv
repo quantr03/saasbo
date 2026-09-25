@@ -1,0 +1,6 @@
+method,divergences,exception,fit_gpytorch_mll+Adam,n_eff_min,n_eff_min+divergences,ok,r_hat_max,r_hat_max+divergences,r_hat_max+n_eff_min,r_hat_max+n_eff_min+divergences
+product-lengthscale,0,0,0,249,0,3635,971,4,2323,18
+additive-lengthscale,2,0,0,196,1,2869,975,1,3096,60
+product-amplitude,0,0,0,0,0,0,0,0,7188,12
+additive-amplitude,0,0,0,0,0,0,0,0,7175,25
+dsp_map,0,38,133,0,0,7029,0,0,0,0

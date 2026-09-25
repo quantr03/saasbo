@@ -1,0 +1,6 @@
+| family | best_ap_native | best_ap_sobol | best_f1 | order_by_ap_native |
+|---|---|---|---|---|
+| interaction_g0.00 | additive-lengthscale | additive-lengthscale | additive-lengthscale | additive-lengthscale > product-amplitude > additive-amplitude > product-lengthscale |
+| interaction_g0.50 | product-lengthscale | product-amplitude | product-lengthscale | product-lengthscale > product-amplitude > additive-amplitude > additive-lengthscale |
+| interaction_g0.75 | product-lengthscale | product-lengthscale | product-lengthscale | product-lengthscale > product-amplitude > additive-amplitude > additive-lengthscale |
+| anti_aligned | additive-amplitude | additive-lengthscale | additive-amplitude | additive-amplitude > additive-lengthscale > product-amplitude > product-lengthscale |
