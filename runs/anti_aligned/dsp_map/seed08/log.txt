@@ -1,0 +1,264 @@
+start method=dsp_map family=anti_aligned seed=8 T=200
+t=20 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.343 acq_wall_s=4.117 acq_value=-1.54756 y=1.29035 best_f=1.79399 regret=2.13657 sobol_computed=0 map_result=mll=-20.1712 fallback=none
+t=21 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.275 acq_wall_s=3.657 acq_value=-2.28038 y=1.02379 best_f=1.79399 regret=2.13657 sobol_computed=0 map_result=mll=-19.2278 fallback=none
+t=22 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.302 acq_wall_s=5.123 acq_value=-2.49482 y=1.66513 best_f=1.79399 regret=2.13657 sobol_computed=0 map_result=mll=-18.3879 fallback=none
+t=23 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.606 acq_wall_s=4.680 acq_value=-2.32407 y=2.62309 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-17.5561 fallback=none
+t=24 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.675 acq_wall_s=4.704 acq_value=-2.45318 y=1.67672 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-16.8412 fallback=none
+t=25 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.340 acq_wall_s=6.491 acq_value=-4.41785 y=0.987095 best_f=2.46045 regret=1.4701 sobol_computed=1 map_result=mll=-16.1975 fallback=none
+t=26 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.307 acq_wall_s=4.629 acq_value=-4.40406 y=1.37858 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-15.6304 fallback=none
+t=27 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.357 acq_wall_s=5.263 acq_value=-5.29159 y=1.68564 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-15.0754 fallback=none
+t=28 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.296 acq_wall_s=10.219 acq_value=-5.55002 y=-0.129273 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-14.546 fallback=none
+t=29 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.562 acq_wall_s=5.699 acq_value=-5.12991 y=1.2035 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-14.1165 fallback=none
+t=30 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.517 acq_wall_s=5.803 acq_value=-5.5455 y=0.829011 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-13.6728 fallback=none
+t=31 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.451 acq_wall_s=5.249 acq_value=-5.27009 y=1.45671 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-13.2792 fallback=none
+t=32 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.569 acq_wall_s=4.333 acq_value=-5.8802 y=1.16482 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-12.8796 fallback=none
+t=33 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.482 acq_wall_s=4.708 acq_value=-6.08108 y=2.21151 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-12.5143 fallback=none
+t=34 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.671 acq_wall_s=5.815 acq_value=-3.64906 y=1.9043 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-12.1487 fallback=none
+t=35 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.638 acq_wall_s=6.962 acq_value=-4.91254 y=0.516356 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-11.8003 fallback=none
+t=36 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.576 acq_wall_s=5.778 acq_value=-2.24802 y=2.2292 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-11.4918 fallback=none
+t=37 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.626 acq_wall_s=11.150 acq_value=-4.03391 y=2.46903 best_f=2.46045 regret=1.4701 sobol_computed=0 map_result=mll=-11.1701 fallback=none
+t=38 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.921 acq_wall_s=12.117 acq_value=-3.34316 y=2.41328 best_f=2.56009 regret=1.37046 sobol_computed=0 map_result=mll=-10.8558 fallback=none
+t=39 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.753 acq_wall_s=10.726 acq_value=-3.36774 y=2.33027 best_f=2.56009 regret=1.37046 sobol_computed=0 map_result=mll=-10.5488 fallback=none
+t=40 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.431 acq_wall_s=5.561 acq_value=-2.52004 y=2.55641 best_f=2.62173 regret=1.30883 sobol_computed=0 map_result=mll=-10.2536 fallback=none
+t=41 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.155 acq_wall_s=10.158 acq_value=-3.09909 y=2.24535 best_f=2.62173 regret=1.30883 sobol_computed=0 map_result=mll=-9.97161 fallback=none
+t=42 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.745 acq_wall_s=5.847 acq_value=-2.7728 y=2.72835 best_f=2.77188 regret=1.15867 sobol_computed=0 map_result=mll=-9.72935 fallback=none
+t=43 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.703 acq_wall_s=10.361 acq_value=-3.29376 y=2.30385 best_f=2.77188 regret=1.15867 sobol_computed=0 map_result=mll=-9.46936 fallback=none
+t=44 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.847 acq_wall_s=5.868 acq_value=-2.78076 y=2.96464 best_f=2.89225 regret=1.0383 sobol_computed=0 map_result=mll=-9.24974 fallback=none
+t=45 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.544 acq_wall_s=6.390 acq_value=-2.86259 y=2.53935 best_f=2.89225 regret=1.0383 sobol_computed=0 map_result=mll=-9.0164 fallback=none
+t=46 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.990 acq_wall_s=5.458 acq_value=-3.3958 y=3.11243 best_f=2.89591 regret=1.03464 sobol_computed=0 map_result=mll=-8.80835 fallback=none
+t=47 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.956 acq_wall_s=9.668 acq_value=-3.48757 y=2.92117 best_f=2.89591 regret=1.03464 sobol_computed=0 map_result=mll=-8.59689 fallback=none
+t=48 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.513 acq_wall_s=12.818 acq_value=-3.43737 y=2.84769 best_f=2.89591 regret=1.03464 sobol_computed=0 map_result=mll=-8.38864 fallback=none
+t=49 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.556 acq_wall_s=10.138 acq_value=-3.31473 y=2.76565 best_f=2.89591 regret=1.03464 sobol_computed=0 map_result=mll=-8.19346 fallback=none
+t=50 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.750 acq_wall_s=6.840 acq_value=-2.98971 y=3.09179 best_f=2.97956 regret=0.950995 sobol_computed=1 map_result=mll=-8.01172 fallback=none
+t=51 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.128 acq_wall_s=6.266 acq_value=-2.43242 y=2.71109 best_f=2.97956 regret=0.950995 sobol_computed=0 map_result=mll=-7.80788 fallback=none
+t=52 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.912 acq_wall_s=6.502 acq_value=-2.84949 y=2.78565 best_f=2.97956 regret=0.950995 sobol_computed=0 map_result=mll=-7.65834 fallback=none
+t=53 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.415 acq_wall_s=6.021 acq_value=-3.41784 y=3.07468 best_f=3.10751 regret=0.823051 sobol_computed=0 map_result=mll=-7.51628 fallback=none
+t=54 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.484 acq_wall_s=11.166 acq_value=-3.63793 y=2.80479 best_f=3.10751 regret=0.823051 sobol_computed=0 map_result=mll=-7.35554 fallback=none
+t=55 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.141 acq_wall_s=6.087 acq_value=-3.2214 y=3.06464 best_f=3.11377 regret=0.816788 sobol_computed=0 map_result=mll=-7.21215 fallback=none
+t=56 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.628 acq_wall_s=10.549 acq_value=-3.59426 y=2.87238 best_f=3.11377 regret=0.816788 sobol_computed=0 map_result=mll=-7.0563 fallback=none
+t=57 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.427 acq_wall_s=7.263 acq_value=-3.43436 y=3.16724 best_f=3.1521 regret=0.778461 sobol_computed=0 map_result=mll=-6.91872 fallback=none
+t=58 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.947 acq_wall_s=12.798 acq_value=-3.66968 y=3.33617 best_f=3.18975 regret=0.740806 sobol_computed=0 map_result=mll=-6.78066 fallback=none
+t=59 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.043 acq_wall_s=11.171 acq_value=-3.91817 y=2.92996 best_f=3.18975 regret=0.740806 sobol_computed=0 map_result=mll=-6.64935 fallback=none
+t=60 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.003 acq_wall_s=7.156 acq_value=-3.55511 y=3.38696 best_f=3.29139 regret=0.639166 sobol_computed=0 map_result=mll=-6.52922 fallback=none
+t=61 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.926 acq_wall_s=8.771 acq_value=-3.64355 y=2.95294 best_f=3.29139 regret=0.639166 sobol_computed=0 map_result=mll=-6.4094 fallback=none
+t=62 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.718 acq_wall_s=6.350 acq_value=-2.61495 y=3.28646 best_f=3.29426 regret=0.636299 sobol_computed=0 map_result=mll=-6.28477 fallback=none
+t=63 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.034 acq_wall_s=7.428 acq_value=-3.49533 y=3.31447 best_f=3.35342 regret=0.577141 sobol_computed=0 map_result=mll=-6.16958 fallback=none
+t=64 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.402 acq_wall_s=10.724 acq_value=-3.80979 y=3.03608 best_f=3.35342 regret=0.577141 sobol_computed=0 map_result=mll=-6.04692 fallback=none
+t=65 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.502 acq_wall_s=6.999 acq_value=-3.47376 y=3.46048 best_f=3.35342 regret=0.577141 sobol_computed=0 map_result=mll=-5.95082 fallback=none
+t=66 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.745 acq_wall_s=12.526 acq_value=-3.93865 y=3.36809 best_f=3.35342 regret=0.577141 sobol_computed=0 map_result=mll=-5.83511 fallback=none
+t=67 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.437 acq_wall_s=11.690 acq_value=-3.72768 y=2.93391 best_f=3.35342 regret=0.577141 sobol_computed=0 map_result=mll=-5.72195 fallback=none
+t=68 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.036 acq_wall_s=7.596 acq_value=-2.75941 y=3.28608 best_f=3.35342 regret=0.577141 sobol_computed=0 map_result=mll=-5.64693 fallback=none
+t=69 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.167 acq_wall_s=8.977 acq_value=-3.76808 y=3.49256 best_f=3.40346 regret=0.527098 sobol_computed=0 map_result=mll=-5.56112 fallback=none
+t=70 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.254 acq_wall_s=6.672 acq_value=-3.01403 y=3.283 best_f=3.40346 regret=0.527098 sobol_computed=0 map_result=mll=-5.44516 fallback=none
+t=71 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.434 acq_wall_s=10.138 acq_value=-3.82851 y=3.23242 best_f=3.40346 regret=0.527098 sobol_computed=0 map_result=mll=-5.35863 fallback=none
+t=72 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.098 acq_wall_s=6.726 acq_value=-3.5048 y=2.90503 best_f=3.40346 regret=0.527098 sobol_computed=0 map_result=mll=-5.27199 fallback=none
+t=73 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.922 acq_wall_s=6.169 acq_value=-2.12736 y=3.19742 best_f=3.40346 regret=0.527098 sobol_computed=0 map_result=mll=-5.20327 fallback=none
+t=74 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.034 acq_wall_s=7.524 acq_value=-3.70674 y=3.32939 best_f=3.40346 regret=0.527098 sobol_computed=0 map_result=mll=-5.13075 fallback=none
+t=75 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.703 acq_wall_s=6.571 acq_value=-3.26825 y=2.92873 best_f=3.40346 regret=0.527098 sobol_computed=1 map_result=mll=-5.04391 fallback=none
+t=76 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.949 acq_wall_s=8.372 acq_value=-3.12097 y=3.62224 best_f=3.41848 regret=0.512078 sobol_computed=0 map_result=mll=-4.96686 fallback=none
+t=77 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=0.986 acq_wall_s=6.273 acq_value=-3.24396 y=3.49465 best_f=3.41848 regret=0.512078 sobol_computed=0 map_result=mll=-4.9267 fallback=none
+t=78 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.281 acq_wall_s=12.320 acq_value=-3.87918 y=3.44326 best_f=3.41848 regret=0.512078 sobol_computed=0 map_result=mll=-4.79206 fallback=none
+t=79 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=2.651 acq_wall_s=7.029 acq_value=-3.40272 y=3.281 best_f=3.41848 regret=0.512078 sobol_computed=0 map_result=mll=-4.7291 fallback=none
+t=80 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.822 acq_wall_s=7.901 acq_value=-3.3256 y=3.41025 best_f=3.42703 regret=0.503523 sobol_computed=0 map_result=mll=-4.65685 fallback=none
+t=81 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.111 acq_wall_s=12.293 acq_value=-4.26226 y=3.22977 best_f=3.4344 regret=0.49616 sobol_computed=0 map_result=mll=-4.58395 fallback=none
+t=82 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.150 acq_wall_s=8.928 acq_value=-4.12875 y=3.42707 best_f=3.43991 regret=0.490648 sobol_computed=0 map_result=mll=-4.52845 fallback=none
+t=83 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.194 acq_wall_s=11.886 acq_value=-4.60909 y=3.53588 best_f=3.4424 regret=0.488156 sobol_computed=0 map_result=mll=-4.45788 fallback=none
+t=84 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.278 acq_wall_s=11.244 acq_value=-4.15858 y=3.41873 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-4.38639 fallback=none
+t=85 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.879 acq_wall_s=11.801 acq_value=-4.52895 y=3.42492 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-4.3218 fallback=none
+t=86 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=46.945 acq_wall_s=12.124 acq_value=-2.64322 y=3.3458 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-5.79774 fallback=none
+t=87 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.346 acq_wall_s=6.793 acq_value=-3.63281 y=3.20941 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-4.22657 fallback=none
+t=88 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.194 acq_wall_s=6.615 acq_value=-2.99133 y=3.36386 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-4.14107 fallback=none
+t=89 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.290 acq_wall_s=6.232 acq_value=-3.25805 y=3.39455 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-4.13182 fallback=none
+t=90 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.196 acq_wall_s=7.709 acq_value=-3.53642 y=3.34283 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-4.03772 fallback=none
+t=91 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.078 acq_wall_s=10.228 acq_value=-4.13713 y=3.07694 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-3.97973 fallback=none
+t=92 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.075 acq_wall_s=9.614 acq_value=-4.16611 y=3.30318 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-3.94704 fallback=none
+t=93 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.315 acq_wall_s=12.173 acq_value=-4.58582 y=3.48082 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-3.89802 fallback=none
+t=94 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.466 acq_wall_s=12.120 acq_value=-4.65616 y=3.54107 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-3.84586 fallback=none
+t=95 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.498 acq_wall_s=11.925 acq_value=-4.64679 y=3.41621 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-3.79187 fallback=none
+t=96 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.031 acq_wall_s=11.847 acq_value=-4.50459 y=3.23709 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-3.73902 fallback=none
+t=97 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=3.848 acq_wall_s=6.764 acq_value=-3.5859 y=3.36284 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-3.70051 fallback=none
+t=98 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.544 acq_wall_s=7.593 acq_value=-3.92512 y=3.17833 best_f=3.44668 regret=0.483881 sobol_computed=0 map_result=mll=-3.65307 fallback=none
+t=99 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=37.781 acq_wall_s=12.271 acq_value=-2.64213 y=3.48815 best_f=3.44774 regret=0.482814 sobol_computed=0 map_result=mll=-4.99396 fallback=none
+t=100 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.915 acq_wall_s=7.871 acq_value=-3.74261 y=3.4299 best_f=3.44774 regret=0.482814 sobol_computed=1 map_result=mll=-3.57824 fallback=none
+t=101 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.467 acq_wall_s=11.875 acq_value=-4.5878 y=3.54921 best_f=3.44774 regret=0.482814 sobol_computed=0 map_result=mll=-3.53454 fallback=none
+t=102 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.769 acq_wall_s=12.117 acq_value=-4.4283 y=3.31434 best_f=3.44774 regret=0.482814 sobol_computed=0 map_result=mll=-3.48915 fallback=none
+t=103 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.537 acq_wall_s=12.547 acq_value=-4.10042 y=3.37064 best_f=3.44774 regret=0.482814 sobol_computed=0 map_result=mll=-3.44771 fallback=none
+t=104 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.814 acq_wall_s=8.024 acq_value=-3.95994 y=3.49826 best_f=3.44774 regret=0.482814 sobol_computed=0 map_result=mll=-3.41106 fallback=none
+t=105 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.692 acq_wall_s=11.917 acq_value=-4.52638 y=3.40865 best_f=3.44774 regret=0.482814 sobol_computed=0 map_result=mll=-3.36534 fallback=none
+t=106 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.305 acq_wall_s=12.071 acq_value=-2.18245 y=3.2496 best_f=3.45081 regret=0.479748 sobol_computed=0 map_result=mll=-5.30981 fallback=none
+t=107: the fit raised; retrying once
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 177, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.nuts_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=107: the retry raised; querying at random
+Traceback (most recent call last):
+  File "/scratch/work/tranq8/saasbo/sagp/bo.py", line 182, in _fit_with_retry
+    fitted = surrogate(X, z, rngs.retry_seed)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/experiments/run_bo.py", line 58, in <lambda>
+    return lambda X, z, seed: fit_map(X, z)
+                              ^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/saasbo/sagp/references.py", line 178, in fit_map
+    mll_value = float(mll(model(*model.train_inputs), model.train_targets))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/module.py", line 83, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 84, in forward
+    res = output.log_prob(target)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 227, in log_prob
+    return super().log_prob(value)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/torch/distributions/multivariate_normal.py", line 260, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/gpytorch/distributions/multivariate_normal.py", line 87, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 1312, in cholesky
+    chol = self._cholesky(upper=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/memoize.py", line 60, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/operators/_linear_operator.py", line 527, in _cholesky
+    cholesky = psd_safe_cholesky(evaluated_mat, upper=upper).contiguous()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 68, in psd_safe_cholesky
+    L = _psd_safe_cholesky(A, out=out, jitter=jitter, max_tries=max_tries)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/work/tranq8/.conda_envs/saasbo/lib/python3.11/site-packages/linear_operator/utils/cholesky.py", line 48, in _psd_safe_cholesky
+    raise NotPSDError(
+linear_operator.utils.errors.NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.
+t=107 method=dsp_map status=excluded fit_calls=2 nuts_attempts=0 fit_wall_s=79.968 acq_wall_s=nan acq_value=nan y=-0.485801 best_f=3.45081 regret=0.479748 sobol_computed=0 reason='exception: NotPSDError: Matrix not positive definite after repeatedly adding jitter up to 1.0e+00.'
+t=108 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.391 acq_wall_s=7.698 acq_value=-3.47195 y=3.34187 best_f=3.45081 regret=0.479748 sobol_computed=0 map_result=mll=-3.26947 fallback=none
+t=109 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.959 acq_wall_s=11.003 acq_value=-4.26387 y=3.30876 best_f=3.45081 regret=0.479748 sobol_computed=0 map_result=mll=-3.24003 fallback=none
+t=110 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.533 acq_wall_s=11.970 acq_value=-4.76462 y=3.60792 best_f=3.45081 regret=0.479748 sobol_computed=0 map_result=mll=-3.20847 fallback=none
+t=111 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=45.005 acq_wall_s=11.875 acq_value=-2.25857 y=3.4856 best_f=3.45081 regret=0.479748 sobol_computed=0 map_result=mll=-4.60143 fallback=none
+t=112 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.782 acq_wall_s=8.008 acq_value=-3.25279 y=3.42021 best_f=3.45081 regret=0.479748 sobol_computed=0 map_result=mll=-3.13309 fallback=none
+t=113 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.740 acq_wall_s=10.568 acq_value=-3.98159 y=3.47105 best_f=3.45081 regret=0.479748 sobol_computed=0 map_result=mll=-3.10501 fallback=none
+t=114 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.829 acq_wall_s=11.951 acq_value=-4.31429 y=3.46653 best_f=3.45081 regret=0.479748 sobol_computed=0 map_result=mll=-3.06845 fallback=none
+t=115 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=57.665 acq_wall_s=13.606 acq_value=-3.24362 y=3.56788 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-4.22859 fallback=none
+t=116 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=36.237 acq_wall_s=11.980 acq_value=-2.99962 y=3.43897 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-4.57226 fallback=none
+t=117 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.667 acq_wall_s=8.197 acq_value=-3.37117 y=3.57003 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.97512 fallback=none
+t=118 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.990 acq_wall_s=12.452 acq_value=-3.99333 y=3.42128 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.93888 fallback=none
+t=119 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.810 acq_wall_s=9.456 acq_value=-3.59083 y=3.42323 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.91014 fallback=none
+t=120 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.014 acq_wall_s=11.082 acq_value=-3.97764 y=3.30327 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.88133 fallback=none
+t=121 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.026 acq_wall_s=9.343 acq_value=-3.77154 y=3.65989 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.8614 fallback=none
+t=122 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.555 acq_wall_s=11.973 acq_value=-4.09602 y=3.34476 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.82873 fallback=none
+t=123 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.253 acq_wall_s=8.806 acq_value=-3.66565 y=3.27673 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.80229 fallback=none
+t=124 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.897 acq_wall_s=10.776 acq_value=-4.10577 y=3.49696 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.7911 fallback=none
+t=125 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=1.026 acq_wall_s=6.117 acq_value=-2.74971 y=3.42477 best_f=3.45818 regret=0.472374 sobol_computed=1 map_result=mll=-2.82178 fallback=none
+t=126 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.165 acq_wall_s=11.873 acq_value=-4.85246 y=3.41489 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.7364 fallback=none
+t=127 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.840 acq_wall_s=12.214 acq_value=-4.86552 y=3.15239 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.70622 fallback=none
+t=128 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=4.336 acq_wall_s=12.457 acq_value=-4.62673 y=3.44024 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.68932 fallback=none
+t=129 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.461 acq_wall_s=12.387 acq_value=-4.89644 y=3.36544 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.66022 fallback=none
+t=130 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=6.356 acq_wall_s=11.969 acq_value=-5.01949 y=3.47754 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.63468 fallback=none
+t=131 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=76.803 acq_wall_s=12.309 acq_value=-3.06594 y=3.49282 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-3.57584 fallback=none
+t=132 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=140.620 acq_wall_s=12.278 acq_value=-4.81258 y=3.49297 best_f=3.45818 regret=0.472374 sobol_computed=0 reason='fit_gpytorch_mll failed; Adam fallback' map_result=mll=-2.58517 fallback=adam
+t=133 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.492 acq_wall_s=12.234 acq_value=-4.60751 y=3.46748 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.55375 fallback=none
+t=134 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.483 acq_wall_s=13.478 acq_value=-4.85005 y=3.51782 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.5291 fallback=none
+t=135 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.191 acq_wall_s=13.466 acq_value=-4.79891 y=3.51812 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.5051 fallback=none
+t=136 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.486 acq_wall_s=13.277 acq_value=-4.8906 y=3.2382 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.4792 fallback=none
+t=137 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.119 acq_wall_s=12.222 acq_value=-4.36655 y=3.36125 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.46011 fallback=none
+t=138 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.983 acq_wall_s=12.144 acq_value=-4.48345 y=3.65646 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.44012 fallback=none
+t=139 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=5.003 acq_wall_s=12.039 acq_value=-4.0809 y=3.49551 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.42073 fallback=none
+t=140 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.691 acq_wall_s=14.163 acq_value=-4.10251 y=3.38196 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.39493 fallback=none
+t=141 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.313 acq_wall_s=9.516 acq_value=-3.51373 y=3.52663 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.37046 fallback=none
+t=142 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.409 acq_wall_s=12.807 acq_value=-4.46809 y=3.46129 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.35013 fallback=none
+t=143 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.256 acq_wall_s=12.817 acq_value=-4.67298 y=3.55794 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.3282 fallback=none
+t=144 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=15.773 acq_wall_s=12.432 acq_value=-4.43933 y=3.66385 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.30282 fallback=none
+t=145 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.374 acq_wall_s=12.479 acq_value=-4.17066 y=3.23801 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.28102 fallback=none
+t=146 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.298 acq_wall_s=9.774 acq_value=-3.18034 y=3.42339 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.27158 fallback=none
+t=147 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.371 acq_wall_s=14.160 acq_value=-4.35794 y=3.45069 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.25948 fallback=none
+t=148 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=19.104 acq_wall_s=12.282 acq_value=-2.75532 y=3.30509 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-3.62966 fallback=none
+t=149 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.921 acq_wall_s=15.006 acq_value=-4.14502 y=3.27234 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.2261 fallback=none
+t=150 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.360 acq_wall_s=12.445 acq_value=-4.07059 y=3.56404 best_f=3.45818 regret=0.472374 sobol_computed=1 map_result=mll=-2.21663 fallback=none
+t=151 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=56.421 acq_wall_s=12.705 acq_value=-2.68404 y=3.34553 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-3.12312 fallback=none
+t=152 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.468 acq_wall_s=12.086 acq_value=-4.60143 y=3.31864 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.17746 fallback=none
+t=153 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.938 acq_wall_s=12.352 acq_value=-4.28179 y=3.31669 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.16277 fallback=none
+t=154 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.916 acq_wall_s=12.676 acq_value=-4.52615 y=3.38944 best_f=3.45818 regret=0.472374 sobol_computed=0 map_result=mll=-2.14988 fallback=none
+t=155 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=23.226 acq_wall_s=14.078 acq_value=-3.82404 y=3.43597 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-3.43829 fallback=none
+t=156 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=15.114 acq_wall_s=13.049 acq_value=-4.29262 y=3.43769 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.11781 fallback=none
+t=157 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.194 acq_wall_s=12.804 acq_value=-4.91738 y=3.43198 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.10144 fallback=none
+t=158 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=10.747 acq_wall_s=12.723 acq_value=-4.21275 y=3.43938 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.08095 fallback=none
+t=159 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.477 acq_wall_s=13.795 acq_value=-5.04083 y=3.47248 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.06536 fallback=none
+t=160 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.077 acq_wall_s=13.802 acq_value=-5.02226 y=3.4394 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.04806 fallback=none
+t=161 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=16.557 acq_wall_s=13.612 acq_value=-5.19012 y=3.36831 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.02827 fallback=none
+t=162 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=38.171 acq_wall_s=15.121 acq_value=-2.28006 y=1.60947 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-3.67556 fallback=none
+t=163 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.631 acq_wall_s=12.270 acq_value=-4.88218 y=3.36786 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.01934 fallback=none
+t=164 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.360 acq_wall_s=12.601 acq_value=-4.93634 y=3.5671 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.00306 fallback=none
+t=165 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.906 acq_wall_s=12.513 acq_value=-4.79814 y=3.38909 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.98727 fallback=none
+t=166 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.888 acq_wall_s=12.218 acq_value=-4.50517 y=3.40261 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.97606 fallback=none
+t=167 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=22.780 acq_wall_s=11.944 acq_value=-3.8609 y=3.366 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-3.1508 fallback=none
+t=168 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=26.198 acq_wall_s=11.518 acq_value=-3.796 y=3.06574 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-3.13292 fallback=none
+t=169 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.010 acq_wall_s=12.329 acq_value=-4.7005 y=3.44782 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.93021 fallback=none
+t=170 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=90.914 acq_wall_s=13.098 acq_value=-3.73642 y=3.43239 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.77753 fallback=none
+t=171 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=132.376 acq_wall_s=11.799 acq_value=-1.51247 y=2.4455 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-3.09509 fallback=none
+t=172 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=18.923 acq_wall_s=13.667 acq_value=-4.25698 y=3.56917 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.88668 fallback=none
+t=173 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=17.666 acq_wall_s=13.205 acq_value=-4.76171 y=3.25963 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.87068 fallback=none
+t=174 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=14.594 acq_wall_s=13.240 acq_value=-4.65485 y=3.35283 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.85962 fallback=none
+t=175 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=13.533 acq_wall_s=12.812 acq_value=-4.59981 y=3.48601 best_f=3.46804 regret=0.462514 sobol_computed=1 map_result=mll=-1.8492 fallback=none
+t=176 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=9.721 acq_wall_s=13.339 acq_value=-4.81331 y=3.48706 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.8351 fallback=none
+t=177 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=15.096 acq_wall_s=13.177 acq_value=-5.11264 y=3.64567 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.81888 fallback=none
+t=178 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=14.334 acq_wall_s=13.964 acq_value=-4.62978 y=3.43384 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.80511 fallback=none
+t=179 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=18.851 acq_wall_s=14.087 acq_value=-4.78311 y=3.31964 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.79263 fallback=none
+t=180 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=18.382 acq_wall_s=12.384 acq_value=-4.74855 y=3.46743 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-1.77908 fallback=none
+t=181 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=7.324 acq_wall_s=12.844 acq_value=-2.57104 y=2.69781 best_f=3.46804 regret=0.462514 sobol_computed=0 map_result=mll=-2.84385 fallback=none
+t=182 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=64.266 acq_wall_s=12.348 acq_value=-3.09956 y=3.35591 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-2.55463 fallback=none
+t=183 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=19.019 acq_wall_s=13.628 acq_value=-4.1576 y=3.67818 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.75635 fallback=none
+t=184 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=15.003 acq_wall_s=12.722 acq_value=-4.07777 y=3.36801 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.74337 fallback=none
+t=185 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=11.816 acq_wall_s=10.632 acq_value=-3.75143 y=3.3712 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.73736 fallback=none
+t=186 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=8.309 acq_wall_s=12.761 acq_value=-4.83801 y=3.49776 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.73264 fallback=none
+t=187 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=20.429 acq_wall_s=13.004 acq_value=-4.956 y=3.37232 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.71715 fallback=none
+t=188 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=14.960 acq_wall_s=12.814 acq_value=-5.14255 y=3.61094 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.7056 fallback=none
+t=189 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=17.952 acq_wall_s=13.335 acq_value=-4.51289 y=3.34507 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.68954 fallback=none
+t=190 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=22.183 acq_wall_s=12.167 acq_value=-2.47591 y=3.18279 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-2.73969 fallback=none
+t=191 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=108.216 acq_wall_s=15.852 acq_value=-3.50609 y=2.20495 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-2.62178 fallback=none
+t=192 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=18.494 acq_wall_s=12.915 acq_value=-5.06184 y=3.56804 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.66029 fallback=none
+t=193 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=15.986 acq_wall_s=12.805 acq_value=-4.98862 y=3.41766 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.64722 fallback=none
+t=194 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=19.277 acq_wall_s=12.927 acq_value=-5.30302 y=3.48777 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.63576 fallback=none
+t=195 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=23.719 acq_wall_s=13.220 acq_value=-4.94654 y=3.49549 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.62312 fallback=none
+t=196 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=12.354 acq_wall_s=12.900 acq_value=-5.47275 y=3.33791 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.61127 fallback=none
+t=197 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=30.186 acq_wall_s=12.952 acq_value=-2.45047 y=3.33507 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-2.65575 fallback=none
+t=198 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=25.879 acq_wall_s=13.122 acq_value=-5.18173 y=3.51524 best_f=3.51566 regret=0.4149 sobol_computed=0 map_result=mll=-1.58834 fallback=none
+t=199 method=dsp_map status=ok fit_calls=1 nuts_attempts=0 fit_wall_s=24.392 acq_wall_s=13.270 acq_value=-2.49656 y=2.85642 best_f=3.51566 regret=0.4149 sobol_computed=1 map_result=mll=-2.67273 fallback=none
+resume at t=200 with T=200 (checkpoint t_done=199, last logged row 199)

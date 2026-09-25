@@ -1,0 +1,110 @@
+{
+  "D": 100,
+  "T": 200,
+  "acquisition_constants": {
+    "acquisition": "LogExpectedImprovement",
+    "batch_limit": 1,
+    "best_pct": 5.0,
+    "cholesky_max_tries": 9,
+    "maxiter": 200,
+    "num_restarts": 5,
+    "prob_perturb": 0.2,
+    "q": 1,
+    "raw_samples": 512,
+    "sample_around_best": true,
+    "sample_around_best_sigma": 0.001
+  },
+  "alpha": null,
+  "batch_limit": 1,
+  "config_hash": "5544388f26cdf0644f88ec45de824675e5fa86fd82b0d9771d21d1ac3b07697f",
+  "created": "2026-09-21T10:38:51.329668+00:00",
+  "ell_prior": [
+    0.0,
+    1.5
+  ],
+  "env": {
+    "OMP_NUM_THREADS": "1",
+    "XLA_FLAGS": "--xla_force_host_platform_device_count=1 --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1",
+    "cpu_count": 40,
+    "jax_device": "cpu",
+    "machine": "x86_64",
+    "platform": "Linux-5.14.0-687.41.1.el9_8.x86_64-x86_64-with-glibc2.34",
+    "processor": "x86_64",
+    "torch_num_threads": 1
+  },
+  "family": "anti_aligned",
+  "fixed_noise": null,
+  "git": {
+    "commit": "2866ed21fcef29e3699b6d2fdebfb3d5f52d7028",
+    "dirty": false
+  },
+  "maxiter": 200,
+  "method": "oracle_S",
+  "n_init": 20,
+  "noiseless": false,
+  "num_restarts": 5,
+  "nuts": {
+    "max_tree_depth": 6,
+    "num_chains": 1,
+    "num_samples": 256,
+    "num_warmup": 512,
+    "thinning": 16
+  },
+  "objective": {
+    "D": 100,
+    "S": [
+      1,
+      19,
+      21,
+      39,
+      48,
+      72
+    ],
+    "f_star": 4.789603475419686,
+    "family": "anti_aligned",
+    "gamma": 0.0,
+    "noise_sd": 0.1,
+    "seed": 1
+  },
+  "out_dir": "runs",
+  "raw_samples": 512,
+  "resumed": [
+    {
+      "T": 200,
+      "commit": "2866ed21fcef29e3699b6d2fdebfb3d5f52d7028",
+      "env": {
+        "OMP_NUM_THREADS": "1",
+        "XLA_FLAGS": "--xla_force_host_platform_device_count=1 --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1",
+        "cpu_count": 24,
+        "jax_device": "cpu",
+        "machine": "x86_64",
+        "platform": "Linux-5.14.0-687.46.1.el9_8.x86_64-x86_64-with-glibc2.34",
+        "processor": "x86_64",
+        "torch_num_threads": 1
+      },
+      "time": "2026-09-21T11:58:21.117050+00:00",
+      "versions_changed": []
+    }
+  ],
+  "sample_around_best_sigma": 0.001,
+  "seed": 1,
+  "sobol_every": 25,
+  "sobol_n": 2048,
+  "thresholds": {
+    "max_divergences": 5,
+    "n_eff_min": 16.0,
+    "r_hat_max": 1.1
+  },
+  "versions": {
+    "botorch": "0.18.1",
+    "gpytorch": "1.15.2",
+    "jax": "0.10.2",
+    "jaxlib": "0.10.2",
+    "linear_operator": "0.6.1",
+    "numpy": "2.4.6",
+    "numpyro": "0.21.0",
+    "python": "3.11.16",
+    "scipy": "1.17.1",
+    "torch": "2.14.0"
+  }
+}
