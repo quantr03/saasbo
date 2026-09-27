@@ -1,0 +1,26 @@
+| method | family | ap_native_median | ap_native_mean | recall_at_S_native_median | recall_at_S_native_mean | ap_sobol_median | ap_sobol_mean | recall_at_S_sobol_median | recall_at_S_sobol_mean | precision_median | precision_mean | recall_median | recall_mean | f1_median | f1_mean | n_pred_active_median | n_pred_active_mean | n_runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| product-lengthscale | anti_aligned | 0.86 | 0.889 | 0.833 | 0.833 | 0.903 | 0.87 | 0.833 | 0.8 | 1 | 1 | 0.667 | 0.617 | 0.8 | 0.744 | 4 | 3.7 | 10 |
+| product-lengthscale | interaction_g0.00 | 1 | 0.945 | 1 | 0.94 | 1 | 0.973 | 1 | 0.94 | 1 | 0.917 | 0.6 | 0.68 | 0.75 | 0.765 | 3 | 3.7 | 10 |
+| product-lengthscale | interaction_g0.50 | 1 | 1 | 1 | 1 | 1 | 0.924 | 1 | 0.92 | 1 | 1 | 0.8 | 0.88 | 0.889 | 0.933 | 4 | 4.4 | 10 |
+| product-lengthscale | interaction_g0.75 | 1 | 1 | 1 | 1 | 1 | 0.962 | 1 | 0.96 | 1 | 1 | 0.8 | 0.86 | 0.889 | 0.922 | 4 | 4.3 | 10 |
+| additive-lengthscale | anti_aligned | 1 | 0.954 | 1 | 0.95 | 1 | 0.981 | 1 | 0.95 | 1 | 1 | 0.833 | 0.783 | 0.909 | 0.854 | 5 | 4.7 | 10 |
+| additive-lengthscale | interaction_g0.00 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 5 | 5 | 10 |
+| additive-lengthscale | interaction_g0.50 | 0.71 | 0.744 | 0.8 | 0.78 | 0.922 | 0.913 | 0.8 | 0.84 | 0.833 | 0.839 | 0.8 | 0.86 | 0.844 | 0.835 | 5.5 | 5.3 | 10 |
+| additive-lengthscale | interaction_g0.75 | 0.71 | 0.701 | 0.8 | 0.76 | 0.877 | 0.808 | 0.8 | 0.78 | 0.833 | 0.837 | 0.8 | 0.72 | 0.844 | 0.742 | 5 | 4.3 | 10 |
+| product-amplitude | anti_aligned | 1 | 0.951 | 1 | 0.933 | 1 | 0.976 | 1 | 0.95 | 1 | 1 | 0.667 | 0.717 | 0.8 | 0.83 | 4 | 4.3 | 10 |
+| product-amplitude | interaction_g0.00 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0.9 | 0.88 | 0.944 | 0.931 | 4.5 | 4.4 | 10 |
+| product-amplitude | interaction_g0.50 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0.8 | 0.8 | 0.889 | 0.886 | 4 | 4 | 10 |
+| product-amplitude | interaction_g0.75 | 1 | 0.963 | 1 | 0.96 | 1 | 0.946 | 1 | 0.96 | 1 | 0.96 | 0.8 | 0.78 | 0.889 | 0.86 | 4 | 4.1 | 10 |
+| additive-amplitude | anti_aligned | 1 | 0.979 | 1 | 0.967 | 1 | 0.975 | 1 | 0.967 | 1 | 1 | 0.833 | 0.783 | 0.909 | 0.876 | 5 | 4.7 | 10 |
+| additive-amplitude | interaction_g0.00 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 5 | 5 | 10 |
+| additive-amplitude | interaction_g0.50 | 0.81 | 0.793 | 0.8 | 0.8 | 0.877 | 0.843 | 0.8 | 0.8 | 0.8 | 0.822 | 0.8 | 0.8 | 0.8 | 0.806 | 5 | 4.9 | 10 |
+| additive-amplitude | interaction_g0.75 | 0.71 | 0.753 | 0.8 | 0.8 | 0.983 | 0.884 | 0.9 | 0.86 | 0.8 | 0.813 | 0.8 | 0.76 | 0.8 | 0.781 | 5 | 4.7 | 10 |
+| dsp_map | anti_aligned | 0.679 | 0.598 | 0.667 | 0.6 | 0.433 | 0.526 | 0.5 | 0.55 | 0.258 | 0.276 | 0.833 | 0.733 | 0.392 | 0.389 | 16.5 | 16.7 | 10 |
+| dsp_map | interaction_g0.00 | 0.714 | 0.677 | 0.6 | 0.64 | 0.629 | 0.663 | 0.6 | 0.66 | 0.361 | 0.395 | 1 | 0.82 | 0.503 | 0.516 | 9.5 | 11.3 | 10 |
+| dsp_map | interaction_g0.50 | 0.649 | 0.616 | 0.6 | 0.58 | 0.566 | 0.557 | 0.6 | 0.56 | 0.25 | 0.262 | 0.8 | 0.76 | 0.358 | 0.375 | 14 | 16.4 | 10 |
+| dsp_map | interaction_g0.75 | 0.648 | 0.66 | 0.6 | 0.64 | 0.491 | 0.477 | 0.5 | 0.48 | 0.318 | 0.353 | 0.7 | 0.76 | 0.442 | 0.439 | 11 | 13.9 | 10 |
+| oracle_S | anti_aligned | 1 | 1 | 1 | 1 | 1 | 0.984 | 1 | 0.983 | 1 | 1 | 0.667 | 0.633 | 0.8 | 0.765 | 4 | 3.8 | 10 |
+| oracle_S | interaction_g0.00 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0.6 | 0.66 | 0.75 | 0.785 | 3 | 3.3 | 10 |
+| oracle_S | interaction_g0.50 | 1 | 1 | 1 | 1 | 1 | 0.962 | 1 | 0.96 | 1 | 1 | 0.8 | 0.86 | 0.889 | 0.922 | 4 | 4.3 | 10 |
+| oracle_S | interaction_g0.75 | 1 | 1 | 1 | 1 | 1 | 0.962 | 1 | 0.96 | 1 | 1 | 0.8 | 0.84 | 0.889 | 0.911 | 4 | 4.2 | 10 |

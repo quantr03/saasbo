@@ -5,4 +5,5 @@ saasbo.egg*
 data/
 docs/thesis/*.pdf
 logs/
+runs/
 runs_smoke/
