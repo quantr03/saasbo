@@ -105,7 +105,7 @@ optimization -- {additive, product} kernel structure x {amplitude, lengthscale} 
 run on BoTorch 0.18.1's SAASBO (`SaasFullyBayesianSingleTaskGP`, NumPyro NUTS through a copy of
 `fit_fully_bayesian_model_nuts`'s sampler lines, `LogExpectedImprovement`, `optimize_acqf`) under
 Papenmeier et al. (2025)'s loop protocol, so that a difference in regret or in identification is
-attributable to the parameterization and to nothing else. `sagp` is a six-module library and
+attributable to the parameterization and to nothing else. `sagp` is a seven-module library and
 `experiments` is the study code built on it:
 
 | module | owns |
@@ -113,6 +113,7 @@ attributable to the parameterization and to nothing else. `sagp` is a six-module
 | `sagp/gp.py` | the four cells as BoTorch `PyroModel`s, `CellGP`, `NUTSConfig`, `FittedGP`, `fit`, `standardize`; the JAX kernels are the log density |
 | `sagp/kernels_torch.py` | the three centered kernels in torch, batched over draws, for prediction and the acquisition's gradients |
 | `sagp/diagnostics.py` | the convergence verdict on a NUTS attempt |
+| `sagp/r2d2.py` | the R2-D2 prior's two forms behind `sample_log_theta`, and their Gaussian-copula map: the reference Newton solver and the loop-free table the cells run |
 | `sagp/bo.py` | the loop: seeding, BoTorch's LogEI and `optimize_acqf`, `run_bo` |
 | `sagp/references.py` | Papenmeier's `dsp` model at the MAP and the oracle behind `FilterFeatures`; the Sobol proposer |
 | `sagp/readouts.py` | posterior readouts from a `FittedGP`'s retained draws |
