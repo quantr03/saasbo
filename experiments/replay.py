@@ -11,12 +11,14 @@ cell replayed on its own run is the control: the loop's own computation again, w
 reproduces the stored fit bit for bit and on a GPU measures the device's run-to-run variation. Both
 go through the one code path. `compare` joins every replayed fit to the stored fit of the same
 (family, seed, t) and writes the tables and the verdict of gate G2 (plan, Task 11), which decides
-whether the R2-D2 cells run in the loop.
+whether the R2-D2 cells run in the loop; `compare --probe` reads the GPU probe's cost criterion
+alone.
 
     python -m experiments.replay fit --runs runs/ --out runs_replay/ --family aligned10 --seed 3 \
         --cell additive/amplitude_r2d2 [--source additive/amplitude] [--t 50,100,199] \
         [--nuts 512,256,16] [--max-tree-depth 6] [--dry-run]
-    python -m experiments.replay compare --runs runs/ --replay runs_replay/ --out <report dir>
+    python -m experiments.replay compare --runs runs/ --replay runs_replay/ --out <report dir> \
+        [--probe]
 """
 from __future__ import annotations
 
@@ -36,7 +38,7 @@ from types import SimpleNamespace
 import jax
 import numpy as np
 
-from experiments.runlog import RunConfig, RunLogger, config_hash, run_dir_for
+from experiments.runlog import RunConfig, RunLogger, _git_provenance, config_hash, run_dir_for
 from sagp.bo import iteration_rngs
 from sagp.diagnostics import DiagThresholds, Diagnostics
 from sagp.gp import CELLS, R2D2_K, Cell, NUTSConfig, fit, standardize
@@ -54,6 +56,9 @@ TWINS: dict[str, str] = {
 }
 # The iterations replayed: each carries the stored Sobol readout (t = 0 mod 25, and t = T - 1).
 REPLAY_T: tuple[int, ...] = (50, 100, 199)
+# Where the warm-up's log line reports the R2-D2 map, y = log_gamma_icdf(z, R2D2_K): both tails
+# of the table, the prior's bulk and its median.
+_TABLE_DIGEST_Z: tuple[float, ...] = (-30.0, -5.0, 0.0, 5.0, 30.0)
 
 # What a replay can refit or read from: the eight cells, spelled as methods. The MAP references and
 # the Sobol search run no chain, so there is nothing of theirs to diagnose.
@@ -130,6 +135,9 @@ def dataset_at(source: Source, t: int) -> tuple[np.ndarray, np.ndarray, float, f
     the checkpoint holds iteration t (`t <= t_done`), `iterations.csv` has a complete row t, and
     `y[:t]` standardizes to that row's `y_mean` and `y_std` exactly -- the check that the stored
     observations are the ones the fit was handed, and that no shorter or other dataset is fitted.
+    Refused too unless every row t' in [n_init, t) carries exactly the checkpoint's y[t'] and
+    X[t'] (its `y` and `x_*` columns, plan section 0): two moments alone would pass a checkpoint
+    whose points or observations were exchanged. The design X[:n_init] has no row to check.
     """
     t_done = int(source.checkpoint["t_done"])
     if t > t_done:
@@ -139,8 +147,19 @@ def dataset_at(source: Source, t: int) -> tuple[np.ndarray, np.ndarray, float, f
     row = source.rows.get(t)
     if row is None:
         raise ValueError(f"{source.dir}: iterations.csv has no complete row t={t}")
-    X = source.checkpoint["X"][:t]
-    z, y_mean, y_std = standardize(source.checkpoint["y"][:t])
+    X, y = source.checkpoint["X"][:t], source.checkpoint["y"][:t]
+    for t_row in range(source.cfg.n_init, t):
+        recorded = source.rows.get(t_row)
+        if recorded is None:
+            raise ValueError(f"{source.dir}: iterations.csv has no complete row t={t_row}")
+        x_recorded = [float(recorded[f"x_{i}"]) for i in range(X.shape[1])]
+        if float(recorded["y"]) != y[t_row] or x_recorded != X[t_row].tolist():
+            raise ValueError(
+                f"{source.dir}: row t={t_row} records y={recorded['y']} and its x_* columns, "
+                f"but the checkpoint holds y[{t_row}]={y[t_row]!r} and a point X[{t_row}] that "
+                "they do not both equal: the checkpoint's data are not the ones the loop recorded"
+            )
+    z, y_mean, y_std = standardize(y)
     if float(row["y_mean"]) != y_mean or float(row["y_std"]) != y_std:
         raise ValueError(
             f"{source.dir}: y[:{t}] standardizes to y_mean={y_mean!r}, y_std={y_std!r}, but row "
@@ -178,7 +197,8 @@ def run_replay(
     the half-Cauchy global scale there but k on an R2-D2 cell (ruling R27); a control takes the
     source's `alpha` through. Before its first timed fit the process builds the R2-D2 map's
     table at `R2D2_K`, whatever the cell (ruling R26), so `fit_wall_s` holds a fit and that n's
-    compilation but not the table's one-time build.
+    compilation but not the table's one-time build; its log line records the map's value at five
+    z, so a GPU-built table can be compared with the CPU's.
 
     The replay directory, `<out>/<family>/<method>/seed##` (`run_dir_for`): `replay.csv`, one row
     per t (`_REPLAY_FIELDS`); `coords.csv` and `samples/t###.npz`, written by `RunLogger` exactly
@@ -220,7 +240,7 @@ def run_replay(
 
     cfg = dataclasses.replace(source.cfg, method=method, out_dir=str(out))
     replay_dir = run_dir_for(out, cfg)
-    done = _done(replay_dir, cfg, source_method, budget_text)
+    done = _done(replay_dir, cfg, source, budget_text)
 
     if dry_run:
         print(f"source {source.dir} (method {source_method}, t_done "
@@ -240,17 +260,21 @@ def run_replay(
     # A process's one-time start-up, done before its first timed fit so that no `fit_wall_s`
     # carries it (ruling R26): the R2-D2 map's table at R2D2_K, built on first use and cached per
     # shape. Every cell's replay builds it, so every cell's first fit starts from the same state.
+    # The map's values at `_TABLE_DIGEST_Z` go into the log line by repr: on a GPU the table is
+    # built by the GPU's arithmetic, which the map's accuracy tests (CPU) do not cover, and these
+    # five numbers can be compared with a CPU evaluation of the same map.
     start = time.perf_counter()
-    jax.block_until_ready(log_gamma_icdf(np.zeros(1), R2D2_K))
+    digest = jax.block_until_ready(log_gamma_icdf(np.asarray(_TABLE_DIGEST_Z), R2D2_K))
     startup_s = time.perf_counter() - start
     logger = RunLogger(replay_dir, cfg)
     if logger.manifest.exists():
-        logger.note_resume()
+        _note_resume(logger)
     else:
         _write_manifest(logger, source)
     logger.log(
         f"replay method={method} on {source.dir} t={todo} budget={budget_text}; "
-        f"R2-D2 table at k={R2D2_K!r} ready in {startup_s:.3f} s before the first fit"
+        f"R2-D2 table at k={R2D2_K!r} ready in {startup_s:.3f} s before the first fit; "
+        + ", ".join(f"y({z:g}) = {float(y)!r}" for z, y in zip(_TABLE_DIGEST_Z, digest))
     )
     _drop_unfinished(logger, done)
     for t in todo:
@@ -275,20 +299,39 @@ def _budget_text(nuts: NUTSConfig) -> str:
     return f"{nuts.num_warmup}/{nuts.num_samples}/{nuts.thinning}/{nuts.max_tree_depth}"
 
 
-def _done(replay_dir: Path, cfg: RunConfig, source_method: str, budget_text: str) -> set[int]:
+def _done(replay_dir: Path, cfg: RunConfig, source: Source, budget_text: str) -> set[int]:
     """The t this replay directory has finished, after refusing one written under other terms.
 
-    The manifest's `config_hash` is the replay's configuration, as a run's is on resume, and every
-    complete row must be of this call's source and budget: the directory's path names neither, so
-    without these checks a call under another would skip the t it finds done and mix the two.
+    The manifest's `config_hash` is the replay's configuration, as a run's is on resume; its
+    `source` block must name this call's source run; and every complete row must be of this
+    call's source and budget. The directory's path names neither source nor budget, so without
+    these checks a call under another would skip the t it finds done and mix the two. The source
+    run is compared by its `config_hash`, not by its path: the hash names the run -- family, seed,
+    method and every setting -- however `--runs` is spelled (relative in the sbatch file, absolute
+    elsewhere) and wherever the root is mounted, and it is what `compare` joins on. A manifest
+    with no `source` block (a kill between its two writes) is refused too, since nothing then
+    ties the directory to a run: remove the directory and replay it again.
     """
     manifest = replay_dir / "manifest.json"
     if manifest.exists():
-        recorded = json.loads(manifest.read_text()).get("config_hash")
-        if recorded != config_hash(cfg):
+        recorded = json.loads(manifest.read_text())
+        if recorded.get("config_hash") != config_hash(cfg):
             raise ValueError(
                 f"{replay_dir} was written under a different configuration (manifest "
-                f"config_hash {recorded}, this replay's {config_hash(cfg)})"
+                f"config_hash {recorded.get('config_hash')}, this replay's {config_hash(cfg)})"
+            )
+        block = recorded.get("source")
+        if not isinstance(block, dict):
+            raise ValueError(
+                f"{replay_dir}/manifest.json names no source run (a call killed between its two "
+                "writes), so nothing ties the directory to a run: remove it and replay again"
+            )
+        if block.get("config_hash") != source.manifest["config_hash"]:
+            raise ValueError(
+                f"{replay_dir} was replayed on the run with config_hash "
+                f"{block.get('config_hash')}, not on {source.dir} (config_hash "
+                f"{source.manifest['config_hash']}): a replay directory holds one source, so "
+                "replay another into another --out"
             )
     _, rows = _read_csv(replay_dir / "replay.csv")
     for row in rows:
@@ -298,10 +341,10 @@ def _done(replay_dir: Path, cfg: RunConfig, source_method: str, budget_text: str
                 f"call's {budget_text}: a replay directory holds one budget, so replay another "
                 "budget into another --out"
             )
-        if row["source_method"] != source_method:
+        if row["source_method"] != source.cfg.method:
             raise ValueError(
                 f"{replay_dir}/replay.csv holds rows replayed on {row['source_method']}'s run, "
-                f"not {source_method}'s"
+                f"not {source.cfg.method}'s"
             )
     return {int(row["t"]) for row in rows}
 
@@ -328,6 +371,24 @@ def _write_manifest(logger: RunLogger, source: Source) -> None:
         "commit": source.manifest["git"]["commit"],
         "devices": _session_devices(source.manifest),
     }
+    tmp = logger.manifest.with_name(logger.manifest.name + ".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n")
+    os.replace(tmp, logger.manifest)
+
+
+def _note_resume(logger: RunLogger) -> None:
+    """`RunLogger.note_resume`, with `dirty` added to the entry it appends.
+
+    The loop's resume entry records the commit alone. `compare` reads G2 only off replays whose
+    every session -- the creation and each resume -- ran at one commit on a clean checkout, so a
+    replay's resume records whether its checkout was dirty, as the manifest's `git` block does
+    for the creation. The flag is `runlog`'s own `_git_provenance`, so "dirty" means the same in
+    both places (`git status --porcelain` non-empty, untracked files included); the loop's entry
+    is left as it is, since its key set is pinned by `tests/test_bo_config.py`.
+    """
+    logger.note_resume()
+    manifest = json.loads(logger.manifest.read_text())
+    manifest["resumed"][-1]["dirty"] = _git_provenance()["dirty"]
     tmp = logger.manifest.with_name(logger.manifest.name + ".tmp")
     tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n")
     os.replace(tmp, logger.manifest)
@@ -474,45 +535,70 @@ def _append_row(path: Path, row: dict[str, object]) -> None:
 
 # --- compare ---
 
-# Gate G2 (plan, Task 11) in numbers. FAIL: an R2-D2 cell's exclusion rate at or above 0.90, or its
-# median n_eff_min at or below 10. PASS: every R2-D2 cell at or below 0.60 and at or above 16.
-# Harness: each control cell's exclusion rate within 0.15 of its stored fits', and its median
-# |delta r_hat_max| and |delta AP_native| against them at most 0.05. Cost: an R2-D2 cell's median
-# fit_wall_s at t = 199 at most 1.5 times its twin's control refits' there, on the same device.
+# Gate G2 (plan, Task 11) in numbers. Each criterion is read by one comparison -- `_cell_reading`,
+# `_harness_holds`, `_cost_holds` -- and the PASS bar is set in one function, `_pass_bar`, so a
+# changed ruling changes these constants and that one place.
+# FAIL, read first: an R2-D2 cell's exclusion rate at or above 0.90, or its median n_eff_min at or
+# below 10.
 _G2_FAIL_EXCLUSION, _G2_FAIL_N_EFF = 0.90, 10.0
+# PASS (ruling R31b): every R2-D2 cell at or below E* and at or above N*. E* is the higher of 0.60
+# and the two half-Cauchy lengthscale twins' stored exclusion rates, N* the lower of 16 and their
+# stored median n_eff_min, both over the (family, seed, t) the replay reads: the level those cells
+# run at there (0.700 and 14.0 on the stored runs).
 _G2_PASS_EXCLUSION, _G2_PASS_N_EFF = 0.60, 16.0
-_G2_HARNESS_EXCLUSION, _G2_HARNESS_R_HAT, _G2_HARNESS_AP = 0.15, 0.05, 0.05
+# Harness (ruling R31a): per control cell, against the stored fits of the same (family, seed, t),
+# the exclusion rates within 0.15 and the medians of r_hat_max and of AP_native within 0.10 each --
+# compared in distribution, as a GPU refit reproduces a fit (plan D9). The paired median |delta|
+# of each statistic is reported beside them, not gated.
+_G2_HARNESS_EXCLUSION, _G2_HARNESS_R_HAT, _G2_HARNESS_AP = 0.15, 0.10, 0.10
+# Cost: an R2-D2 cell's median fit_wall_s at t = 199 at most 1.5 times its twin's control refits'
+# there, on the same device at the same budget. t = 199 alone (ruling R28): by then every replay
+# process has fitted its cell once, so the reading excludes a process's one-time start-up.
 _G2_COST_RATIO = 1.5
-# The one t the cost criterion reads (ruling R28): by t = 199 every replay process has fitted its
-# cell once, so the reading excludes a process's one-time start-up.
 _G2_COST_T = 199
-# The full replay: 4 R2-D2 cells x 8 families x 10 seeds x 3 t, and 4 controls x 2 x 10 x 3.
+# G2's design (`_design`) as slurm/r2d2_replay.sbatch runs it; change the two together.
+_G2_SEEDS: tuple[int, ...] = tuple(range(10))
+_G2_CONTROL_FAMILIES: tuple[str, ...] = ("aligned10", "decoupled")
 _G2_R2D2_FITS, _G2_CONTROL_FITS = 960, 240
+# How many missing (family, seed, t) the report names per cell.
+_MISSING_SHOWN = 3
 # The three groups the per-group diagnostics attribute a gate failure to.
 _GROUPS: tuple[str, ...] = ("native", "ell", "global")
 
 
 def compare(
-    runs: str | os.PathLike[str], replay: str | os.PathLike[str], out: str | os.PathLike[str]
+    runs: str | os.PathLike[str],
+    replay: str | os.PathLike[str],
+    out: str | os.PathLike[str],
+    *,
+    probe: bool = False,
 ) -> Path:
     """Join every replayed fit to its stored fit and write G2's tables and report; returns `out`.
 
     One joined row per replayed (cell, family, seed, t): the replay's fit, the source's stored fit
     of the same (family, seed, t) (`stored_`), and for an R2-D2 cell its twin's control refit
-    there where one exists (`control_`). `tables/`: `replay_vs_stored.csv` (the join),
+    there where one exists (`control_`). A replay directory whose manifest does not name, by
+    `config_hash`, the stored run under `runs` it is joined to is refused (`ValueError`): its fits
+    were made on another run's data. `tables/`: `replay_vs_stored.csv` (the join),
     `gate_by_cell_t.csv` (per cell and t, and over all t: exclusion rate, the r_hat_max and
     n_eff_min medians, the per-group r_hat medians and the fraction of fits whose every sampling
     iteration reached the tree cap, for the replay and for its stored fits),
     `identification.csv` (AP of native_median and of sobol_hat, and precision, recall and F1 of
     p_active > 0.5, against the manifest's S, for each replayed and each stored fit) and
-    `cost.csv` (fit_wall_s by cell and device, every t); `REPORT.md` states the G2 verdict with its
-    numbers, its cost criterion reading t = 199 alone (`_G2_COST_T`, ruling R28).
-    NumPy and csv only, so it runs in the study environment.
+    `cost.csv` (fit_wall_s by cell and device, every t). NumPy and csv only, so it runs in the
+    study environment.
+
+    `REPORT.md` states G2's verdict with its numbers (plan, Task 11; `_verdict`). PASS or FAIL is
+    read only on a complete tree written at one commit on clean checkouts: every (family, seed, t)
+    of the design replayed (`_design`), and a same-device t = 199 cost pair for every R2-D2 cell;
+    anything less is INCONCLUSIVE, and the report names what is missing. With `probe` the report
+    reads the cost criterion alone -- the GPU probe's sixteen fits say nothing of the rest -- and
+    labels every other table as information: no verdict.
     """
     runs, replay, out = Path(runs), Path(replay), Path(out)
-    replayed = _replayed_fits(replay)
+    replayed, manifests = _replayed_fits(replay)
     wanted: dict[tuple[str, str, int], set[int]] = {}  # (family, source, seed) -> its t
-    for (_, family, seed, t), (row, _) in replayed.items():
+    for (_, family, seed, t), (row, _, _) in replayed.items():
         wanted.setdefault((family, row["source_method"], seed), set()).add(t)
     stored_runs = {
         (family, source_method, seed): _stored_run(_run_dir(runs, family, source_method, seed), ts)
@@ -520,21 +606,31 @@ def compare(
     }
 
     joined = []
-    for (method, family, seed, t), (row, coord_rows) in sorted(replayed.items()):
+    for (method, family, seed, t), (row, coord_rows, directory) in sorted(replayed.items()):
         source_method = row["source_method"]
         stored = stored_runs[(family, source_method, seed)]
+        source_block = manifests[directory].get("source")
+        source_hash = source_block.get("config_hash") if isinstance(source_block, dict) else None
+        if source_hash != stored["config_hash"]:
+            raise ValueError(
+                f"{directory} was replayed on the run with config_hash {source_hash}, but the "
+                f"stored run it would be joined to, {stored['dir']}, has config_hash "
+                f"{stored['config_hash']}: its fits are not refits of that run's data"
+            )
         S = stored["S"]
-        replay_fit = _fit_record(row, coord_rows, S, _tree_cap(row["budget"]), row["device"])
+        replay_fit = _fit_record(
+            row, coord_rows, S, _tree_cap(row["budget"]), row["device"], row["budget"]
+        )
         stored_fit = _fit_record(
             stored["rows"][t], stored["coords"].get(t, []), S, stored["tree_cap"],
-            stored["devices"].get(t, "unknown"),
+            stored["devices"].get(t, "unknown"), stored["budget"],
         )
         # The twin's control: the source cell refitted on this same run, if it was.
         control = replayed.get((source_method, family, seed, t))
         has_control = control is not None and control[0]["source_method"] == source_method
         control_fit = (
             _fit_record(control[0], control[1], S, _tree_cap(control[0]["budget"]),
-                        control[0]["device"])
+                        control[0]["device"], control[0]["budget"])
             if has_control and method != source_method
             else _blank(replay_fit)
         )
@@ -561,26 +657,44 @@ def compare(
     _write_table(tables / "gate_by_cell_t.csv", _gate_table(joined))
     _write_table(tables / "identification.csv", _identification_table(joined))
     _write_table(tables / "cost.csv", _cost_table(joined))
-    (out / "REPORT.md").write_text(_report(joined, runs, replay))
+    report = _report(joined, runs, replay, _design(runs), manifests, probe=probe)
+    (out / "REPORT.md").write_text(report)
     return out
 
 
 def _replayed_fits(
     replay: Path,
-) -> dict[tuple[str, str, int, int], tuple[dict[str, str], list[dict[str, str]]]]:
-    """Every replayed fit under `replay`, by (method, family, seed, t): its row, its coordinates."""
-    fits = {}
+) -> tuple[
+    dict[tuple[str, str, int, int], tuple[dict[str, str], list[dict[str, str]], Path]],
+    dict[Path, dict[str, object]],
+]:
+    """Every replayed fit under `replay`, by (method, family, seed, t) -- its row, its coordinates
+    and its directory -- and the manifest of each directory that holds one.
+
+    A directory with a finished fit but no manifest is refused: nothing then names the run it
+    was replayed on, or the code it ran.
+    """
+    fits, manifests = {}, {}
     for path in sorted(replay.glob("*/*/seed*/replay.csv")):
         _, rows = _read_csv(path)
+        if not rows:
+            continue
+        manifest = path.parent / "manifest.json"
+        if not manifest.exists():
+            raise ValueError(f"{path.parent} holds replayed fits but no manifest.json")
+        manifests[path.parent] = json.loads(manifest.read_text())
         coords = _coords_by_t(path.parent / "coords.csv", {int(row["t"]) for row in rows})
         for row in rows:
             t = int(row["t"])
-            fits[(row["method"], row["family"], int(row["seed"]), t)] = (row, coords.get(t, []))
-    return fits
+            fits[(row["method"], row["family"], int(row["seed"]), t)] = (
+                row, coords.get(t, []), path.parent
+            )
+    return fits, manifests
 
 
 def _stored_run(run_dir: Path, wanted: set[int]) -> dict[str, object]:
-    """What `compare` reads of a stored run: rows and coordinates at `wanted`, S, cap, devices.
+    """What `compare` reads of a stored run: rows and coordinates at `wanted`, S, cap, devices,
+    and the run's `config_hash` and budget.
 
     The device of an iteration is its session's: the log's "resume at" lines start each session
     after the first, whose device the manifest's `env` records, and each resume's its `resumed`
@@ -600,6 +714,9 @@ def _stored_run(run_dir: Path, wanted: set[int]) -> dict[str, object]:
         elif match := re.match(r"t=(\d+) method=", line):
             devices[int(match.group(1))] = sessions[min(session, len(sessions) - 1)]
     return {
+        "dir": run_dir,
+        "config_hash": manifest["config_hash"],
+        "budget": _budget_text(SimpleNamespace(**manifest["nuts"])),
         "rows": {int(row["t"]): row for row in rows if int(row["t"]) in wanted},
         "coords": _coords_by_t(run_dir / "coords.csv", wanted),
         "S": [int(i) for i in manifest["objective"]["S"]],
@@ -626,7 +743,7 @@ def _tree_cap(budget_text: str) -> int:
 
 def _fit_record(
     row: dict[str, str], coord_rows: list[dict[str, str]], S: list[int], tree_cap: int,
-    device: str,
+    device: str, budget: str,
 ) -> dict[str, object]:
     """One fit as `compare` reads it -- verdict, diagnostics, cost, identification -- replayed or
     stored alike, since both rows carry the loop's names."""
@@ -637,6 +754,7 @@ def _fit_record(
         "at_tree_cap": float(float(row["num_steps_mean"]) >= tree_cap),
         "fit_wall_s": float(row["fit_wall_s"]),
         "device": device,
+        "budget": budget,
         **_identification(coord_rows, S),
     }
 
@@ -839,56 +957,79 @@ def _md_table(header: list[str], rows: list[list[object]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _report(joined: list[dict[str, object]], runs: Path, replay: Path) -> str:
-    """REPORT.md: G2's verdict first, then each of its criteria with the numbers it rests on."""
-    groups = _groups(joined)
-    r2d2 = {
-        cell: rows for (cell, _, role), rows in groups.items() if role == "twin" and cell in TWINS
-    }
-    controls = {cell: rows for (cell, _, role), rows in groups.items() if role == "control"}
-    n_r2d2 = sum(len(rows) for rows in r2d2.values())
-    n_control = sum(len(rows) for rows in controls.values())
+def _design(runs: Path) -> dict[str, set[tuple[str, int, int]]]:
+    """G2's design by cell: the (family, seed, t) at which each cell must have been replayed.
 
-    cells = []  # [cell, twin, fits, exclusion, median n_eff_min, stored exclusion, median, reading]
+    As slurm/r2d2_replay.sbatch runs it: each R2-D2 cell on its twin's stored runs, in every
+    family under `runs` that holds them, and each half-Cauchy cell -- the control -- on its own
+    runs in `_G2_CONTROL_FAMILIES`; seeds `_G2_SEEDS`, t `REPLAY_T`. On the study's runs that is
+    240 per R2-D2 cell (eight families) and 60 per control.
+    """
+    families = sorted(path.name for path in runs.iterdir() if path.is_dir())
+    design = {}
+    for cell, twin in TWINS.items():
+        stored = [family for family in families if _run_dir(runs, family, twin, 0).parent.is_dir()]
+        design[cell] = {(family, s, t) for family in stored for s in _G2_SEEDS for t in REPLAY_T}
+    for twin in TWINS.values():
+        design[twin] = {
+            (family, s, t) for family in _G2_CONTROL_FAMILIES for s in _G2_SEEDS for t in REPLAY_T
+        }
+    return design
+
+
+def _cell_reading(exclusion: float, n_eff: float, e_star: float, n_star: float) -> str:
+    """An R2-D2 cell against G2: "FAIL" (read first), "PASS" at the bar (E*, N*), or "neither".
+
+    Every threshold is inclusive: an exclusion rate of exactly 0.90 or a median n_eff_min of
+    exactly 10 fails, and exactly E* or N* passes. NaN reads "neither".
+    """
+    if exclusion >= _G2_FAIL_EXCLUSION or n_eff <= _G2_FAIL_N_EFF:
+        return "FAIL"
+    if exclusion <= e_star and n_eff >= n_star:
+        return "PASS"
+    return "neither"
+
+
+def _harness_holds(d_exclusion: float, d_r_hat: float, d_ap: float) -> bool:
+    """A control cell reproduces its stored fits in distribution (ruling R31a): the |delta| of
+    the exclusion rates, and of the medians of r_hat_max and of AP_native, each within its
+    tolerance, inclusive. NaN holds nothing."""
+    return bool(
+        d_exclusion <= _G2_HARNESS_EXCLUSION
+        and d_r_hat <= _G2_HARNESS_R_HAT
+        and d_ap <= _G2_HARNESS_AP
+    )
+
+
+def _cost_holds(ratio: float) -> bool:
+    """An R2-D2 cell's median fit_wall_s at t = 199 against its control's: at most 1.5 times."""
+    return bool(ratio <= _G2_COST_RATIO)
+
+
+def _pass_bar(
+    r2d2: dict[str, list[dict[str, object]]],
+) -> tuple[float, float, list[tuple[str, float, float, int]]]:
+    """E* and N* (ruling R31b), and what they are taken from: (twin, exclusion rate, median
+    n_eff_min, fits) for each half-Cauchy lengthscale twin, over the stored fits its R2-D2 cell
+    was joined to -- the (family, seed, t) the replay reads."""
+    sources = []
     for cell, rows in r2d2.items():
-        stats = _gate_stats(rows, "") | _gate_stats(rows, "stored_")
-        exclusion, n_eff = stats["exclusion_rate"], stats["n_eff_min_median"]
-        fails = exclusion >= _G2_FAIL_EXCLUSION or n_eff <= _G2_FAIL_N_EFF
-        passes = exclusion <= _G2_PASS_EXCLUSION and n_eff >= _G2_PASS_N_EFF
-        reading = "FAIL" if fails else "PASS" if passes else "neither"
-        cells.append([cell, TWINS[cell], len(rows), exclusion, n_eff,
-                      stats["stored_exclusion_rate"], stats["stored_n_eff_min_median"], reading])
+        if _cell(cell).native_site == "kernel_inv_length_sq":
+            stored = _gate_stats(rows, "stored_")
+            sources.append((TWINS[cell], stored["stored_exclusion_rate"],
+                            stored["stored_n_eff_min_median"], len(rows)))
+    e_star = max([_G2_PASS_EXCLUSION, *_numbers(rate for _, rate, _, _ in sources)])
+    n_star = min([_G2_PASS_N_EFF, *_numbers(median for _, _, median, _ in sources)])
+    return float(e_star), float(n_star), sources
 
-    harness = []  # [cell, fits, exclusion, stored exclusion, |d|, med |d r_hat|, med |d AP|, holds]
-    for cell, rows in controls.items():
-        exclusion = _gate_stats(rows, "")["exclusion_rate"]
-        stored = _gate_stats(rows, "stored_")["stored_exclusion_rate"]
-        d_r_hat = _median(abs(row["r_hat_max"] - row["stored_r_hat_max"]) for row in rows)
-        d_ap = _median(abs(row["ap_native"] - row["stored_ap_native"]) for row in rows)
-        holds = (
-            abs(exclusion - stored) <= _G2_HARNESS_EXCLUSION
-            and d_r_hat <= _G2_HARNESS_R_HAT
-            and d_ap <= _G2_HARNESS_AP
-        )
-        harness.append([cell, len(rows), exclusion, stored, abs(exclusion - stored), d_r_hat, d_ap,
-                        "yes" if holds else "no"])
 
-    cost = []  # [cell, device, pairs, median fit_wall_s, control's, ratio, holds], at t = 199
-    for cell, rows in r2d2.items():
-        paired = [
-            row for row in rows
-            if row["t"] == _G2_COST_T and row["control_device"] == row["device"]
-        ]
-        for device in sorted({row["device"] for row in paired}):
-            on_device = [row for row in paired if row["device"] == device]
-            mine = _median(row["fit_wall_s"] for row in on_device)
-            theirs = _median(row["control_fit_wall_s"] for row in on_device)
-            ratio = mine / theirs
-            cost.append([cell, device, len(on_device), mine, theirs, ratio,
-                         "yes" if ratio <= _G2_COST_RATIO else "no"])
-
-    # The two stops come first: without a harness that reproduces the stored fits no reading of
-    # the R2-D2 cells can be trusted, and a cost stop is asked about before anything else runs.
+def _verdict(
+    cells: list[list[object]], harness: list[list[object]], cost: list[list[object]],
+    gaps: list[str],
+) -> str:
+    """G2's verdict from its readings, each table's last column: a stop first (the harness, then
+    the cost), then INCONCLUSIVE on any gap in the tree or its provenance, then FAIL, then PASS,
+    and INCONCLUSIVE for a cell between the bar and FAIL."""
     stops = []
     if any(row[-1] == "no" for row in harness):
         stops.append("harness -- the control refits do not reproduce their stored fits: stop, "
@@ -897,25 +1038,161 @@ def _report(joined: list[dict[str, object]], runs: Path, replay: Path) -> str:
         stops.append(f"cost -- at t = {_G2_COST_T} an R2-D2 cell costs more than "
                      f"{_G2_COST_RATIO} times its control on the same device: ask before the "
                      "bulk array")
-    if not cells:
-        verdict = "NO R2-D2 FITS: nothing to decide"
-    elif stops:
-        verdict = "STOP (" + "; ".join(stops) + ")"
-    elif not harness:
-        verdict = (
-            "INCONCLUSIVE: no control refit at all, so the harness is unchecked -- stop and ask"
-        )
-    elif not cost:
-        verdict = (f"INCONCLUSIVE: no R2-D2 fit at t = {_G2_COST_T} has a control refit on its "
-                   "device, so the cost is unchecked -- stop and ask")
-    elif any(row[-1] == "FAIL" for row in cells):
-        verdict = ("FAIL: the half-Cauchy amplitude signature -- nothing in-loop is launched; "
-                   "Quan decides the budget for all eight cells (D10)")
-    elif len(cells) == len(TWINS) and all(row[-1] == "PASS" for row in cells):
-        verdict = "PASS: proceed to stage 3"
-    else:
-        verdict = "INCONCLUSIVE: stop and ask"
-    complete = n_r2d2 == _G2_R2D2_FITS and n_control == _G2_CONTROL_FITS
+    if stops:
+        return "STOP (" + "; ".join(stops) + ")"
+    if gaps:
+        return "INCONCLUSIVE: " + "; ".join(gaps) + " -- stop and ask"
+    if any(row[-1] == "FAIL" for row in cells):
+        return ("FAIL: the half-Cauchy amplitude signature -- nothing in-loop is launched; "
+                "Quan decides the budget for all eight cells (D10)")
+    if all(row[-1] == "PASS" for row in cells):
+        return "PASS: proceed to stage 3"
+    between = ", ".join(str(row[0]) for row in cells if row[-1] != "PASS")
+    return f"INCONCLUSIVE: {between} between the PASS bar and FAIL -- stop and ask"
+
+
+def _completeness(
+    design: dict[str, set[tuple[str, int, int]]],
+    r2d2: dict[str, list[dict[str, object]]],
+    controls: dict[str, list[dict[str, object]]],
+    cost: list[list[object]],
+) -> tuple[list[list[object]], list[str]]:
+    """How far the tree is from G2's design: a table row per cell, and each gap named.
+
+    A cell lacks a (family, seed, t) of its design when no complete row holds it -- for a
+    control, none at the stored budget, the only rows the harness reads -- and an R2-D2 cell
+    lacks its cost reading when it has no control refit on its device at t = 199.
+    """
+    paired = {row[0] for row in cost}
+    table, gaps = [], []
+    r2d2_cells = [method for method in _CELL_METHODS if method in TWINS]
+    control_cells = [method for method in _CELL_METHODS if method in TWINS.values()]
+    for cell in r2d2_cells + control_cells:
+        is_control = cell not in TWINS
+        rows = (controls if is_control else r2d2).get(cell, [])
+        wanted = design[cell]
+        missing = sorted(wanted - {(row["family"], row["seed"], row["t"]) for row in rows})
+        name = f"{cell} (control)" if is_control else cell
+        first = [f"{family}/seed{seed:02d}/t={t}" for family, seed, t in missing[:_MISSING_SHOWN]]
+        table.append([name, len(wanted), len(wanted) - len(missing), len(missing),
+                      "" if is_control else ("yes" if cell in paired else "no"),
+                      ", ".join(first)])
+        if not wanted:
+            gaps.append(f"{name} has no stored runs of its twin under --runs")
+        elif missing:
+            where = " at the stored budget" if is_control else ""
+            gaps.append(f"{name} lacks {len(missing)} of its {len(wanted)} fits{where} "
+                        f"(first: {', '.join(first)})")
+        if not is_control and cell not in paired:
+            gaps.append(f"{name} has no cost pair at t = {_G2_COST_T} with its control on one "
+                        "device")
+    return table, gaps
+
+
+def _provenance(
+    manifests: dict[Path, dict[str, object]], replay: Path,
+) -> tuple[list[list[object]], list[str]]:
+    """One row per replay directory and session -- its creation, then each resume -- and what,
+    if anything, keeps the tree from having been written at one commit on clean checkouts.
+
+    A session that recorded no dirty state (a resume made before `_note_resume` recorded one,
+    or a checkout git could not read) counts against that as much as a dirty one does.
+    """
+    table, commits, dirty, unknown = [], set(), 0, 0
+    for directory, manifest in sorted(manifests.items()):
+        git = manifest.get("git") or {}
+        sessions = [("created", manifest.get("created", ""), git.get("commit"), git.get("dirty"))]
+        sessions += [
+            (f"resume {i}", entry.get("time", ""), entry.get("commit"), entry.get("dirty"))
+            for i, entry in enumerate(manifest.get("resumed", []), start=1)
+        ]
+        for session, when, commit, is_dirty in sessions:
+            commit = commit or "unknown"
+            table.append([str(directory.relative_to(replay)), session, when, commit,
+                          {True: "yes", False: "no"}.get(is_dirty, "unknown")])
+            commits.add(commit)
+            dirty += is_dirty is True
+            unknown += is_dirty is None
+    issues = []
+    if len(commits) > 1:
+        issues.append(f"the replays ran at {len(commits)} commits ({', '.join(sorted(commits))})")
+    elif "unknown" in commits:
+        issues.append("the replays' commit is unknown")
+    if dirty:
+        issues.append(f"{dirty} session(s) ran on a dirty checkout")
+    if unknown:
+        issues.append(f"{unknown} session(s) recorded no dirty state")
+    return table, issues
+
+
+def _report(
+    joined: list[dict[str, object]],
+    runs: Path,
+    replay: Path,
+    design: dict[str, set[tuple[str, int, int]]],
+    manifests: dict[Path, dict[str, object]],
+    *,
+    probe: bool = False,
+) -> str:
+    """REPORT.md: G2's verdict first, then the tree's completeness and each criterion with the
+    numbers it rests on; with `probe`, the cost criterion alone and the rest as information."""
+    groups = _groups(joined)
+    r2d2 = {
+        cell: rows for (cell, _, role), rows in groups.items() if role == "twin" and cell in TWINS
+    }
+    # The harness reads a control's refits at its stored fits' budget only (and the cost pairs
+    # below form at one budget): a refit at an override budget is another experiment.
+    controls = {
+        cell: [row for row in rows if row["budget"] == row["stored_budget"]]
+        for (cell, _, role), rows in groups.items() if role == "control"
+    }
+    controls = {cell: rows for cell, rows in controls.items() if rows}
+    n_r2d2 = sum(len(rows) for rows in r2d2.values())
+    n_control = sum(len(rows) for rows in controls.values())
+
+    e_star, n_star, bar = _pass_bar(r2d2)
+    cells = []  # [cell, twin, fits, exclusion, median n_eff_min, twin's two, reading]
+    for cell, rows in r2d2.items():
+        stats = _gate_stats(rows, "") | _gate_stats(rows, "stored_")
+        exclusion, n_eff = stats["exclusion_rate"], stats["n_eff_min_median"]
+        cells.append([cell, TWINS[cell], len(rows), exclusion, n_eff,
+                      stats["stored_exclusion_rate"], stats["stored_n_eff_min_median"],
+                      _cell_reading(exclusion, n_eff, e_star, n_star)])
+
+    harness = []  # [cell, fits, then value, stored, |delta| of three statistics, paired, holds]
+    for cell, rows in controls.items():
+        values = []
+        for name in ("exclusion_rate", "r_hat_max", "ap_native"):
+            if name == "exclusion_rate":
+                mine = _gate_stats(rows, "")["exclusion_rate"]
+                theirs = _gate_stats(rows, "stored_")["stored_exclusion_rate"]
+            else:
+                mine = _median(row[name] for row in rows)
+                theirs = _median(row[f"stored_{name}"] for row in rows)
+            values += [mine, theirs, abs(mine - theirs)]
+        paired = [_median(abs(row[name] - row[f"stored_{name}"]) for row in rows)
+                  for name in ("r_hat_max", "ap_native")]
+        holds = _harness_holds(values[2], values[5], values[8])
+        harness.append([cell, len(rows), *values, *paired, "yes" if holds else "no"])
+
+    cost = []  # [cell, device, pairs, median fit_wall_s, control's median, ratio, holds], t = 199
+    for cell, rows in r2d2.items():
+        paired_rows = [
+            row for row in rows
+            if row["t"] == _G2_COST_T and row["control_device"] == row["device"]
+            and row["control_budget"] == row["budget"]
+        ]
+        for device in sorted({row["device"] for row in paired_rows}):
+            on_device = [row for row in paired_rows if row["device"] == device]
+            mine = _median(row["fit_wall_s"] for row in on_device)
+            theirs = _median(row["control_fit_wall_s"] for row in on_device)
+            ratio = mine / theirs
+            cost.append([cell, device, len(on_device), mine, theirs, ratio,
+                         "yes" if _cost_holds(ratio) else "no"])
+
+    completeness, missing = _completeness(design, r2d2, controls, cost)
+    provenance, unclean = _provenance(manifests, replay)
+    verdict = _verdict(cells, harness, cost, missing + unclean)
 
     # Per group, the share of fits whose statistic fails the gate, over the fits that have one.
     thresholds = DiagThresholds()
@@ -929,46 +1206,98 @@ def _report(joined: list[dict[str, object]], runs: Path, replay: Path) -> str:
         for prefix, kind, method in (("", "replay", cell), ("stored_", "stored", TWINS[cell]))
     ]
 
+    info = " (information, not a G2 reading)" if probe else ""
+    cells_header = ["cell", "twin", "fits", "exclusion rate", "median n_eff_min",
+                    "twin's exclusion rate", "twin's median n_eff_min", "reading"]
+    # "abs delta", not "|delta|": a pipe inside a cell would split the Markdown table's columns.
+    harness_header = ["cell", "fits", "exclusion rate", "stored", "abs delta",
+                      "median r_hat_max", "stored", "abs delta", "median AP_native", "stored",
+                      "abs delta", "paired median abs delta r_hat_max",
+                      "paired median abs delta AP_native", "holds"]
+    if probe:  # no reading on the probe's two fits per cell: drop the reading columns
+        cells_header, cells = cells_header[:-1], [row[:-1] for row in cells]
+        harness_header, harness = harness_header[:-1], [row[:-1] for row in harness]
+    bar_terms = "; ".join(
+        f"{twin}: exclusion rate {_fmt(rate)}, median n_eff_min {_fmt(median)}, over {fits} fits"
+        for twin, rate, median, fits in bar
+    ) or "no lengthscale R2-D2 cell replayed"
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    return "".join([
-        "# R2-D2 replay: gate G2\n\n",
+    command = "compare --probe" if probe else "compare"
+    parts = [
+        f"# R2-D2 replay: gate G2{', the cost probe' if probe else ''}\n\n",
         f"Stored runs `{runs}`, replays `{replay}`; written {stamp} by "
-        "`python -m experiments.replay compare`.\n\n",
-        "## Verdict\n\n",
-        f"**G2: {verdict}.**\n\n",
-        f"Fits: {n_r2d2} of {_G2_R2D2_FITS} R2-D2 fits and {n_control} of {_G2_CONTROL_FITS} "
-        "control refits"
-        + ("." if complete else " -- incomplete, so this verdict is provisional.")
-        + "\n\n",
-        "## R2-D2 cells\n\n",
+        f"`python -m experiments.replay {command}`.\n\n",
+    ]
+    if probe:
+        parts += _probe_reading(cost, set(TWINS))
+    else:
+        parts += [
+            "## Verdict\n\n",
+            f"**G2: {verdict}.**\n\n",
+            f"Fits: {n_r2d2} of {_G2_R2D2_FITS} R2-D2 fits and {n_control} of "
+            f"{_G2_CONTROL_FITS} control refits at their stored budget (the full array's "
+            "counts).\n\n",
+            "PASS and FAIL are read only on a complete tree written at one commit on clean "
+            "checkouts: every (family, seed, t) of the design below replayed, a same-device "
+            f"cost pair at t = {_G2_COST_T} for every R2-D2 cell, and every session of every "
+            "replay directory at one commit with a clean checkout (Provenance). Anything less "
+            "is INCONCLUSIVE, naming what is missing; a stop is reported whatever the tree "
+            "holds.\n\n",
+            "## Completeness\n\n",
+            "The design (slurm/r2d2_replay.sbatch): each R2-D2 cell on its twin's stored runs "
+            "of every family under the stored root, each control on its own runs of "
+            f"{' and '.join(_G2_CONTROL_FAMILIES)}, seeds {_G2_SEEDS[0]}-{_G2_SEEDS[-1]}, t = "
+            f"{', '.join(str(t) for t in REPLAY_T)}. A control's fits count at its stored "
+            "budget only.\n\n",
+            _md_table(["cell", "design fits", "replayed", "missing",
+                       f"cost pair at t = {_G2_COST_T}", "first missing"], completeness),
+        ]
+    parts += [
+        f"\n## R2-D2 cells{info}\n\n",
         f"FAIL at an exclusion rate of {_G2_FAIL_EXCLUSION} or more or a median n_eff_min of "
-        f"{_G2_FAIL_N_EFF:g} or less; PASS at {_G2_PASS_EXCLUSION} or less and {_G2_PASS_N_EFF:g} "
-        "or more (every R2-D2 cell). The twin's columns are its stored fits of the same "
-        "(family, seed, t).\n\n",
-        _md_table(["cell", "twin", "fits", "exclusion rate", "median n_eff_min",
-                   "twin's exclusion rate", "twin's median n_eff_min", "reading"], cells),
-        "\n## Harness: control refits against their stored fits\n\n",
-        f"Holds at |delta exclusion rate| <= {_G2_HARNESS_EXCLUSION}, median |delta r_hat_max| "
-        f"<= {_G2_HARNESS_R_HAT} and median |delta AP_native| <= {_G2_HARNESS_AP}, over the "
+        f"{_G2_FAIL_N_EFF:g} or less, read first; PASS for every R2-D2 cell at an exclusion rate "
+        f"of E* or less and a median n_eff_min of N* or more (ruling R31b), with "
+        f"E* = max({_G2_PASS_EXCLUSION}, the half-Cauchy lengthscale twins' stored exclusion "
+        f"rates) = {_fmt(e_star)} and N* = min({_G2_PASS_N_EFF:g}, their stored median "
+        f"n_eff_min) = {_fmt(n_star)}, over the stored fits their R2-D2 cells were joined to: "
+        f"{bar_terms}. A cell between the bar and FAIL reads neither. The twin's columns are its "
         "stored fits of the same (family, seed, t).\n\n",
-        _md_table(["cell", "fits", "exclusion rate", "stored exclusion rate", "|delta|",
-                   "median |delta r_hat_max|", "median |delta AP_native|", "holds"], harness),
-        f"\n## Cost at t = {_G2_COST_T}: R2-D2 against its twin's control refits on the same "
-        "device\n\n",
-        f"Medians of fit_wall_s at t = {_G2_COST_T} alone, over the (family, seed) where the "
-        "R2-D2 fit and its twin's control refit ran on one device; holds at a ratio of "
-        f"{_G2_COST_RATIO} or less. By then every replay process has fitted its cell once, so "
-        "the reading holds a fit and its compilation at that n and no one-time start-up (ruling "
-        "R28); `tables/cost.csv` keeps every t.\n\n",
-        _md_table(["cell", "device", "pairs", "median fit_wall_s", "control's median",
-                   "ratio", "holds"], cost),
-        "\n## Per-group attribution\n\n",
+        _md_table(cells_header, cells),
+        f"\n## Harness: control refits against their stored fits{info}\n\n",
+        f"Holds when, over a control cell's refits and the stored fits of the same (family, "
+        f"seed, t), the exclusion rates differ by at most {_G2_HARNESS_EXCLUSION}, the medians "
+        f"of r_hat_max by at most {_G2_HARNESS_R_HAT} and the medians of AP_native by at most "
+        f"{_G2_HARNESS_AP} (ruling R31a: a GPU refit reproduces a fit in distribution only). The "
+        "paired medians of the absolute differences are information, not gated. Refits at a "
+        "budget other than the stored fits' are left out.\n\n",
+        _md_table(harness_header, harness),
+    ]
+    if not probe:
+        parts += [
+            f"\n## Cost at t = {_G2_COST_T}: R2-D2 against its twin's control refits on the "
+            "same device\n\n",
+            f"Medians of fit_wall_s at t = {_G2_COST_T} alone, over the (family, seed) where "
+            "the R2-D2 fit and its twin's control refit ran on one device at one budget; holds "
+            f"at a ratio of {_G2_COST_RATIO} or less. By then every replay process has fitted "
+            "its cell once, so the reading holds a fit and its compilation at that n and no "
+            "one-time start-up (ruling R28); `tables/cost.csv` keeps every t.\n\n",
+            _md_table(["cell", "device", "pairs", "median fit_wall_s", "control's median",
+                       "ratio", "holds"], cost),
+        ]
+    parts += [
+        f"\n## Per-group attribution{info}\n\n",
         f"The share of fits whose group's r_hat_max exceeds {thresholds.r_hat_max} or whose "
         f"n_eff_min is below {thresholds.n_eff_min:g}; n/a where the cell has no site in the "
-        "group. "
-        "If the ell group fails under both prior families, the prior cannot be the lever.\n\n",
+        "group. If the ell group fails under both prior families, the prior cannot be the "
+        "lever.\n\n",
         _md_table(["method", "kind", "fits", "r_hat native", "r_hat ell", "r_hat global",
                    "n_eff native", "n_eff ell", "n_eff global"], attribution),
+        f"\n## Provenance{info}\n\n",
+        "One row per replay directory and session: its creation, then each resume, with the "
+        "commit it ran at and whether its checkout was dirty. "
+        + (f"Not one commit on clean checkouts: {'; '.join(unclean)}.\n\n" if unclean
+           else "One commit, every checkout clean.\n\n"),
+        _md_table(["replay directory", "session", "time", "commit", "dirty"], provenance),
         "\n## Tables\n\n",
         "- `tables/replay_vs_stored.csv`: one row per replayed (cell, family, seed, t) -- the "
         "replayed fit, its source's stored fit (`stored_`), and for an R2-D2 cell its twin's "
@@ -979,7 +1308,35 @@ def _report(joined: list[dict[str, object]], runs: Path, replay: Path) -> str:
         "recall and F1 of p_active > 0.5, against S.\n",
         "- `tables/cost.csv`: fit_wall_s by cell, device and t, every t (the cost criterion "
         f"reads t = {_G2_COST_T}).\n",
-    ])
+    ]
+    return "".join(parts)
+
+
+def _probe_reading(cost: list[list[object]], r2d2_cells: set[str]) -> list[str]:
+    """The probe's report head: the cost criterion alone, as the GPU probe (plan, Task 11) is
+    read -- each R2-D2 cell at t = 199 against its control on one device -- with no verdict."""
+    over = [f"{row[0]} ({_fmt(row[5])} on {row[1]})" for row in cost if row[-1] == "no"]
+    unpaired = sorted(r2d2_cells - {row[0] for row in cost})
+    summary = []
+    if over:
+        summary.append(f"above {_G2_COST_RATIO} times its control for {', '.join(over)} -- "
+                       "ask before the bulk array")
+    if unpaired:
+        summary.append(f"no same-device pair at t = {_G2_COST_T} for {', '.join(unpaired)}, "
+                       "whose cost is unread")
+    if not summary:
+        summary.append(f"every R2-D2 cell at or below {_G2_COST_RATIO} times its control")
+    return [
+        f"## The probe's reading: cost at t = {_G2_COST_T}\n\n",
+        f"**Cost criterion: {'; '.join(summary)}.**\n\n",
+        f"The probe reads G2's cost criterion alone: each R2-D2 cell's median fit_wall_s at "
+        f"t = {_G2_COST_T} against its twin's control refit on the same device, holding at a "
+        f"ratio of {_G2_COST_RATIO} or less. It gives no G2 verdict, since two fits per cell say "
+        "nothing about the gate's other criteria; the tables after this one are information "
+        "only.\n\n",
+        _md_table(["cell", "device", "pairs", "median fit_wall_s", "control's median",
+                   "ratio", "holds"], cost),
+    ]
 
 
 # --- the command line ---
@@ -1059,6 +1416,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--out", required=True, type=Path,
         help="the report directory, e.g. sagp_analysis/r2d2-replay/<YYYY-MM-DD-HHMM>/",
     )
+    compare_command.add_argument(
+        "--probe", action="store_true",
+        help="read the GPU probe: the cost criterion alone, with no G2 verdict",
+    )
     return parser
 
 
@@ -1075,7 +1436,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if exc.code is None else int(exc.code)
 
     if args.command == "compare":
-        print(compare(args.runs, args.replay, args.out))
+        print(compare(args.runs, args.replay, args.out, probe=args.probe))
         return 0
     replay_dir = run_replay(
         args.runs, args.out, family=args.family, seed=args.seed, method=args.cell,

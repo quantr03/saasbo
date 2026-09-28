@@ -2,12 +2,16 @@
 
 What gate G2 needs the replay to be, one contract per test. On a CPU, replaying a cell on its own
 run is the loop's own fit again, bit for bit. A stored run that could hand the replay other data
-than its loop fitted is refused -- four ways -- before anything is fitted or written. An R2-D2 cell
-replayed on its twin's run writes the loop's own vocabulary: the row, the coordinates and the
-draws. A second call skips what the first finished and redoes, without duplicating, what a kill
-interrupted; a replay directory holds one budget. And `compare` joins every replayed fit to the
-stored fit of the same (family, seed, t) and, for an R2-D2 fit, to its twin's control refit. Runs
-are the loop tests' D = 5 problem at a 16/16/4 chain, so a fit costs seconds.
+than its loop fitted is refused before anything is fitted or written: a checkpoint or row it
+lacks, a manifest that does not reproduce its hash or names another run, observations or points
+the rows do not carry. An R2-D2 cell replayed on its twin's run writes the loop's own vocabulary:
+the row, the coordinates and the draws. A second call skips what the first finished and redoes,
+without duplicating, what a kill interrupted; a replay directory holds one configuration, one
+source run and one budget, and records every session's commit and checkout. And `compare` joins
+every replayed fit to the stored fit of the same (family, seed, t) -- refusing a replay not made
+on that run -- and, for an R2-D2 fit, to its twin's control refit; it reads G2 only on a complete
+tree at one clean commit, and the GPU probe for its cost alone. Runs are the loop tests' D = 5
+problem at a 16/16/4 chain, so a fit costs seconds; G2's trees are written directly.
 """
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ import csv
 import dataclasses
 import json
 import math
+import re
 import shutil
 from pathlib import Path
 
@@ -29,7 +34,7 @@ from experiments.run_bo import run
 from experiments.runlog import config_hash
 from sagp.bo import iteration_rngs
 from sagp.diagnostics import DiagThresholds
-from sagp.gp import CELLS, NUTSConfig, R2D2_K
+from sagp.gp import CELLS, NUTSConfig, R2D2_K, standardize
 from synthobj.families import make_family
 
 
@@ -54,22 +59,6 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
 
 
 # --- the replay ---
-
-
-def test_replaying_a_run_reproduces_its_stored_fit_bit_for_bit(tmp_path):
-    # The harness check that a GPU cannot give: on CPU, refitting iteration t's data with
-    # iteration t's seed and the run's budget is the same computation as the loop's own fit.
-    source = run(_objective(), "product/lengthscale", seed=1, T=8, n_init=5,
-                 out_dir=tmp_path / "runs", nuts=NUTSConfig(16, 16, 4), **_LOOP_KW)
-    replay_dir = run_replay(tmp_path / "runs", tmp_path / "replay", family="aligned3", seed=1,
-                            method="product/lengthscale", ts=(6,))
-    with np.load(source / "samples" / "t006.npz") as a, np.load(replay_dir / "samples" / "t006.npz") as b:
-        for site in CELLS[("product", "lengthscale")].sites:
-            assert np.array_equal(a[site], b[site])
-    stored = next(r for r in _read_rows(source / "iterations.csv") if r["t"] == "6")
-    replayed = _read_rows(replay_dir / "replay.csv")[0]
-    for field in ("status", "r_hat_max", "n_eff_min", "divergences", "y_mean", "y_std"):
-        assert replayed[field] == stored[field]
 
 
 @pytest.fixture(scope="module")
@@ -119,6 +108,34 @@ def _nudge_y(run_dir: Path) -> None:
     _rewrite_checkpoint(run_dir, y=y)
 
 
+def _edit_the_manifest(run_dir: Path) -> None:
+    # A setting edited after the run: the manifest no longer hashes to the config_hash it records.
+    path = run_dir / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["sobol_every"] += 1
+    path.write_text(json.dumps(manifest))
+
+
+def _swap_y_5_and_6(run_dir: Path) -> None:
+    # Two observations of the rows t' = 5 and 6 exchanged: y[:5] and y[:7] keep their mean and std
+    # to the bit (checked here), so only the rows' own y can tell the checkpoint is not theirs.
+    with np.load(run_dir / "checkpoint.npz") as data:
+        y = data["y"].copy()
+    swapped = y.copy()
+    swapped[[5, 6]] = y[[6, 5]]
+    for t in (5, 7):
+        assert standardize(swapped[:t])[1:] == standardize(y[:t])[1:], "the swap moved a moment"
+    _rewrite_checkpoint(run_dir, y=swapped)
+
+
+def _swap_x_5_and_6(run_dir: Path) -> None:
+    # Two points of the rows t' = 5 and 6 exchanged: y is untouched, so only the rows' x_* can tell.
+    with np.load(run_dir / "checkpoint.npz") as data:
+        X = data["X"].copy()
+    X[[5, 6]] = X[[6, 5]]
+    _rewrite_checkpoint(run_dir, X=X)
+
+
 @pytest.mark.parametrize(
     "tamper, t, match",
     [
@@ -126,14 +143,21 @@ def _nudge_y(run_dir: Path) -> None:
         (_checkpoint_under_another_hash, 6, "config_hash"),
         (_drop_row_6, 6, "no complete row"),
         (_nudge_y, 6, "y_mean"),
+        (_edit_the_manifest, 6, "does not reproduce the config_hash"),
+        (_swap_y_5_and_6, 7, r"row t=5 records"),
+        (_swap_x_5_and_6, 7, r"row t=5 records"),
     ],
-    ids=["t_beyond_t_done", "checkpoint_under_another_hash", "missing_row", "tampered_y"],
+    ids=["t_beyond_t_done", "checkpoint_under_another_hash", "missing_row", "tampered_y",
+         "manifest_edited", "y_swapped_keeping_its_moments", "x_swapped"],
 )
 def test_a_replay_refuses_data_its_source_loop_did_not_fit(runs, tmp_path, tamper, t, match):
     """Review Focus 1: refused -- before any t is fitted -- never fitted on other data.
 
     t = 5 is valid in every case and is asked for first, so a refusal that came only once the
-    bad t was reached would leave t = 5's fit behind; `out` must not even exist.
+    bad t was reached would leave t = 5's fit behind; `out` must not even exist. The last three
+    cases: a manifest that does not reproduce its own hash, and a checkpoint whose rows t' in
+    [n_init, t) no longer hold the y[t'] and X[t'] that `iterations.csv` recorded there, one of
+    them with y[:t]'s mean and std unchanged, which the y_mean/y_std check alone would pass.
     """
     copy = tmp_path / "runs"
     shutil.copytree(runs, copy)
@@ -143,6 +167,19 @@ def test_a_replay_refuses_data_its_source_loop_did_not_fit(runs, tmp_path, tampe
     with pytest.raises(ValueError, match=match):
         run_replay(copy, out, family="aligned3", seed=1, method="product/lengthscale_r2d2",
                    ts=(5, t))
+    assert not out.exists()
+
+
+def test_a_replay_refuses_a_source_whose_manifest_names_another_run(runs, tmp_path):
+    """The source directory is found by its path, so the manifest must name the run the path
+    does: a run copied under another seed's path would otherwise hand its data to that seed."""
+    copy = tmp_path / "runs"
+    shutil.copytree(runs, copy)
+    shutil.copytree(_source_dir(copy), _source_dir(copy).with_name("seed02"))
+    out = tmp_path / "replay"
+    with pytest.raises(ValueError, match="not the run its path does"):
+        run_replay(copy, out, family="aligned3", seed=2, method="product/lengthscale_r2d2",
+                   ts=(6,))
     assert not out.exists()
 
 
@@ -242,6 +279,22 @@ def replayed(runs, tmp_path_factory) -> tuple[Path, Path]:
     return out, replay_dir
 
 
+def test_replaying_a_run_reproduces_its_stored_fit_bit_for_bit(runs, replayed):
+    # The harness check that a GPU cannot give: on CPU, refitting iteration t's data with
+    # iteration t's seed and the run's budget is the same computation as the loop's own fit.
+    # The run and its t = 6 replay are the module's `runs` and `replayed` fixtures, which other
+    # tests build anyway, so this exact check costs PART_A nothing (ruling R29, revised).
+    source = _source_dir(runs)
+    replay_dir = replayed[1]
+    with np.load(source / "samples" / "t006.npz") as a, np.load(replay_dir / "samples" / "t006.npz") as b:
+        for site in CELLS[("product", "lengthscale")].sites:
+            assert np.array_equal(a[site], b[site])
+    stored = next(r for r in _read_rows(source / "iterations.csv") if r["t"] == "6")
+    replayed = _read_rows(replay_dir / "replay.csv")[0]
+    for field in ("status", "r_hat_max", "n_eff_min", "divergences", "y_mean", "y_std"):
+        assert replayed[field] == stored[field]
+
+
 def _snapshot(directory: Path) -> dict[str, bytes]:
     return {
         str(path.relative_to(directory)): path.read_bytes()
@@ -278,6 +331,73 @@ def test_a_budget_other_than_the_files_is_refused(runs, replayed, monkeypatch):
     assert _snapshot(replay_dir) == before
 
 
+def _replace_the_replays_config_hash(replay_dir: Path) -> None:
+    _edit_json(replay_dir / "manifest.json", lambda manifest: manifest.update(config_hash="0" * 64))
+
+
+def _replay_rows_on_another_source(replay_dir: Path) -> None:
+    path = replay_dir / "replay.csv"
+    rows = _read_rows(path)
+    for row in rows:
+        row["source_method"] = "additive/lengthscale"
+    _write_csv(path, list(rows[0]), rows)
+
+
+def _no_rows(replay_dir: Path) -> None:
+    # What a directory holds when its first t was never finished: a manifest and a log.
+    for name in ("replay.csv", "coords.csv"):
+        (replay_dir / name).unlink()
+    shutil.rmtree(replay_dir / "samples")
+
+
+def _no_source_block(replay_dir: Path) -> None:
+    # A kill between the manifest's two writes: RunLogger's, then the one adding `source`.
+    _no_rows(replay_dir)
+    _edit_json(replay_dir / "manifest.json", lambda manifest: manifest.pop("source"))
+
+
+def _another_source(replay_dir: Path) -> None:
+    # A directory begun on another run (another source method, or the same one under other
+    # settings): its manifest names that run's config_hash.
+    _no_rows(replay_dir)
+    _edit_json(replay_dir / "manifest.json",
+               lambda manifest: manifest["source"].update(config_hash="0" * 64))
+
+
+def _edit_json(path: Path, edit) -> None:
+    data = json.loads(path.read_text())
+    edit(data)
+    path.write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize(
+    "damage, match",
+    [
+        (_replace_the_replays_config_hash, "different configuration"),
+        (_replay_rows_on_another_source, "replayed on additive/lengthscale's run"),
+        (_no_source_block, "names no source run"),
+        (_another_source, "was replayed on the run"),
+    ],
+    ids=["replay_config_hash", "rows_of_another_source", "no_source_block", "another_source"],
+)
+def test_a_replay_directory_is_continued_only_under_its_own_terms(
+    runs, replayed, tmp_path, monkeypatch, damage, match
+):
+    """A second call continues a replay directory only on the configuration, the source run and
+    the rows it was begun with; otherwise it is refused before anything is fitted or written. The
+    source run is named by its config_hash, which names the run wherever its root is mounted."""
+    out = tmp_path / "replay"
+    shutil.copytree(replayed[0], out)
+    replay_dir = out / replayed[1].relative_to(replayed[0])
+    damage(replay_dir)
+    before = _snapshot(replay_dir)
+    monkeypatch.setattr(replay_module, "fit", _must_not_fit)
+    with pytest.raises(ValueError, match=match):
+        run_replay(runs, out, family="aligned3", seed=1, method="product/lengthscale",
+                   ts=(6, 7))
+    assert _snapshot(replay_dir) == before
+
+
 def test_a_t_the_kill_interrupted_is_redone_without_duplicates(runs, replayed, tmp_path):
     """What a kill during t = 7 leaves -- part of its coordinates, a torn row, a torn npz -- is
     rolled back and t = 7 redone, while t = 6 is kept as it was (the loop's `truncate_to`)."""
@@ -299,6 +419,23 @@ def test_a_t_the_kill_interrupted_is_redone_without_duplicates(runs, replayed, t
     assert (replay_dir / "samples" / "t006.npz").read_bytes() == t6_npz
     with np.load(replay_dir / "samples" / "t007.npz") as data:
         assert int(data["schema_version"]) == 2
+
+
+def test_a_resumed_replay_records_whether_its_checkout_was_dirty(
+    runs, replayed, tmp_path, monkeypatch
+):
+    """G2 is read only off replays whose every session ran at one commit on a clean checkout
+    (`compare`), so a replay's resume entry records `dirty` beside the commit `note_resume`
+    records, as the manifest's `git` block does for the directory's creation."""
+    out = tmp_path / "replay"
+    shutil.copytree(replayed[0], out)
+    replay_dir = out / replayed[1].relative_to(replayed[0])
+    monkeypatch.setattr(replay_module, "fit", _fit_reached)
+    with pytest.raises(_FitReached):
+        run_replay(runs, out, family="aligned3", seed=1, method="product/lengthscale", ts=(6, 7))
+    (entry,) = json.loads((replay_dir / "manifest.json").read_text())["resumed"]
+    assert set(entry) == {"time", "commit", "versions_changed", "T", "env", "dirty"}
+    assert isinstance(entry["dirty"], bool)
 
 
 def test_a_dry_run_prints_the_datasets_seeds_and_budget_and_writes_nothing(runs, tmp_path, capsys):
@@ -349,6 +486,20 @@ def test_a_dry_run_builds_no_table(runs, tmp_path, monkeypatch):
     run_replay(runs, tmp_path / "dry", family="aligned3", seed=1,
                method="product/lengthscale_r2d2", ts=(6,), dry_run=True)
     assert float(R2D2_K) not in sagp.r2d2._TABLES
+
+
+def test_the_warm_up_logs_the_r2d2_maps_values_at_full_precision(replayed):
+    """On Triton the R2-D2 table is built by GPU arithmetic, which its accuracy certificate (CPU
+    only) does not cover. The warm-up line therefore logs the map at five z, by repr, so the GPU
+    log can be compared with a CPU evaluation of the same map: here, that evaluation itself."""
+    log = (replayed[1] / "log.txt").read_text().splitlines()
+    (line,) = [entry for entry in log if "R2-D2 table" in entry]
+    logged = re.findall(r"y\((-?\d+)\) = (\S+?)(?:,|$)", line)
+    assert [int(z) for z, _ in logged] == [-30, -5, 0, 5, 30]
+    with jax.default_device(jax.devices("cpu")[0]):
+        on_cpu = np.asarray(sagp.r2d2.log_gamma_icdf(np.array([-30.0, -5.0, 0.0, 5.0, 30.0]),
+                                                     R2D2_K))
+    assert [float(value) for _, value in logged] == on_cpu.tolist()
 
 
 # A source run under an explicit alpha: twice the half-Cauchy lengthscale prior's global scale.
@@ -416,6 +567,9 @@ _DIAG_FIELDS = (
 _S = [0, 2]
 _REPLAY_SCORES = [0.9, 0.1, 0.8, 0.2, 0.3]
 _STORED_SCORES = [0.9, 0.95, 0.8, 0.1, 0.1]
+# Every fake fit's budget (warmup/samples/thinning/depth), the stored runs' as the replays'.
+_BUDGET = "16/16/4/6"
+_COMMIT = "c0ffee"
 
 
 def _write_csv(path: Path, fields: list[str], rows: list[dict[str, object]]) -> None:
@@ -440,44 +594,74 @@ def _coords(ts: tuple[int, ...], scores: list[float], sobol: bool) -> list[dict[
     ]
 
 
-def _fake_stored_run(root: Path, method: str, seed: int, ts: tuple[int, ...]) -> None:
-    run_dir = root / "aligned3" / method.replace("/", "-") / f"seed{seed:02d}"
-    rows = [
-        {"t": t, "method": method, "status": "excluded", "reason": "r_hat_max 1.5 > 1.1",
-         **_diagnostics(1.0 + seed / 10 + t / 1000), "fit_wall_s": 10.0 + t,
-         "y_mean": 0.0, "y_std": 1.0}
-        for t in ts
-    ]
-    _write_csv(run_dir / "iterations.csv", list(rows[0]), rows)
+def _stored_hash(family: str, method: str, seed: int) -> str:
+    """A fake stored run's config_hash: any string that names the run will do."""
+    return f"stored {family} {method} {seed}"
+
+
+def _write_stored_run(root: Path, family: str, method: str, seed: int,
+                      rows: dict[int, dict[str, object]], scores: list[float]) -> None:
+    """A stored run as `compare` reads it: rows at the given t, coordinates, manifest and log."""
+    run_dir = root / family / method.replace("/", "-") / f"seed{seed:02d}"
+    rows_out = [{"t": t, "method": method, **row, "y_mean": 0.0, "y_std": 1.0}
+                for t, row in rows.items()]
+    _write_csv(run_dir / "iterations.csv", list(rows_out[0]), rows_out)
     _write_csv(run_dir / "coords.csv", ["t", "i", "native_median", "p_active", "sobol_hat"],
-               _coords(ts, _STORED_SCORES, sobol=False))
+               _coords(tuple(rows), scores, sobol=False))
     (run_dir / "manifest.json").write_text(json.dumps({
-        "family": "aligned3", "seed": seed, "method": method,
+        "family": family, "seed": seed, "method": method,
+        "config_hash": _stored_hash(family, method, seed),
         "nuts": {"num_warmup": 16, "num_samples": 16, "thinning": 4, "max_tree_depth": 6,
                  "num_chains": 1},
         "objective": {"S": _S, "D": 5}, "env": {"jax_device": "stored-gpu"}, "resumed": [],
     }))
     (run_dir / "log.txt").write_text(
-        "".join(f"t={t} method={method} status=excluded\n" for t in ts)
+        "".join(f"t={t} method={method} status={row['status']}\n" for t, row in rows.items())
     )
+
+
+def _write_replay(root: Path, family: str, method: str, source: str, seed: int,
+                  rows: dict[int, dict[str, object]], scores: list[float], *,
+                  commit: str = _COMMIT, dirty: bool | None = False,
+                  resumed: list[dict[str, object]] | None = None) -> Path:
+    """A replay directory as `run_replay` leaves it: `replay.csv`, coordinates and a manifest
+    naming its source run by that run's config_hash, and the session's commit and checkout."""
+    replay_dir = root / family / method.replace("/", "-") / f"seed{seed:02d}"
+    rows_out = [
+        {"t": t, "n": t, "method": method, "source_method": source, "family": family,
+         "seed": seed, "nuts_seed": 7, "budget": _BUDGET, **row, "readout_wall_s": 1.0,
+         "y_mean": 0.0, "y_std": 1.0, "r2d2_r2": 0.4, "first_order_r2": 0.6}
+        for t, row in rows.items()
+    ]
+    _write_csv(replay_dir / "replay.csv", list(replay_module._REPLAY_FIELDS), rows_out)
+    _write_csv(replay_dir / "coords.csv", ["t", "i", "native_median", "p_active", "sobol_hat"],
+               _coords(tuple(rows), scores, sobol=True))
+    (replay_dir / "manifest.json").write_text(json.dumps({
+        "config_hash": f"replay {family} {method} {seed}", "created": "2026-10-05T12:00:00",
+        "git": {"commit": commit, "dirty": dirty}, "resumed": resumed or [],
+        "source": {"config_hash": _stored_hash(family, source, seed), "path": "runs",
+                   "commit": "a51a4b9", "devices": ["stored-gpu"]},
+    }))
+    return replay_dir
+
+
+def _fake_stored_run(root: Path, method: str, seed: int, ts: tuple[int, ...]) -> None:
+    _write_stored_run(root, "aligned3", method, seed, {
+        t: {"status": "excluded", "reason": "r_hat_max 1.5 > 1.1",
+            **_diagnostics(1.0 + seed / 10 + t / 1000), "fit_wall_s": 10.0 + t}
+        for t in ts
+    }, _STORED_SCORES)
 
 
 def _fake_replay(root: Path, method: str, source: str, seed: int, ts: tuple[int, ...],
                  marker: float, *, status: str = "ok", scores: list[float] = _REPLAY_SCORES,
                  fit_wall_s: dict[int, float] | None = None) -> None:
-    replay_dir = root / "aligned3" / method.replace("/", "-") / f"seed{seed:02d}"
-    rows = [
-        {"t": t, "n": t, "method": method, "source_method": source, "family": "aligned3",
-         "seed": seed, "nuts_seed": 7, "budget": "16/16/4/6", "status": status, "reason": "",
-         **_diagnostics(marker + seed / 10 + t / 1000),
-         "fit_wall_s": marker + t if fit_wall_s is None else fit_wall_s[t],
-         "readout_wall_s": 1.0, "y_mean": 0.0, "y_std": 1.0, "r2d2_r2": 0.4,
-         "first_order_r2": 0.6, "device": "replay-gpu"}
+    _write_replay(root, "aligned3", method, source, seed, {
+        t: {"status": status, "reason": "", **_diagnostics(marker + seed / 10 + t / 1000),
+            "fit_wall_s": marker + t if fit_wall_s is None else fit_wall_s[t],
+            "device": "replay-gpu"}
         for t in ts
-    ]
-    _write_csv(replay_dir / "replay.csv", list(replay_module._REPLAY_FIELDS), rows)
-    _write_csv(replay_dir / "coords.csv", ["t", "i", "native_median", "p_active", "sobol_hat"],
-               _coords(ts, scores, sobol=True))
+    }, scores)
 
 
 def test_compare_joins_one_row_per_cell_family_seed_and_t(tmp_path):
@@ -518,6 +702,8 @@ def test_compare_joins_one_row_per_cell_family_seed_and_t(tmp_path):
                 assert r["control_device"] == "replay-gpu"
             else:
                 assert math.isnan(float(r["control_r_hat_max"])) and r["control_status"] == ""
+        # The budgets the harness and the cost pairs are formed at: the stored fit's and the replay's.
+        assert r["budget"] == r["stored_budget"] == _BUDGET
 
     identification = _read_rows(out / "tables" / "identification.csv")
     assert len(identification) == 6 + 4  # six replayed fits, four stored ones
@@ -533,20 +719,226 @@ def test_compare_joins_one_row_per_cell_family_seed_and_t(tmp_path):
     assert "G2" in report and "4 of 960" in report and "2 of 240" in report
 
 
+@pytest.mark.parametrize("damage", ["another_source", "no_manifest"])
+def test_compare_refuses_a_replay_not_tied_to_the_stored_run_it_joins(tmp_path, damage):
+    """A replay directory names its source run by config_hash; joined to a stored run under
+    `--runs` with another, its fits would be compared with a fit of other data."""
+    runs, replay = tmp_path / "runs", tmp_path / "replay"
+    _fake_stored_run(runs, "additive/amplitude", 0, (5, 6))
+    _fake_replay(replay, "additive/amplitude_r2d2", "additive/amplitude", 0, (5, 6), 2.0)
+    manifest = replay / "aligned3" / "additive-amplitude_r2d2" / "seed00" / "manifest.json"
+    if damage == "another_source":
+        _edit_json(manifest, lambda data: data["source"].update(config_hash="another run"))
+        match = "not refits of that run's data"
+    else:
+        manifest.unlink()
+        match = "no manifest.json"
+    with pytest.raises(ValueError, match=match):
+        compare(runs, replay, tmp_path / "report")
+    assert not (tmp_path / "report").exists()
+
+
+# --- G2's verdict on a whole tree ---
+
+# The smallest complete tree G2 reads: the controls' two families, which then are the R2-D2 cells'
+# too (their twins' stored runs are in those two only), ten seeds, three t -- 60 fits per cell.
+_G2_FAMILIES = ("aligned10", "decoupled")
+_G2_FITS = [(family, seed, t) for family in _G2_FAMILIES for seed in range(10) for t in REPLAY_T]
+# The stored twins at the replay's t, as the stored runs have them (final review, P2): E* = 0.7
+# and N* = 14 come from the additive lengthscale twin.
+_STORED_TWINS = {
+    "additive/amplitude": {"excluded": 60, "n_eff_min": 5.8, "r_hat_max": 1.5},
+    "product/amplitude": {"excluded": 60, "n_eff_min": 6.2, "r_hat_max": 1.4},
+    "additive/lengthscale": {"excluded": 42, "n_eff_min": 14.0, "r_hat_max": 1.2},
+    "product/lengthscale": {"excluded": 35, "n_eff_min": 22.7, "r_hat_max": 1.1},
+}
+# Every R2-D2 cell at 0.5 and 20, inside the bar; t = 199 at 11 s against its control's 10 s.
+_R2D2_FITS = {"excluded": 30, "n_eff_min": 20.0, "r_hat_max": 1.05,
+              "fit_wall_s": {50: 30.0, 100: 30.0, 199: 11.0}}
+_CONTROL_WALL_S = {50: 10.0, 100: 10.0, 199: 10.0}
+
+
+def _g2_fit(spec: dict[str, object], index: int, t: int) -> dict[str, object]:
+    """The `index`-th fit of a method in `_G2_FITS` order, at t: the first `excluded` fits are
+    excluded; every r_hat_max and n_eff_min is the spec's, so its medians are exactly those."""
+    r_hat, n_eff = spec["r_hat_max"], spec["n_eff_min"]
+    wall = spec.get("fit_wall_s", _CONTROL_WALL_S)
+    return {
+        "status": "excluded" if index < spec["excluded"] else "ok", "reason": "",
+        "r_hat_max": r_hat, "r_hat_median": 1.0, "frac_r_hat_below_1_05": 0.5, "n_eff_min": n_eff,
+        "divergences": 0, "num_steps_mean": 63.0,
+        "r_hat_max_native": r_hat, "n_eff_min_native": n_eff, "r_hat_max_ell": r_hat,
+        "n_eff_min_ell": n_eff, "r_hat_max_global": r_hat, "n_eff_min_global": n_eff,
+        "fit_wall_s": wall[t] if isinstance(wall, dict) else wall,
+    }
+
+
+def _g2_tree(root: Path, *, stored=None, fits=None, drop=()) -> tuple[Path, Path]:
+    """A complete G2 tree under `root`: (the stored root, the replay root).
+
+    The four half-Cauchy twins stored in `_G2_FAMILIES`, seeds 0-9; each R2-D2 cell replayed on
+    its twin's runs and each twin on its own (the control, reproducing its stored fits exactly),
+    at every t of `REPLAY_T`, one device, one budget, one clean commit. `stored[twin]` and
+    `fits[method]` update a method's spec (`excluded` of its 60 fits, `n_eff_min`, `r_hat_max`,
+    `fit_wall_s`, and for a replay `device`, `budget`, `commit`, `dirty`, `resumed`); `drop`
+    lists replay directories, (method, family, seed), left out.
+    """
+    runs, replay = root / "runs", root / "replay"
+    stored_specs = {twin: {**spec, **(stored or {}).get(twin, {})}
+                    for twin, spec in _STORED_TWINS.items()}
+    for twin, spec in stored_specs.items():
+        for family in _G2_FAMILIES:
+            for seed in range(10):
+                _write_stored_run(runs, family, twin, seed, {
+                    t: _g2_fit(spec, _G2_FITS.index((family, seed, t)), t) for t in REPLAY_T
+                }, _STORED_SCORES)
+    methods = [(cell, twin, {**_R2D2_FITS}) for cell, twin in TWINS.items()]
+    methods += [(twin, twin, {**spec, "fit_wall_s": _CONTROL_WALL_S})
+                for twin, spec in stored_specs.items()]
+    for method, source, spec in methods:
+        spec |= (fits or {}).get(method, {})
+        for family in _G2_FAMILIES:
+            for seed in range(10):
+                if (method, family, seed) in drop:
+                    continue
+                rows = {
+                    t: _g2_fit(spec, _G2_FITS.index((family, seed, t)), t)
+                    | {"device": spec.get("device", "replay-gpu")}
+                    for t in REPLAY_T
+                }
+                replay_dir = _write_replay(
+                    replay, family, method, source, seed, rows, _STORED_SCORES,
+                    commit=spec.get("commit", _COMMIT), dirty=spec.get("dirty", False),
+                    resumed=spec.get("resumed"),
+                )
+                if "budget" in spec:  # a refit at another budget than the stored fits'
+                    path = replay_dir / "replay.csv"
+                    replayed_rows = _read_rows(path)
+                    for row in replayed_rows:
+                        row["budget"] = spec["budget"]
+                    _write_csv(path, list(replayed_rows[0]), replayed_rows)
+    return runs, replay
+
+
+def _verdict_line(report: str) -> str:
+    return next(line for line in report.splitlines() if line.startswith("**G2: "))
+
+
+_ALL_SEEDS_OF = [(family, seed) for family in _G2_FAMILIES for seed in range(10)]
+
+# Each verdict branch, and each INCONCLUSIVE cause, on the complete tree changed in one place:
+# (stored, fits, drop, the verdict's first word, a fragment it must hold). Several sit exactly on
+# a threshold: 54 of 60 fits is an exclusion rate of 0.90, 42 of 60 is E*, 36 of 60 the bar's
+# floor of 0.60, 9 of 60 against 0 a |delta| of 0.15, and 15 s against 10 s a ratio of 1.5.
+_G2_CASES = {
+    "pass": ({}, {}, (), "PASS", "PASS: proceed to stage 3"),
+    "pass_exactly_at_e_star_and_n_star": (
+        {}, {"additive/lengthscale_r2d2": {"excluded": 42, "n_eff_min": 14.0}}, (), "PASS", ""),
+    "pass_bar_floor_when_the_twins_run_below_it": (
+        {"additive/lengthscale": {"excluded": 30, "n_eff_min": 20.0},
+         "product/lengthscale": {"excluded": 24, "n_eff_min": 25.0}},
+        {"additive/lengthscale_r2d2": {"excluded": 36, "n_eff_min": 16.0}}, (), "PASS", ""),
+    "above_the_bar_floor": (
+        {"additive/lengthscale": {"excluded": 30, "n_eff_min": 20.0},
+         "product/lengthscale": {"excluded": 24, "n_eff_min": 25.0}},
+        {"additive/lengthscale_r2d2": {"excluded": 37}}, (), "INCONCLUSIVE",
+        "additive/lengthscale_r2d2 between the PASS bar and FAIL"),
+    "fail_at_exclusion_0_90": (
+        {}, {"product/amplitude_r2d2": {"excluded": 54}}, (), "FAIL", "amplitude signature"),
+    "fail_at_n_eff_10": (
+        {}, {"additive/amplitude_r2d2": {"n_eff_min": 10.0}}, (), "FAIL", "amplitude signature"),
+    "between_bar_and_fail": (
+        {}, {"additive/amplitude_r2d2": {"excluded": 48, "n_eff_min": 12.0}}, (),
+        "INCONCLUSIVE", "additive/amplitude_r2d2 between the PASS bar and FAIL"),
+    "stop_harness": (
+        {}, {"additive/amplitude": {"excluded": 50}}, (), "STOP", "harness -- the control"),
+    "harness_holds_at_0_15": (
+        {"product/lengthscale": {"excluded": 0}}, {"product/lengthscale": {"excluded": 9}}, (),
+        "PASS", ""),
+    "stop_harness_past_0_15": (
+        {"product/lengthscale": {"excluded": 0}}, {"product/lengthscale": {"excluded": 10}}, (),
+        "STOP", "harness -- the control"),
+    "stop_cost": (
+        {}, {"product/lengthscale_r2d2": {"fit_wall_s": {50: 30.0, 100: 30.0, 199: 16.0}}}, (),
+        "STOP", "cost -- at t = 199"),
+    "cost_holds_at_1_5": (
+        {}, {"product/lengthscale_r2d2": {"fit_wall_s": {50: 30.0, 100: 30.0, 199: 15.0}}}, (),
+        "PASS", ""),
+    "missing_r2d2_fits": (
+        {}, {}, (("product/amplitude_r2d2", "decoupled", 3),), "INCONCLUSIVE",
+        "product/amplitude_r2d2 lacks 3 of its 60 fits (first: decoupled/seed03/t=50, "
+        "decoupled/seed03/t=100, decoupled/seed03/t=199)"),
+    "a_missing_r2d2_cell_is_no_fail": (
+        {}, {"product/amplitude_r2d2": {"excluded": 60}},
+        tuple(("additive/amplitude_r2d2", family, seed) for family, seed in _ALL_SEEDS_OF),
+        "INCONCLUSIVE", "additive/amplitude_r2d2 lacks 60 of its 60 fits"),
+    "missing_control_cell": (
+        {}, {}, tuple(("additive/lengthscale", family, seed) for family, seed in _ALL_SEEDS_OF),
+        "INCONCLUSIVE",
+        "additive/lengthscale (control) lacks 60 of its 60 fits at the stored budget"),
+    "no_same_device_cost_pair": (
+        {}, {"product/amplitude": {"device": "other-gpu"}}, (), "INCONCLUSIVE",
+        "product/amplitude_r2d2 has no cost pair at t = 199 with its control on one device"),
+    "control_at_another_budget": (
+        {}, {"additive/lengthscale": {"budget": "16/16/4/8"}}, (), "INCONCLUSIVE",
+        "additive/lengthscale (control) lacks 60 of its 60 fits at the stored budget"),
+    "two_commits": (
+        {}, {"product/amplitude_r2d2": {"commit": "deadbeef"}}, (), "INCONCLUSIVE",
+        "the replays ran at 2 commits (c0ffee, deadbeef)"),
+    "a_resume_at_another_commit": (
+        {}, {"additive/amplitude": {"resumed": [{"time": "t", "commit": "deadbeef",
+                                                  "dirty": False}]}}, (), "INCONCLUSIVE",
+        "the replays ran at 2 commits (c0ffee, deadbeef)"),
+    "a_dirty_session": (
+        {}, {"additive/amplitude": {"dirty": True}}, (), "INCONCLUSIVE",
+        "20 session(s) ran on a dirty checkout"),
+    "a_resume_with_no_dirty_state": (
+        {}, {"product/lengthscale": {"resumed": [{"time": "t", "commit": _COMMIT}]}}, (),
+        "INCONCLUSIVE", "20 session(s) recorded no dirty state"),
+}
+
+
+@pytest.mark.parametrize("stored, fits, drop, kind, fragment", list(_G2_CASES.values()),
+                         ids=list(_G2_CASES))
+def test_g2_reads_pass_or_fail_only_on_a_complete_tree_at_one_clean_commit(
+    tmp_path, stored, fits, drop, kind, fragment
+):
+    """G2's verdict (plan, Task 11; rulings R28, R31a, R31b) on the smallest complete tree,
+    changed in one place per case: a stop first (harness, then cost), then INCONCLUSIVE for
+    anything missing -- an R2-D2 cell's fits, a control cell, a same-device cost pair, a control
+    at its stored budget -- or for sessions at two commits or on a dirty or unrecorded checkout;
+    only then FAIL, PASS, or INCONCLUSIVE between the two. The tables print whatever there is."""
+    runs, replay = _g2_tree(tmp_path, stored=stored, fits=fits, drop=drop)
+    compare(runs, replay, tmp_path / "report")
+    report = (tmp_path / "report" / "REPORT.md").read_text()
+    verdict = _verdict_line(report)
+    assert verdict.startswith(f"**G2: {kind}") and fragment in verdict
+    assert "## Completeness" in report and "## Provenance" in report
+
+
+def test_g2_prints_its_pass_bar_with_the_numbers_it_comes_from(tmp_path):
+    """E* and N* (ruling R31b) are computed from the stored fits the lengthscale R2-D2 cells
+    are joined to, and printed with that derivation."""
+    runs, replay = _g2_tree(tmp_path)
+    compare(runs, replay, tmp_path / "report")
+    report = (tmp_path / "report" / "REPORT.md").read_text()
+    assert "E* = max(0.6, the half-Cauchy lengthscale twins' stored exclusion rates) = 0.7" in report
+    assert "N* = min(16, their stored median n_eff_min) = 14" in report
+    assert ("additive/lengthscale: exclusion rate 0.7, median n_eff_min 14, over 60 fits; "
+            "product/lengthscale: exclusion rate 0.583, median n_eff_min 22.7, over 60 fits"
+            in report)
+
+
 def test_the_cost_criterion_reads_t_199_alone(tmp_path):
     """Ruling R28: G2's cost criterion pairs each R2-D2 fit with its twin's control refit at
     t = 199 only, when every replay process has already fitted its cell once. Here the t = 50 and
     t = 100 pairs cost 3 times the control (a process's one-time start-up, in the replay) and the
     t = 199 pair 1.1 times: read over every t, the median ratio of 3 would stop the gate on cost.
     The control reproduces its stored fits exactly, so the harness holds and the verdict turns on
-    the cost reading and the R2-D2 cell alone (its median n_eff_min, about 2, reads FAIL)."""
-    runs, replay, out = tmp_path / "runs", tmp_path / "replay", tmp_path / "report"
-    ts = (50, 100, 199)
-    _fake_stored_run(runs, "additive/amplitude", 0, ts)
-    _fake_replay(replay, "additive/amplitude_r2d2", "additive/amplitude", 0, ts, 2.0,
-                 fit_wall_s={50: 30.0, 100: 30.0, 199: 11.0})
-    _fake_replay(replay, "additive/amplitude", "additive/amplitude", 0, ts, 1.0,
-                 status="excluded", scores=_STORED_SCORES, fit_wall_s={t: 10.0 for t in ts})
+    the cost reading and the R2-D2 cell alone (its median n_eff_min, about 2, reads FAIL). The
+    tree is complete, as a FAIL needs: twenty t = 199 pairs per cell."""
+    runs, replay = _g2_tree(tmp_path, fits={"additive/amplitude_r2d2": {"n_eff_min": 2.0}})
+    out = tmp_path / "report"
 
     compare(runs, replay, out)
 
@@ -559,9 +951,120 @@ def test_the_cost_criterion_reads_t_199_alone(tmp_path):
     cell, device, pairs, mine, theirs, ratio, holds = (
         column.strip() for column in cost_row.strip("|").split("|")
     )
-    assert (pairs, mine, theirs, ratio, holds) == ("1", "11", "10", "1.1", "yes")
+    assert (pairs, mine, theirs, ratio, holds) == ("20", "11", "10", "1.1", "yes")
     # cost.csv keeps every t for the record; only the criterion reads t = 199 alone.
     cost = _read_rows(out / "tables" / "cost.csv")
     assert {r["t"] for r in cost if (r["kind"], r["method"]) == ("replay", cell)} == {
         "50", "100", "199", "all"
     }
+
+
+def _probe_tree(root: Path, fits=None) -> tuple[Path, Path]:
+    """The GPU probe's tree: aligned10 seed 0, t = 100 and 199, all eight cells (plan, Task 11)."""
+    runs, replay = root / "runs", root / "replay"
+    ts = (100, 199)
+    for twin, spec in _STORED_TWINS.items():
+        _write_stored_run(runs, "aligned10", twin, 0,
+                          {t: _g2_fit(spec, 0, t) for t in ts}, _STORED_SCORES)
+    methods = [(cell, twin, {**_R2D2_FITS}) for cell, twin in TWINS.items()]
+    methods += [(twin, twin, {**spec, "fit_wall_s": _CONTROL_WALL_S})
+                for twin, spec in _STORED_TWINS.items()]
+    for method, source, spec in methods:
+        spec |= (fits or {}).get(method, {})
+        _write_replay(replay, "aligned10", method, source, 0, {
+            t: _g2_fit(spec, 0, t) | {"device": spec.get("device", "replay-gpu")} for t in ts
+        }, _STORED_SCORES)
+    return runs, replay
+
+
+@pytest.mark.parametrize(
+    "fits, reading",
+    [
+        ({}, "**Cost criterion: every R2-D2 cell at or below 1.5 times its control.**"),
+        ({"product/amplitude_r2d2": {"fit_wall_s": {100: 30.0, 199: 16.0}}},
+         "**Cost criterion: above 1.5 times its control for product/amplitude_r2d2 (1.6 on "
+         "replay-gpu) -- ask before the bulk array.**"),
+        ({"product/amplitude": {"device": "other-gpu"}},
+         "**Cost criterion: no same-device pair at t = 199 for product/amplitude_r2d2, whose "
+         "cost is unread.**"),
+    ],
+    ids=["holds", "exceeded", "unpaired"],
+)
+def test_the_probe_reads_the_cost_criterion_alone(tmp_path, fits, reading):
+    """`compare --probe` (final review I-3): the probe's sixteen fits are read for the cost
+    criterion only. No G2 headline -- PASS, FAIL or STOP -- is printed, whatever the tables hold,
+    and every other section is labeled as information."""
+    runs, replay = _probe_tree(tmp_path, fits)
+    out = tmp_path / "report"
+    argv = ["compare", "--probe", "--runs", str(runs), "--replay", str(replay), "--out", str(out)]
+    assert main(argv) == 0
+    report = (out / "REPORT.md").read_text()
+    headlines = [line for line in report.splitlines() if line.startswith("**")]
+    assert headlines == [reading]
+    assert not any(word in reading for word in ("PASS", "FAIL", "STOP"))
+    sections = [line for line in report.splitlines() if line.startswith("## ")]
+    assert sections[0] == "## The probe's reading: cost at t = 199"
+    assert all(section.endswith("(information, not a G2 reading)")
+               for section in sections[1:] if section != "## Tables")
+    assert "## Completeness" not in report and "## Verdict" not in report
+
+
+@pytest.mark.parametrize(
+    "exclusion, n_eff, reading",
+    [
+        (0.90, 20.0, "FAIL"),  # FAIL's exclusion bound is inclusive
+        (np.nextafter(0.90, 0.0), 20.0, "neither"),
+        (0.5, 10.0, "FAIL"),  # and so is its n_eff_min bound
+        (0.5, np.nextafter(10.0, 11.0), "neither"),
+        (0.7, 20.0, "PASS"),  # E* = 0.7 passes
+        (np.nextafter(0.7, 1.0), 20.0, "neither"),
+        (0.5, 14.0, "PASS"),  # N* = 14 passes
+        (0.5, np.nextafter(14.0, 0.0), "neither"),
+        (float("nan"), 20.0, "neither"),
+    ],
+)
+def test_each_cell_threshold_is_inclusive(exclusion, n_eff, reading):
+    """An R2-D2 cell exactly at 0.90 or at 10 fails and exactly at E* or N* passes; one ulp on
+    the other side does not. The bar here is the stored data's, E* = 0.7 and N* = 14."""
+    assert replay_module._cell_reading(exclusion, n_eff, 0.7, 14.0) == reading
+
+
+@pytest.mark.parametrize(
+    "deltas, holds",
+    [
+        ((0.15, 0.0, 0.0), True),
+        ((np.nextafter(0.15, 1.0), 0.0, 0.0), False),
+        ((0.0, 0.10, 0.0), True),
+        ((0.0, np.nextafter(0.10, 1.0), 0.0), False),
+        ((0.0, 0.0, 0.10), True),
+        ((0.0, 0.0, np.nextafter(0.10, 1.0)), False),
+        ((0.0, float("nan"), 0.0), False),
+    ],
+    ids=["exclusion_0_15", "exclusion_past", "r_hat_0_10", "r_hat_past", "ap_0_10", "ap_past",
+         "nan"],
+)
+def test_each_harness_tolerance_is_inclusive(deltas, holds):
+    """Ruling R31a: |delta| of the exclusion rates at 0.15, and of the r_hat_max and AP_native
+    medians at 0.10, still hold; one ulp more does not, and a statistic missing holds nothing."""
+    assert replay_module._harness_holds(*deltas) is holds
+
+
+def test_the_cost_ratio_holds_at_1_5():
+    assert replay_module._cost_holds(1.5) is True
+    assert replay_module._cost_holds(float(np.nextafter(1.5, 2.0))) is False
+
+
+def test_g2s_design_is_the_replay_arrays():
+    """The design `compare` completes against is the one slurm/r2d2_replay.sbatch runs: its
+    control families, its ten seeds, its three t, and the full array's 960 and 240 fits."""
+    sbatch = (Path(__file__).resolve().parent.parent / "slurm" / "r2d2_replay.sbatch").read_text()
+    families = re.search(r"^FAMILIES=\((.*)\)$", sbatch, re.M).group(1).split()
+    controls = re.search(r"^CONTROL_FAMILIES=\((.*)\)$", sbatch, re.M).group(1).split()
+    seeds = re.search(r"^for seed in ([\d ]+); do$", sbatch, re.M).group(1).split()
+    ts = re.search(r'--seed "\$seed" --cell "\$cell" --t ([\d,]+)', sbatch).group(1)
+    assert tuple(controls) == replay_module._G2_CONTROL_FAMILIES
+    assert tuple(int(seed) for seed in seeds) == replay_module._G2_SEEDS
+    assert ts == ",".join(str(t) for t in REPLAY_T)
+    fits = len(REPLAY_T) * len(replay_module._G2_SEEDS)
+    assert replay_module._G2_R2D2_FITS == len(TWINS) * len(families) * fits
+    assert replay_module._G2_CONTROL_FITS == len(TWINS) * len(controls) * fits
