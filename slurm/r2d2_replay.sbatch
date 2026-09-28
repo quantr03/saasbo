@@ -10,11 +10,13 @@
 #SBATCH --mem=32G
 #SBATCH --time=6:00:00
 #SBATCH --output=logs/%x_%A_%a.out
-#SBATCH --account=ellis_users
-#SBATCH --partition=gpu-h200-141g-ellis
+#SBATCH --partition=gpu-h200-141g-short,gpu-h200-141g-m
 #SBATCH --gpus=1
-# One H200 per task, on the ELLIS partition and account, as every R2-D2 array (plan D10): the
-# replay's wall times are compared with its own control refits, so all of them run on one GPU type.
+# One H200 per task, on gpu-h200-141g-short or gpu-h200-141g-m, whichever can start the task first.
+# Why these two: Quan's instruction of 2026-09-28 not to use ELLIS for now (ruling R37); both run on
+# the same H200 141g nodes, so every replay and control fit runs on one GPU type and G2's
+# same-device cost pairs stay valid; and -m's 8 h limit covers --time=6:00:00. ELLIS jobs have
+# priority on these nodes, so tasks may queue.
 #
 # Offline replay (plan D9, Task 11): refit a cell on a stored run's data at t = 50, 100 and 199
 # (python -m experiments.replay fit). Forty tasks, each looping the ten seeds:

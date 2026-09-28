@@ -262,10 +262,10 @@ run in it. Five arrays, because the four cells and the three references have dif
 one `slurm/sagp_<cell>.sbatch` per cell (40 tasks, one core, 8 GB and one GPU each -- an H200 or an
 H100, whichever partition can start the task first -- `--time` sized to that cell's cost) and
 `slurm/sagp_refs.sbatch` (120 tasks, 2 h, on CPUs). Stage 2's offline replay has its own array,
-`slurm/r2d2_replay.sbatch` (40 tasks on ELLIS H200s: the four R2-D2 cells on their twins' runs of
-the eight families, and the four half-Cauchy cells on their own `aligned10` and `decoupled` runs
-as the control; `PROBE=1` runs the GPU cost probe instead), read by `python -m experiments.replay
-compare` (`--probe` for the probe). `sagp` takes a visible GPU first and the CPU
+`slurm/r2d2_replay.sbatch` (40 tasks on H200s (`gpu-h200-141g-short` / `-m`): the four R2-D2 cells
+on their twins' runs of the eight families, and the four half-Cauchy cells on their own `aligned10`
+and `decoupled` runs as the control; `PROBE=1` runs the GPU cost probe instead), read by `python -m
+experiments.replay compare` (`--probe` for the probe). `sagp` takes a visible GPU first and the CPU
 otherwise, for the NUTS chain and a cell's acquisition alike (`sagp/__init__.py`, `sagp.gp.fit`);
 `JAX_PLATFORMS=cpu` forces the CPU. The cell files also set `TORCH_DISABLE_NATIVE_JIT=1`, since
 torch 2.14 JIT-compiles a C launcher for a few CUDA ops and the GPU nodes have no C compiler, and
