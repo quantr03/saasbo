@@ -902,7 +902,12 @@ _G2_CASES = {
         "additive/lengthscale (control) lacks 60 of its 60 fits at the stored budget"),
     "no_same_device_cost_pair": (
         {}, {"product/amplitude": {"device": "other-gpu"}}, (), "INCONCLUSIVE",
-        "product/amplitude_r2d2 has no cost pair at t = 199 with its control on one device"),
+        "product/amplitude_r2d2 has no cost pair at t = 199 with its control on one device at "
+        "one budget"),
+    "cost_pairs_form_at_one_budget": (
+        {}, {"product/amplitude_r2d2": {"budget": "16/16/4/8"}}, (), "INCONCLUSIVE",
+        "product/amplitude_r2d2 has no cost pair at t = 199 with its control on one device at "
+        "one budget"),
     "control_at_another_budget": (
         {}, {"additive/lengthscale": {"budget": "16/16/4/8"}}, (), "INCONCLUSIVE",
         "additive/lengthscale (control) lacks 60 of its 60 fits at the stored budget"),

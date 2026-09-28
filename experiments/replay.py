@@ -1077,7 +1077,7 @@ def _completeness(
 
     A cell lacks a (family, seed, t) of its design when no complete row holds it -- for a
     control, none at the stored budget, the only rows the harness reads -- and an R2-D2 cell
-    lacks its cost reading when it has no control refit on its device at t = 199.
+    lacks its cost reading when it has no control refit on its device at its budget at t = 199.
     """
     paired = {row[0] for row in cost}
     table, gaps = [], []
@@ -1101,7 +1101,7 @@ def _completeness(
                         f"(first: {', '.join(first)})")
         if not is_control and cell not in paired:
             gaps.append(f"{name} has no cost pair at t = {_G2_COST_T} with its control on one "
-                        "device")
+                        "device at one budget")
     return table, gaps
 
 
