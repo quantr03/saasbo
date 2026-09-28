@@ -4,7 +4,8 @@ It runs the protocol of `docs/superpowers/specs/2026-09-25-r2d2-prior-parametriz
 on the models of `experiments.r2d2_prior`: I1, the supervisor's reference; I2 and I3, the two
 forms of `sagp.r2d2`; and the half-Cauchy control. Task 3 of the 2026-09-27 plan adds four
 extensions:
-- Tier D searches the calibration, and its two points C_tied and C_untied join Tiers A to C;
+- Tier D searches the calibration, and its points C_tied, C_untied and C_untied_k1 join Tiers A
+  to C, as does any point named with `--point NAME=a,b,k` (ledger ruling R15);
 - the rho-scale transport identity, with its Tier D row;
 - wall times read after `jax.block_until_ready`;
 - this command line:
@@ -18,6 +19,8 @@ The tiers:
   log a_sq; log R2, log omega, share differences), against the ground truth (KS on ESS_min
   equally spaced draws; the active count's quartiles) and, at a tied point, against the exact
   P(a_sq_i > eps). A run with ESS_min < 100 or more than 1 % divergent draws is "not evaluable".
+  Each row carries its point's null pass rate, the verdict's rate on exact i.i.d. draws of the
+  prior, and a failing verdict's margins (ledger ruling R16).
 - Tier B, the fixed budget: `_run_nuts`'s protocol at depth 6 and, for context, 10, per
   implementation, point, p in {30, 100} and seed in {0, 1, 2}, gated as the study gates a fit,
   with `log a_sq` gated separately. The half-Cauchy control runs once per seed, p and depth,
@@ -26,10 +29,11 @@ The tiers:
 - Tier C, forward sampling: `Predictive` draws against the ground truth, a property, not a gate.
 - Tier D, the calibration readout at p = 100: the active count from the ground truth, from the
   exact mixture and from each Tier A chain, at every point, at the brief's tied k = 0.0892 and on
-  the calibration profile, each also on the rho scale. The calibration table holds the D2 search:
-  the half-Cauchy target, the tied median-matched k at b = 0.5, the untied profile (the best b for
-  each a), and the untied (a, b, k) that matches the median and minimizes the quartile residual
-  over a, b >= 0.5.
+  the calibration profiles, each also on the rho scale. The calibration table holds the D2 search
+  as ruling R15 restates it: the half-Cauchy target; the tied median-matched k at b = 0.5; the
+  untied (a, b, k) that matches the median and minimizes the quartile residual over a, b >= 0.5
+  and k <= 1/2 (C_untied) or k <= 1 (C_untied_k1), with the profile over a behind each; and the
+  trend without a bound on k, which heads for uniform shares and has no minimizer.
 
 Every verdict comes from the harness alone. The scouting's numbers are compared afterwards, by
 hand, in the blank `agrees_with_scouting` column every tier table carries: the blind comparison.
@@ -46,6 +50,7 @@ import json
 import math
 import os
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -65,8 +70,8 @@ from scipy.stats import beta as beta_distribution
 from scipy.stats import ks_2samp, kurtosis
 
 from experiments.r2d2_prior import (
-    QMC_LOG2, RHO_SCALE, SITE_SUPPORTS, active_count, closed_forms, count_pmf, gate, ground_truth,
-    half_cauchy_count_pmf, p_active_tied, pmf_quantile, prior_model,
+    QMC_LOG2, RHO_SCALE, SITE_SUPPORTS, active_count, closed_forms, count_pmf, exact_log_theta,
+    gate, ground_truth, half_cauchy_count_pmf, p_active_tied, pmf_quantile, prior_model,
 )
 from sagp.gp import ACTIVE_EPS, ALPHA_AMPLITUDE, RHO_EPS, NUTSConfig
 from sagp.r2d2 import sample_log_theta
@@ -75,13 +80,18 @@ A_PI = 0.2093  # the 2026-09-21 per-coordinate concentration of P1 and P3
 BRIEF_TIED_K = 0.0892  # the 2026-09-25 brief's median-matched tied point, a Tier D row
 IMPLEMENTATIONS = ("I1", "I2", "I3")
 CONTROL = "HC"
-POINTS = ("P1", "P2", "P3", "C_tied", "C_untied")
+CALIBRATED = ("C_tied", "C_untied", "C_untied_k1")
+POINTS = ("P1", "P2", "P3", *CALIBRATED)
 
 KS_MIN_P = 0.01
 MIN_EVALUABLE_ESS = 100.0
 MAX_DIVERGENT_FRACTION = 0.01
 MAX_FRACTION_OUTSIDE = 0.01
 PHI_PAIRS = ((0, 1), (2, 3), (4, 5), (6, 7), (8, 9))
+# Ruling R16: every Tier A verdict is read beside its point's pass rate on this many exact i.i.d.
+# replicates of the prior, whose seeds are spawned from this root, apart from every other stream.
+NULL_REPLICATES = 200
+NULL_SEED = 20_260_928
 _QUANTILES = {"q05": 0.05, "q25": 0.25, "q50": 0.5, "q75": 0.75, "q95": 0.95}
 # Every cache key carries a digest of the code its entries depend on: the prior's map and forms
 # (`sagp/r2d2.py`), the models and ground truth (`experiments/r2d2_prior.py`), and this harness.
@@ -98,13 +108,14 @@ DEFAULT_CACHE = Path("runs_smoke/r2d2_prior_study")
 
 
 def hyperparameters(
-    point: str, dim: int, calibration: dict | None = None,
+    point: str, dim: int, named: dict | None = None,
 ) -> tuple[float, float, float]:
     """(a, b, alpha) of a study point at p = dim.
 
     P1 = (A_PI p, 0.5, A_PI p) is tied. P2 = (1, 1, 1) is tied, with k = 1/p. P3 = (2, 2, A_PI p) is
-    untied. The calibration's two points hold their per-coordinate concentration k across p:
-    C_tied = (k p, b, k p) and C_untied = (a, b, k p).
+    untied. Every other point is looked up in `named` ({name: {"a", "b", "k"}}: the calibration's
+    points and those given with `--point`), and holds its per-coordinate concentration k across
+    p: C_tied = (k p, b, k p), keeping its tie; any other (a, b, k p), keeping a.
     """
     if point == "P1":
         return A_PI * dim, 0.5, A_PI * dim
@@ -112,12 +123,11 @@ def hyperparameters(
         return 1.0, 1.0, 1.0
     if point == "P3":
         return 2.0, 2.0, A_PI * dim
-    if point in ("C_tied", "C_untied"):
-        if calibration is None:
-            raise ValueError(f"{point} is set by Tier D's calibration search; pass `calibration`")
-        c = calibration[point]
-        return (c["k"] * dim if point == "C_tied" else c["a"]), c["b"], c["k"] * dim
-    raise ValueError(f"unknown point {point!r}; the points are {POINTS}")
+    if named is None or point not in named:
+        raise ValueError(f"point {point!r} is neither P1-P3 nor in `named` (Tier D's calibration "
+                         "search or --point)")
+    c = named[point]
+    return (c["k"] * dim if point == "C_tied" else c["a"]), c["b"], c["k"] * dim
 
 
 def represents(impl: str, a: float, alpha: float) -> bool:
@@ -301,7 +311,8 @@ def tier_a_statistics(
     draws diverged. Such a run is neither a pass nor a fail; its ESS and `need_k_*` are kept. The
     `need_k_*` fields are the multiple of the standard error that would put every coordinate
     inside. Otherwise the verdict is "pass" when every check holds and "fail" when one does not;
-    `failed_checks` names the failures.
+    `failed_checks` names the failures and `margins` states each one's statistic against its
+    tolerance (ruling R16).
     """
     log_a_sq = np.asarray(log_a_sq, dtype=float)
     n_draws, dim = log_a_sq.shape
@@ -357,10 +368,23 @@ def tier_a_statistics(
         checks["p_active"] = bool(p_z <= 3.0)
     failed = [name for name, ok in checks.items() if not ok]
     verdict = "not evaluable" if not evaluable else ("fail" if failed else "pass")
+    # Each check's statistic against its tolerance, stated for the checks that failed (R16).
+    margins = {
+        "mean_log_a_sq": f"fraction outside {outside_mean:.4g} > {MAX_FRACTION_OUTSIDE}",
+        "var_log_a_sq": f"fraction outside {outside_var:.4g} > {MAX_FRACTION_OUTSIDE}",
+        **{name: f"z {float(np.max([c['z_mean'][0], c['z_var'][0]])):.4g} > 3"
+           for name, c in scalars.items()},
+        "phi_pairs": f"pairs outside {pairs_outside} > 0",
+        "ks": f"min p {float(np.min(list(ks.values()))):.4g} < {KS_MIN_P}",
+        "count": (f"median gap {gaps[1]:g} > 1 or q25 gap {gaps[0]:g} > 3 "
+                  f"or q75 gap {gaps[2]:g} > 3"),
+        "p_active": f"z {p_z:.4g} > 3",
+    }
     return {
         "verdict": verdict,
         "evaluable": evaluable,
         "failed_checks": ", ".join(failed),
+        "margins": "; ".join(f"{name}: {margins[name]}" for name in failed),
         "divergences": divergences,
         "ess_log_a_sq_median": ess_median,
         "ess_log_a_sq_min": ess_min,
@@ -392,12 +416,69 @@ def _point_columns(impl: str, point: str, dim: int, a: float, b: float, alpha: f
         "impl": impl, "point": point, "p": dim, "a": a, "b": b, "alpha": alpha, "k": alpha / dim}
 
 
+def null_pass_rate(
+    a: float, b: float, alpha: float, *, dim: int, n_draws: int, truth: dict[str, np.ndarray],
+    replicates: int = NULL_REPLICATES, seed: int = NULL_SEED,
+) -> dict[str, object]:
+    """How often the Tier A verdict passes a perfect sampler at (a, b, alpha): ruling R16.
+
+    Each replicate is `exact_log_theta` at its own seed, spawned from `seed` by
+    `np.random.SeedSequence`, of the chain's length and with no divergence. It goes through
+    `tier_a_statistics` against the same `truth` exactly as a chain does. A "fail" is read beside
+    this rate: the brief's tolerances make a correct sampler fail at some points often. Returns
+    the rate, the replicate count, the root seed, and each check's failure rate over the
+    replicates. Deterministic in `seed`.
+    """
+    quiet = {"diverging": np.zeros(n_draws, dtype=bool)}
+    passed, failures = 0, {}
+    for child in np.random.SeedSequence(seed).spawn(replicates):
+        log_theta = exact_log_theta(a, b, alpha / dim, dim=dim, n=n_draws, seed=child)
+        stats = tier_a_statistics(log_theta, quiet, a=a, b=b, alpha=alpha, truth=truth)
+        passed += stats["verdict"] == "pass"
+        for name in filter(None, stats["failed_checks"].split(", ")):
+            failures[name] = failures.get(name, 0) + 1
+    return {
+        "null_pass_rate": passed / replicates,
+        "null_replicates": replicates,
+        "null_seed": seed,
+        "null_fail_by_check": {
+            name: count / replicates for name, count in sorted(failures.items())},
+    }
+
+
+def _cached_null(
+    cache: Path | None, a: float, b: float, alpha: float, *, dim: int, n_draws: int,
+    truth: dict[str, np.ndarray], replicates: int, seed: int,
+) -> dict[str, object]:
+    """`null_pass_rate` at a point, stored once in `cache` (its truth is the point's seed-0 one)."""
+    if cache is None:
+        return null_pass_rate(a, b, alpha, dim=dim, n_draws=n_draws, truth=truth,
+                              replicates=replicates, seed=seed)
+    key = {"a": a, "b": b, "alpha": alpha, "dim": dim, "n_draws": n_draws,
+           "n_truth": len(truth["n_active"]), "replicates": replicates, "seed": seed,
+           "code": SOURCE_DIGEST}
+    path = cache / f"null_p{dim}_{_digest(key)}.json"
+    if path.exists():
+        return json.loads(path.read_text())
+    null = null_pass_rate(a, b, alpha, dim=dim, n_draws=n_draws, truth=truth,
+                          replicates=replicates, seed=seed)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(null))
+    os.replace(tmp, path)
+    return null
+
+
 def tier_a_row(
     impl: str, point: str, *, dim: int, nuts: NUTSConfig, truth: dict[str, np.ndarray],
-    calibration: dict | None = None, cache: Path | None = None,
+    named: dict | None = None, cache: Path | None = None,
+    null_replicates: int = NULL_REPLICATES, null_seed: int = NULL_SEED,
 ) -> tuple[dict, NutsRun]:
-    """One Tier A chain (seed 0) of `impl` at `point`, its row and the run itself."""
-    a, b, alpha = hyperparameters(point, dim, calibration)
+    """One Tier A chain (seed 0) of `impl` at `point`, its row and the run itself.
+
+    The row carries the point's null pass rate (`null_pass_rate`, on the chain's length).
+    """
+    a, b, alpha = hyperparameters(point, dim, named)
     key = {"tier": "A", "impl": impl, "point": point, "dim": dim, "seed": 0,
            "depth": nuts.max_tree_depth, "num_warmup": nuts.num_warmup,
            "num_samples": nuts.num_samples, "a": a, "b": b, "alpha": alpha, "code": SOURCE_DIGEST}
@@ -405,11 +486,13 @@ def tier_a_row(
         cache, key, lambda: run_nuts(prior_model(impl, dim, a=a, b=b, alpha=alpha), nuts, 0))
     stats = tier_a_statistics(
         run.samples["log_a_sq"], run.extra, a=a, b=b, alpha=alpha, truth=truth)
+    null = _cached_null(cache, a, b, alpha, dim=dim, n_draws=nuts.num_samples, truth=truth,
+                        replicates=null_replicates, seed=null_seed)
     num_steps = run.extra["num_steps"]
     return {
         **_point_columns(impl, point, dim, a, b, alpha),
         "seed": 0, "depth": nuts.max_tree_depth, "num_warmup": nuts.num_warmup,
-        "num_samples": nuts.num_samples, **stats,
+        "num_samples": nuts.num_samples, **stats, **null,
         "num_steps_mean": float(num_steps.mean()),
         "frac_at_cap": float(np.mean(num_steps >= 2**nuts.max_tree_depth - 1)),
         "wall_s": run.wall_s, "agrees_with_scouting": "",
@@ -418,14 +501,14 @@ def tier_a_row(
 
 def tier_b_row(
     impl: str, point: str, dim: int, seed: int, nuts: NUTSConfig, *,
-    calibration: dict | None = None, cache: Path | None = None,
+    named: dict | None = None, cache: Path | None = None,
 ) -> dict:
     """One Tier B chain at the budget `nuts` and its gate, on the sampled sites and on log a_sq.
 
     `point` is "-" for the control, which has no R2-D2 hyperparameters. `limiting_site` is the
     sampled site with the smallest ESS (a NaN counts as smallest), the one a failed gate points at.
     """
-    a, b, alpha = (math.nan,) * 3 if impl == CONTROL else hyperparameters(point, dim, calibration)
+    a, b, alpha = (math.nan,) * 3 if impl == CONTROL else hyperparameters(point, dim, named)
     key = {"tier": "B", "impl": impl, "point": point, "dim": dim, "seed": seed,
            "depth": nuts.max_tree_depth, "num_warmup": nuts.num_warmup,
            "num_samples": nuts.num_samples, "a": a, "b": b, "alpha": alpha, "code": SOURCE_DIGEST}
@@ -465,7 +548,7 @@ def _has_factor(model: Callable[[], None]) -> bool:
 
 def tier_c_row(
     impl: str, point: str, dim: int, *, truth: dict[str, np.ndarray],
-    calibration: dict | None = None, num_samples: int = 4_000, seed: int = 0,
+    named: dict | None = None, num_samples: int = 4_000, seed: int = 0,
 ) -> dict:
     """Forward draws, `Predictive(model, num_samples)`, against the ground truth: not a gate.
 
@@ -473,7 +556,7 @@ def tier_c_row(
     records the mechanism of a mismatch: `Predictive` samples every latent site from its own
     distribution and never reads a factor, so a factor-corrected site comes out as its proposal.
     """
-    a, b, alpha = hyperparameters(point, dim, calibration)
+    a, b, alpha = hyperparameters(point, dim, named)
     model = prior_model(impl, dim, a=a, b=b, alpha=alpha)
     draws = Predictive(model, num_samples=num_samples)(jax.random.PRNGKey(seed))
     stats = draw_statistics(np.asarray(draws["log_a_sq"]))
@@ -494,69 +577,79 @@ def tier_c_row(
     }
 
 
-# --- the calibration (Tier D, plan D2) ---
+# --- the calibration (Tier D: plan D2 as ledger ruling R15 restates it) ---
+
+K_BOUND = 0.5  # C_untied's k <= 1/2: the paper's spike-at-the-origin regime (its Theorem 4)
+K_BOUND_SENSITIVITY = 1.0  # C_untied_k1, the sensitivity point, has k <= 1
+UNTIED_BOUNDS = (("C_untied", K_BOUND), ("C_untied_k1", K_BOUND_SENSITIVITY))
+A_MIN = 0.5  # D2's proper region is a, b >= 0.5
+B_MIN = 0.5
+_INFEASIBLE = 1e3  # the search's residual where no b matches the median
 
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """The D2 search: the tied median match at `tied_b`; the untied profile over `a_grid`."""
+    """The D2 search of ruling R15: the tied median match, the untied optimum under each k bound
+    (a profile over `a_grid`, `k_scan` values of k per a), and the unbounded trend over `trend_a`.
+    """
 
     dim: int = 100
     tied_b: float = 0.5
-    a_grid: tuple[float, ...] = (0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10.0, 14.0,
-                                 20.0, 30.0)
+    a_grid: tuple[float, ...] = (0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0,
+                                 10.0, 20.0, 50.0, 100.0)
+    k_scan: int = 16
+    trend_a: tuple[float, ...] = (1.5, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0)
+    trend_k_max: float = 1000.0
     refine: bool = True
     search_qmc_log2: int = 12  # the search's resolution; every reported row is re-solved at 2^14
 
 
-B_MIN = 0.5  # D2's proper region is a, b >= 0.5
-_INFEASIBLE = 1e3  # the search's residual where no k matches the median
+def _continuous_median(a: float, b: float, k: float, *, dim: int, qmc_log2: int) -> float:
+    pmf = count_pmf(a, b, k, ACTIVE_EPS, dim, qmc_log2=qmc_log2)
+    return pmf_quantile(pmf, 0.5, continuous=True)
 
 
-def median_matched_k(
-    a: float | None, b: float, target: np.ndarray, *, dim: int, eps: float,
-    qmc_log2: int = QMC_LOG2, k_hint: float | None = None,
-) -> float | None:
-    """The k at which the R2-D2 active count's median equals `target`'s, as continuous quantiles.
+def median_roots_in_k(
+    a: float | None, b: float, target: np.ndarray, *, dim: int, eps: float, k_max: float = 20.0,
+    qmc_log2: int = QMC_LOG2, n_grid: int = 64,
+) -> list[tuple[float, str]]:
+    """Every k in [a / dim, k_max] at which the count median equals `target`'s, with its branch.
 
-    `a` None means the tie a = k * dim, searched from k = 1e-3. Otherwise k runs up from a / dim,
-    the tie, which is the lower edge of `count_pmf`'s exact domain. The first upward crossing on a
-    log-spaced scan up to k = 20 is refined by Brent's method. `k_hint`, a nearby solution, is
-    tried first as a bracket [k_hint / 1.2, 1.2 k_hint]. The result is None when the median never
-    reaches the target, or already exceeds it at the lower edge. Matching the continuous
-    quantiles makes the integer medians equal and fixes k uniquely.
+    `a` None means the tie a = k * dim, searched from k = 1e-3. The gap between the two continuous
+    medians is scanned at `n_grid` log-spaced k, and every sign change is refined by Brent's
+    method. A root is "rising" where the median crosses the target upward in k and "falling"
+    where it crosses back down. Matching the median in k alone need not determine k: where median
+    omega < eps dim the median rises, peaks and falls in k, and both crossings are roots. Two roots
+    closer than one grid step would be missed.
     """
     goal = pmf_quantile(target, 0.5, continuous=True)
-    k_lo = 1e-3 if a is None else a / dim
 
     def gap(k: float) -> float:
-        pmf = count_pmf(k * dim if a is None else a, b, k, eps, dim, qmc_log2=qmc_log2)
+        a_k = k * dim if a is None else a
+        pmf = count_pmf(a_k, b, k, eps, dim, qmc_log2=qmc_log2)
         return pmf_quantile(pmf, 0.5, continuous=True) - goal
 
-    def solve(lo: float, hi: float) -> float:
-        return float(optimize.brentq(gap, lo, hi, xtol=1e-12, rtol=1e-10))
-
-    if k_hint is not None and k_hint / 1.2 > k_lo and gap(k_hint / 1.2) < 0.0 <= gap(1.2 * k_hint):
-        return solve(k_hint / 1.2, 1.2 * k_hint)
-    grid = np.geomspace(k_lo, 20.0, 32)
-    if not gap(float(grid[0])) < 0.0:
-        return None
-    for lo, hi in zip(grid[:-1], grid[1:]):
-        if gap(float(hi)) >= 0.0:
-            return solve(float(lo), float(hi))
-    return None
+    grid = [float(k) for k in np.geomspace(1e-3 if a is None else a / dim, k_max, n_grid)]
+    gaps = [gap(k) for k in grid]
+    roots = []
+    for lo, hi, g_lo, g_hi in zip(grid[:-1], grid[1:], gaps[:-1], gaps[1:]):
+        if (g_lo < 0.0) != (g_hi < 0.0):
+            root = float(optimize.brentq(gap, lo, hi, xtol=1e-12, rtol=1e-10))
+            roots.append((root, "rising" if g_lo < 0.0 else "falling"))
+    return roots
 
 
 def _calibration_row(
     kind: str, a: float, b: float, k: float | None, target: np.ndarray, *, dim: int,
+    qmc_log2: int = QMC_LOG2, note: str = "",
 ) -> dict:
-    """One point of the search: its count quartiles (integer and continuous) and residuals, at 2^14.
+    """One point of the search: its count quartiles (integer and continuous) and residuals.
 
-    The residual is D2's max(|q25 - q25_HC|, |q75 - q75_HC|), in integers and in continuous
-    quantiles; the search minimizes the continuous one. Two closed forms describe the point's
-    regime beside k itself (shares near-uniform once k >= 1): sd(log omega) =
+    The residual is D2's max(|q25 - q25_HC|, |q75 - q75_HC|), the rule's objective, and
+    `residual_c` the same in continuous quantiles, its tie-breaker. Two closed forms describe the
+    point's regime beside k itself (the shares are near-uniform once k >= 1): sd(log omega) =
     sqrt(psi'(a) + psi'(b)), the global scale's spread, and P(R2 < 0.6), the D1 argument's mass
-    below R2 = 0.6.
+    below R2 = 0.6. `k` None is a point where nothing matches the median; `note` says why.
     """
     row = {"kind": kind, "a": a, "b": b, "k": math.nan if k is None else k,
            "alpha": math.nan if k is None else k * dim,
@@ -565,9 +658,8 @@ def _calibration_row(
     names = ("q25", "q50", "q75")
     if k is None:
         return row | {name: math.nan for name in names} | {f"{n}_c": math.nan for n in names} | {
-            "residual": math.nan, "residual_c": math.nan,
-            "note": f"no k (with k dim >= a) matches the median at any b >= {B_MIN}"}
-    pmf = target if kind == "target" else count_pmf(a, b, k, ACTIVE_EPS, dim)
+            "residual": math.nan, "residual_c": math.nan, "note": note}
+    pmf = target if kind == "target" else count_pmf(a, b, k, ACTIVE_EPS, dim, qmc_log2=qmc_log2)
     for name, q in zip(names, (0.25, 0.5, 0.75)):
         row[name] = pmf_quantile(pmf, q)
         row[f"{name}_c"] = pmf_quantile(pmf, q, continuous=True)
@@ -575,118 +667,199 @@ def _calibration_row(
     row["residual"] = max(abs(row[n] - pmf_quantile(target, q)) for n, q in outer)
     row["residual_c"] = max(
         abs(row[f"{n}_c"] - pmf_quantile(target, q, continuous=True)) for n, q in outer)
-    return row | {"note": ""}
+    return row | {"note": note}
 
 
-class _UntiedSearch:
-    """The continuous residual at (a, b), k matched, at the search's resolution; its min over b."""
+def _rank(row: dict) -> tuple[float, float]:
+    """R15's order: the residual first, ties broken by the continuous residual."""
+    return row["residual"], row["residual_c"]
+
+
+class _Search:
+    """Median-matched points (a, b, k), each found at its (a, k) through its unique b.
+
+    At fixed (a, k), raising b makes R2 ~ Beta(a, b), hence omega and every a_sq_i, stochastically
+    smaller, so the count median is nonincreasing in b and at most one b >= B_MIN matches the
+    target. Searching over (a, k) with that b therefore visits every median-matched point once: both
+    k-roots of an (a, b) whose median rises and falls in k (`median_roots_in_k`) appear, at their
+    own k. The domain is a >= A_MIN and a <= k dim, the exact mixture's own limit (`count_pmf`).
+    """
 
     def __init__(self, target: np.ndarray, *, dim: int, qmc_log2: int) -> None:
         self.target, self.dim, self.qmc_log2 = target, dim, qmc_log2
-        self.goals = {q: pmf_quantile(target, q, continuous=True) for q in (0.25, 0.75)}
-        self.last_k: float | None = None
+        self.goal = pmf_quantile(target, 0.5, continuous=True)
         self.evaluations = 0
 
-    def residual(self, a: float, b: float) -> tuple[float, float | None]:
-        """(continuous residual, k), or (_INFEASIBLE, None) where no k matches the median."""
-        self.evaluations += 1
-        k = median_matched_k(a, b, self.target, dim=self.dim, eps=ACTIVE_EPS,
-                             qmc_log2=self.qmc_log2, k_hint=self.last_k)
-        if k is None:
-            return _INFEASIBLE, None
-        self.last_k = k
-        pmf = count_pmf(a, b, k, ACTIVE_EPS, self.dim, qmc_log2=self.qmc_log2)
-        return max(abs(pmf_quantile(pmf, q, continuous=True) - goal)
-                   for q, goal in self.goals.items()), k
+    def matched_b(self, a: float, k: float, *, qmc_log2: int, b_hint: float | None) -> float | None:
+        """The b >= B_MIN at which the median matches at (a, k), or None if even B_MIN is short.
 
-    def best_b(self, a: float) -> tuple[float, float]:
-        """(min over b >= B_MIN of the residual at a, its b); (_INFEASIBLE, nan) if none matches.
-
-        For fixed a, raising b lowers omega. The b at which some k matches the median form an
-        interval. Below it, when a is large, the median already exceeds the target at the tie;
-        above it, no k reaches the target. Inside it, raising b raises the matched k and spreads
-        the count (q25 falls, q75 rises), so the residual has a narrow valley. A log-spaced scan
-        over [B_MIN, 4 a + 4] finds the interval and the best scanned b. Bounded Brent then refines
-        between that b's two neighbours, the infeasible side reading as a plateau at _INFEASIBLE.
+        The median falls to 0 as b grows (omega -> 0), so doubling from B_MIN brackets the root
+        whenever B_MIN's median reaches the target; `b_hint`, a nearby solution, is tried first.
         """
-        grid = np.geomspace(B_MIN, 4.0 * a + 4.0, 24)
-        values = [self.residual(a, float(b))[0] for b in grid]
-        i = int(np.argmin(values))
-        if values[i] >= _INFEASIBLE:
-            return _INFEASIBLE, math.nan
-        lo, hi = float(grid[max(i - 1, 0)]), float(grid[min(i + 1, len(grid) - 1)])
-        result = optimize.minimize_scalar(lambda b: self.residual(a, b)[0], bounds=(lo, hi),
-                                          method="bounded", options={"xatol": 1e-4})
-        if result.fun < values[i]:
-            return float(result.fun), float(result.x)
-        return float(values[i]), float(grid[i])
+        def gap(b: float) -> float:
+            return _continuous_median(a, b, k, dim=self.dim, qmc_log2=qmc_log2) - self.goal
+
+        if gap(B_MIN) < 0.0:
+            return None
+        if (b_hint is not None and b_hint / 1.25 > B_MIN
+                and gap(b_hint / 1.25) >= 0.0 > gap(1.25 * b_hint)):
+            lo, hi = b_hint / 1.25, 1.25 * b_hint
+        else:
+            lo, hi = B_MIN, 2.0 * B_MIN
+            while gap(hi) >= 0.0:
+                lo, hi = hi, 2.0 * hi
+                if hi > 2.0**30:
+                    raise RuntimeError(f"the count median at (a, k) = ({a}, {k}) never falls in b")
+        return float(optimize.brentq(gap, lo, hi, xtol=1e-12, rtol=1e-8))
+
+    def row(self, kind: str, a: float, k: float, *, qmc_log2: int | None = None,
+            b_hint: float | None = None) -> dict | None:
+        """The median-matched point at (a, k) with its residuals, or None outside the domain."""
+        qmc_log2 = qmc_log2 or self.qmc_log2
+        self.evaluations += 1
+        if a < A_MIN or a > k * self.dim * (1.0 + 1e-12):
+            return None
+        b = self.matched_b(a, k, qmc_log2=qmc_log2, b_hint=b_hint)
+        if b is None:
+            return None
+        return _calibration_row(kind, a, b, k, self.target, dim=self.dim, qmc_log2=qmc_log2)
+
+    def best_at(self, kind: str, a: float, k_max: float, *, n_scan: int) -> dict | None:
+        """The best median-matched point at this a over k in [a / dim, k_max], in R15's order.
+
+        A log-spaced scan of k, then bounded Brent on the continuous residual between the best
+        scanned k's neighbours; every evaluated point is a candidate, so the choice is R15's.
+        """
+        k_lo = a / self.dim
+        if k_lo > k_max:
+            return None
+        ks = [float(k) for k in np.geomspace(k_lo, k_max, n_scan)] if k_max > k_lo else [k_lo]
+        rows, hint = [], None
+        for k in ks:
+            rows.append(self.row(kind, a, k, b_hint=hint))
+            hint = rows[-1]["b"] if rows[-1] else hint
+        found = [i for i, r in enumerate(rows) if r]
+        if not found:
+            return None
+        i = min(found, key=lambda j: rows[j]["residual_c"])
+        candidates = [rows[j] for j in found]
+        lo, hi = ks[max(i - 1, 0)], ks[min(i + 1, len(ks) - 1)]
+        if hi > lo:
+            def objective(log_k: float) -> float:
+                r = self.row(kind, a, math.exp(log_k), b_hint=rows[i]["b"])
+                if r:
+                    candidates.append(r)
+                return r["residual_c"] if r else _INFEASIBLE
+
+            optimize.minimize_scalar(objective, bounds=(math.log(lo), math.log(hi)),
+                                     method="bounded", options={"xatol": 1e-3})
+        return min(candidates, key=_rank)
+
+    def optimum(self, kind: str, a_grid: tuple[float, ...], k_max: float, *, n_scan: int,
+                refine: bool) -> tuple[dict | None, list[tuple[float, dict | None]]]:
+        """The best point over a in `a_grid`, refined between its neighbours, and k <= k_max."""
+        profile = [(a, self.best_at(kind, a, k_max, n_scan=n_scan)) for a in a_grid]
+        found = [r for _, r in profile if r]
+        if not found:
+            return None, profile
+        best = min(found, key=_rank)
+        j = list(a_grid).index(best["a"])
+        lo, hi = a_grid[max(j - 1, 0)], a_grid[min(j + 1, len(a_grid) - 1)]
+        if refine and hi > lo:
+            seen = []
+
+            def objective(a: float) -> float:
+                r = self.best_at(kind, float(a), k_max, n_scan=n_scan)
+                if r:
+                    seen.append(r)
+                return r["residual_c"] if r else _INFEASIBLE
+
+            optimize.minimize_scalar(objective, bounds=(lo, hi), method="bounded",
+                                     options={"xatol": 1e-3})
+            best = min([best, *seen], key=_rank)
+        return best, profile
+
+    def branch(self, row: dict) -> str:
+        """The root's branch at the row's (a, b): "rising" if the median grows with k there."""
+        a, b, k = row["a"], row["b"], row["k"]
+        here = _continuous_median(a, b, k, dim=self.dim, qmc_log2=QMC_LOG2)
+        up = _continuous_median(a, b, k * 1.001, dim=self.dim, qmc_log2=QMC_LOG2)
+        return "rising" if up > here else "falling"
 
 
 def calibrate(config: CalibrationConfig) -> dict:
-    """The D2 rule's two calibration points at D = `config.dim`, against the half-Cauchy count.
+    """D2 as ledger ruling R15 restates it, at D = `config.dim`, against the half-Cauchy count.
 
-    The target is the count distribution of the four half-Cauchy cells at `ALPHA_AMPLITUDE`,
-    exact given tausq. C_tied is the tie a = k D at b = `tied_b`, with k matching the target's
-    median; it has one knob. C_untied matches the median exactly and minimizes the continuous
-    quartile residual over a, b >= 0.5, in three steps:
-    - a profile: for each a of `a_grid`, the best b (k matched at every b). The residual has a
-      narrow valley in b and is shallow along a, which a grid over (a, b) misses;
-    - with `refine`, a bounded Brent search for a between the best profile point's two
-      neighbours, each evaluation being a profile point;
-    - every reported row (the profile's and the refined point's) re-solved for k at the full 2^14
-      resolution, and C_untied the best of them there, since the valley is shallow enough along a
-      that the two resolutions can rank neighbouring points differently.
-    The search stays in the exact domain k D >= a of `count_pmf`, whose edge is the tie. Returns
-    the two points, the target's quartiles, every row, the search's evaluation count, and
-    `optimum_at_profile_edge`: whether the best profile point is the grid's largest a, in which
-    case the minimum may lie beyond the grid.
+    The target is the four half-Cauchy cells' count at `ALPHA_AMPLITUDE`, exact given tausq.
+    - C_tied: the tie a = k D at b = `tied_b`, one knob. Every root in k of the median match is
+      found (`median_roots_in_k`), and the best in R15's order is kept.
+    - C_untied (k <= 1/2) and C_untied_k1 (k <= 1): the median matched exactly, minimizing the
+      quartile residual, ties broken by the continuous residual, over a >= 0.5, b >= 0.5 and the
+      bound. The search runs over (a, k) with b solved (`_Search`), so it follows every root in k.
+      It takes a profile over `a_grid` (the best k and b for each a), then with `refine` a bounded
+      Brent search for a between the best profile point's neighbours.
+    - The trend: the same best point for each a of `trend_a` with k up to `trend_k_max`, reported
+      only. Without a bound on k the residual keeps falling as a grows, along the falling root
+      towards uniform shares, so the literal rule has no minimizer.
+    Every reported row is re-solved for b at the full 2^14 resolution and labelled with its
+    root's branch. Each C point is the best, in R15's order and at that resolution, of its
+    profile and the refined point; it also lists every root in k at its (a, b).
+
+    Why no remaining bound excludes the optimum. a runs over [0.5, D k_bound], since a <= k D is
+    the exact mixture's limit, so the grid's upper a is that limit itself. k is bounded by the rule.
+    b is solved rather than searched, with no upper cap (the median falls to 0 as b grows).
     """
     dim = config.dim
     target = half_cauchy_count_pmf(ALPHA_AMPLITUDE, ACTIVE_EPS, dim)
-    search = _UntiedSearch(target, dim=dim, qmc_log2=config.search_qmc_log2)
+    search = _Search(target, dim=dim, qmc_log2=config.search_qmc_log2)
 
-    def reported(kind: str, a: float, b: float, k_hint: float | None) -> dict:
-        k = median_matched_k(a, b, target, dim=dim, eps=ACTIVE_EPS, k_hint=k_hint)
-        return _calibration_row(kind, a, b, k, target, dim=dim)
+    def reported(kind: str, row: dict) -> dict:
+        full = search.row(kind, row["a"], row["k"], qmc_log2=QMC_LOG2, b_hint=row["b"])
+        if full is None:  # the search's resolution matched it, the reported one does not
+            return _calibration_row(kind, row["a"], math.nan, None, target, dim=dim,
+                                    note="no b matches the median at the full resolution")
+        return full | {"branch": search.branch(full)}
 
-    k_tied = median_matched_k(None, config.tied_b, target, dim=dim, eps=ACTIVE_EPS)
-    if k_tied is None:
+    def roots_at(row: dict) -> str:
+        roots = median_roots_in_k(row["a"], row["b"], target, dim=dim, eps=ACTIVE_EPS,
+                                  k_max=max(20.0, 4.0 * row["k"]))
+        return "; ".join(f"{k:.5g} {branch}" for k, branch in roots)
+
+    tied_roots = median_roots_in_k(None, config.tied_b, target, dim=dim, eps=ACTIVE_EPS)
+    if not tied_roots:
         raise RuntimeError(f"no tied k at b = {config.tied_b} matches the half-Cauchy median")
-    tied = _calibration_row("C_tied", k_tied * dim, config.tied_b, k_tied, target, dim=dim)
-
-    profile = []
-    for a in config.a_grid:
-        residual, b = search.best_b(a)
-        profile.append((residual, a, b, search.last_k if residual < _INFEASIBLE else None))
-    feasible = [point for point in profile if point[0] < _INFEASIBLE]
-    if not feasible:
-        raise RuntimeError("no a of the calibration profile matches the half-Cauchy median")
-    best = min(feasible)
-    rows = [tied]
-    rows += [reported("profile", a, b, k) if k is not None
-             else _calibration_row("profile", a, math.nan, None, target, dim=dim)
-             for _, a, b, k in profile]
-    candidates = [row for row in rows[1:] if math.isfinite(row["residual_c"])]
-    i = config.a_grid.index(best[1])
-    lo, hi = config.a_grid[max(i - 1, 0)], config.a_grid[min(i + 1, len(config.a_grid) - 1)]
-    if config.refine and hi > lo:
-        result = optimize.minimize_scalar(lambda a: search.best_b(a)[0], bounds=(lo, hi),
-                                          method="bounded", options={"xatol": 1e-3})
-        b_refined = search.best_b(float(result.x))[1]
-        rows.append(reported("refined", float(result.x), b_refined, search.last_k))
-        candidates.append(rows[-1])
-    # The search's resolution decides where to look; the reported resolution decides the choice.
-    untied = min((row for row in candidates if math.isfinite(row["residual_c"])),
-                 key=lambda row: row["residual_c"]) | {"kind": "C_untied"}
-    rows.append(untied)
+    tied_rows = [_calibration_row("C_tied", k * dim, config.tied_b, k, target, dim=dim)
+                 | {"branch": branch} for k, branch in tied_roots]
+    tied = min(tied_rows, key=_rank)
+    rows = [tied | {"roots_in_k": "; ".join(f"{k:.5g} {branch}" for k, branch in tied_roots)}]
+    points = {"C_tied": {"a": tied["a"], "b": tied["b"], "k": tied["k"]}}
+    for name, bound in UNTIED_BOUNDS:
+        kind = f"profile_k{bound:g}"
+        a_grid = tuple(a for a in config.a_grid if a <= dim * bound)
+        best, profile = search.optimum(kind, a_grid, bound, n_scan=config.k_scan,
+                                       refine=config.refine)
+        if best is None:
+            raise RuntimeError(f"nothing with k <= {bound} matches the half-Cauchy median")
+        shown = [reported(kind, r) if r else _calibration_row(
+            kind, a, math.nan, None, target, dim=dim,
+            note=f"no b >= {B_MIN} with k <= {bound:g} matches the median") for a, r in profile]
+        rows += shown
+        candidates = [r for r in shown if math.isfinite(r["residual_c"])]
+        if best not in [r for _, r in profile]:
+            candidates.append(reported(kind, best))
+        chosen = min((r for r in candidates if math.isfinite(r["residual_c"])), key=_rank)
+        rows.append(chosen | {"kind": name, "roots_in_k": roots_at(chosen)})
+        points[name] = {"a": chosen["a"], "b": chosen["b"], "k": chosen["k"]}
+    for a in config.trend_a:
+        best = search.best_at("trend", a, config.trend_k_max, n_scan=24)
+        rows.append(reported("trend", best) if best else _calibration_row(
+            "trend", a, math.nan, None, target, dim=dim, note="no b >= 0.5 matches the median"))
     return {
         "config": asdict(config),
         "target": _calibration_row("target", math.nan, math.nan, math.nan, target, dim=dim),
-        "C_tied": {"a": tied["a"], "b": tied["b"], "k": tied["k"]},
-        "C_untied": {"a": untied["a"], "b": untied["b"], "k": untied["k"]},
+        **points,
         "rows": rows,
         "search_evaluations": search.evaluations,
-        "optimum_at_profile_edge": best[1] == config.a_grid[-1],
     }
 
 
@@ -719,22 +892,24 @@ def _half_cauchy_counts(dim: int, n: int, seed: int = 0) -> np.ndarray:
     return counts
 
 
-def _profile_name(row: dict) -> str:
-    return f"profile_a{row['a']:g}"
+def _searched_name(row: dict) -> str:
+    """A profile or trend row's name in the readout: its kind and its a."""
+    return f"{row['kind']}_a{row['a']:g}"
 
 
 def tier_d(
-    config: StudyConfig, calibration: dict, tier_a_runs: dict[str, dict[str, tuple[NutsRun, bool]]],
-    cache: Path | None = None,
+    config: StudyConfig, calibration: dict, named: dict, study_points: tuple[str, ...],
+    tier_a_runs: dict[str, dict[str, tuple[NutsRun, bool]]], cache: Path | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Tier D's two tables: the active-count readout and the calibration search.
 
     The readout is at p = `config.dim_a`. It covers the half-Cauchy target (mixture and NumPy),
-    every study point, the brief's tied k = 0.0892 and the calibration profile (where the search
-    ran at this p). Each has its ground truth on both scales (rho = RHO_SCALE a_sq counted at
-    RHO_EPS, with the transport identity checked draw for draw), its exact mixture where one
-    exists, and each Tier A chain of `tier_a_runs` ({point: {impl: (run, evaluable)}}) as a
-    cross-check. The calibration rows gain the ground truth's quartiles at their point.
+    every study point (`study_points`, looked up in `named`), the brief's tied k = 0.0892 and the
+    calibration's profile and trend rows (where the search ran at this p). Each has its ground
+    truth on both scales (rho = RHO_SCALE a_sq counted at RHO_EPS, with the transport identity
+    checked draw for draw), its exact mixture where one exists, and each Tier A chain of
+    `tier_a_runs` ({point: {impl: (run, evaluable)}}) as a cross-check. The calibration rows gain
+    the ground truth's quartiles at their point.
     """
     dim, n = config.dim_a, config.n_truth
     rows: list[dict] = []
@@ -751,16 +926,16 @@ def tier_d(
     add("half-Cauchy", nan, nan, nan, "amplitude", "ground_truth",
         count_summary(_half_cauchy_counts(dim, n)))
 
-    points = {name: hyperparameters(name, dim, calibration) for name in POINTS}
+    points = {name: hyperparameters(name, dim, named) for name in study_points}
     points["tied_k0.0892"] = (BRIEF_TIED_K * dim, 0.5, BRIEF_TIED_K * dim)
     on_calibration_p = dim == calibration["config"]["dim"]
     if on_calibration_p:
-        points |= {_profile_name(r): (r["a"], r["b"], r["alpha"]) for r in calibration["rows"]
-                   if r["kind"] == "profile" and math.isfinite(r["k"])}
+        points |= {_searched_name(r): (r["a"], r["b"], r["alpha"]) for r in calibration["rows"]
+                   if r["kind"].startswith(("profile", "trend")) and math.isfinite(r["k"])}
     truth_quartiles = {}
     for name, (a, b, alpha) in points.items():
         k = alpha / dim
-        truth = (_cached_truth(cache, a, b, k, dim, n) if name in POINTS
+        truth = (_cached_truth(cache, a, b, k, dim, n) if name in study_points
                  else ground_truth(a, b, k, dim=dim, n=n))
         amplitude = count_summary(truth["n_active"])
         truth_quartiles[name] = amplitude
@@ -780,7 +955,8 @@ def tier_d(
 
     calibration_rows = [calibration["target"] | {"kind": "target"}]
     for row in calibration["rows"]:
-        name = _profile_name(row) if row["kind"] == "profile" else row["kind"]
+        searched = row["kind"].startswith(("profile", "trend"))
+        name = _searched_name(row) if searched else row["kind"]
         truth = truth_quartiles.get(name) if on_calibration_p else None
         calibration_rows.append(row | {
             f"truth_{q}": truth[q] if truth else math.nan for q in ("q25", "q50", "q75")})
@@ -792,17 +968,18 @@ def tier_d(
 
 def acceptance(
     tier_a_rows: list[dict], tier_b_rows: list[dict], *, seeds: tuple[int, ...],
-    calibration: dict, dim: int = 100, depth: int = 6,
+    named: dict, dim: int = 100, depth: int = 6,
 ) -> list[dict]:
     """The acceptance rule per implementation, and the same two checks at P2 and the C points.
 
     An implementation passes if (i) Tier A is within tolerance at P1 and, where it represents
     it, at P3, and (ii) the depth-6 Tier B gate passes for every seed at p = 100 at P1. P2 is
-    reported, not required. The C points carry G0's check of the calibrated point. A Tier A entry
+    reported, not required. The C points carry G0's check of the calibrated points. A Tier A entry
     is its verdict, "n/a" where the implementation cannot represent the point, or "missing" when
-    the tier did not run. A Tier B entry is "passed/seeds".
+    the tier did not run. Beside it sit the point's null pass rate and, for a "fail", its
+    margins (ruling R16). A Tier B entry is "passed/seeds".
     """
-    verdicts = {(r["impl"], r["point"]): r["verdict"] for r in tier_a_rows if r["p"] == dim}
+    tier_a = {(r["impl"], r["point"]): r for r in tier_a_rows if r["p"] == dim}
 
     def gate_passes(impl: str, point: str) -> tuple[int, int]:
         rows = [r for r in tier_b_rows
@@ -813,12 +990,17 @@ def acceptance(
     table = []
     for impl in IMPLEMENTATIONS:
         row: dict[str, object] = {"impl": impl}
-        for point in ("P1", "P3", "P2", "C_tied", "C_untied"):
-            a, b, alpha = hyperparameters(point, dim, calibration)
+        for point in ("P1", "P3", "P2", *CALIBRATED):
+            a, b, alpha = hyperparameters(point, dim, named)
             if not represents(impl, a, alpha):
-                row[f"tier_a_{point}"] = row[f"tier_b_{point}"] = "n/a"
+                row[f"tier_a_{point}"] = row[f"null_pass_{point}"] = "n/a"
+                row[f"margins_{point}"] = row[f"tier_b_{point}"] = "n/a"
                 continue
-            row[f"tier_a_{point}"] = verdicts.get((impl, point), "missing")
+            a_row = tier_a.get((impl, point))
+            row[f"tier_a_{point}"] = a_row["verdict"] if a_row else "missing"
+            row[f"null_pass_{point}"] = a_row["null_pass_rate"] if a_row else math.nan
+            failing = a_row is not None and a_row["verdict"] == "fail"
+            row[f"margins_{point}"] = a_row["margins"] if failing else ""
             passed, ran = gate_passes(impl, point)
             row[f"tier_b_{point}"] = f"{passed}/{len(seeds)}" if ran else "missing"
         b_passed, b_ran = gate_passes(impl, "P1")
@@ -853,6 +1035,8 @@ class StudyConfig:
     tier_b_nuts: NUTSConfig = NUTSConfig()  # its depth is replaced per row
     n_truth: int = 200_000
     tier_c_samples: int = 4_000
+    null_replicates: int = NULL_REPLICATES
+    null_seed: int = NULL_SEED
     calibration: CalibrationConfig = CalibrationConfig()
     smoke: bool = False
 
@@ -861,9 +1045,36 @@ SMOKE = StudyConfig(
     dim_a=5, dims_b=(5,), seeds=(0,), depths=(6,),
     tier_a_nuts=NUTSConfig(num_warmup=32, num_samples=64, thinning=4, max_tree_depth=6),
     tier_b_nuts=NUTSConfig(num_warmup=32, num_samples=32, thinning=4),
-    n_truth=5_000, tier_c_samples=200,
-    calibration=CalibrationConfig(a_grid=(1.5,), refine=False), smoke=True,
+    n_truth=5_000, tier_c_samples=200, null_replicates=20,
+    calibration=CalibrationConfig(a_grid=(1.5,), k_scan=6, trend_a=(10.0,), refine=False),
+    smoke=True,
 )
+
+# A --point name: a letter, then letters, digits, "_", "." or "-"; never a built-in point's name
+# or a name the Tier D readout already uses.
+_POINT_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_.-]*")
+_RESERVED_NAMES = (*POINTS, "tied_k0.0892", "target")
+
+
+def parse_point(text: str) -> tuple[str, float, float, float]:
+    """`--point NAME=a,b,k`: a further point's name and its (a, b, k), each finite and positive.
+
+    The point keeps (a, b, k) at every p, so a tie a = k D holds only at the D it was written for.
+    A malformed value raises `argparse.ArgumentTypeError`, which argparse reports as a usage error.
+    """
+    name, sep, values = text.partition("=")
+    if not sep or not _POINT_NAME.fullmatch(name):
+        raise argparse.ArgumentTypeError(
+            f"expected NAME=a,b,k with NAME a letter then letters, digits, _ . or -; got {text!r}")
+    if name in _RESERVED_NAMES or name.startswith(("profile_", "trend_")):
+        raise argparse.ArgumentTypeError(f"{name!r} is taken by the study; choose another name")
+    try:
+        numbers = [float(value) for value in values.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"a, b and k must be numbers; got {values!r}") from None
+    if len(numbers) != 3 or not all(math.isfinite(x) and x > 0.0 for x in numbers):
+        raise argparse.ArgumentTypeError(f"expected three positive numbers a,b,k; got {values!r}")
+    return name, numbers[0], numbers[1], numbers[2]
 
 
 def _cell(value: object) -> str:
@@ -919,6 +1130,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE,
                         help="raw draws and ground truths, reused on rerun "
                              f"(default: {DEFAULT_CACHE})")
+    parser.add_argument("--point", type=parse_point, action="append", default=[],
+                        metavar="NAME=a,b,k",
+                        help="a further named point for Tiers A-C, keeping (a, b, k) at every p; "
+                             "repeatable")
     parser.add_argument("--smoke", action="store_true",
                         help="a minutes-long end-to-end check at p = 5 with tiny budgets; its "
                              "tables are not the study's, so it refuses the default --out")
@@ -929,6 +1144,9 @@ def main(argv: list[str] | None = None) -> int:
     config = SMOKE if args.smoke else StudyConfig()
     if args.smoke and args.out.resolve() == DEFAULT_OUT.resolve():
         parser.error("--smoke writes throwaway tables; give it its own --out")
+    extras = {name: {"a": a, "b": b, "k": k} for name, a, b, k in args.point}
+    if len(extras) != len(args.point):
+        parser.error("--point names must be distinct")
     tables = args.out / "tables"
     tables.mkdir(parents=True, exist_ok=True)
     cache = args.cache
@@ -938,7 +1156,9 @@ def main(argv: list[str] | None = None) -> int:
     clock = time.perf_counter()
     calibration = _cached_calibration(cache, config.calibration)
     walls["calibration"] = time.perf_counter() - clock
-    print(f"calibration: C_tied {calibration['C_tied']}, C_untied {calibration['C_untied']}",
+    named = {name: calibration[name] for name in CALIBRATED} | extras
+    study_points = POINTS + tuple(extras)
+    print("calibration: " + ", ".join(f"{name} {calibration[name]}" for name in CALIBRATED),
           flush=True)
     written: dict[str, list[dict]] = {}
 
@@ -965,18 +1185,20 @@ def main(argv: list[str] | None = None) -> int:
     tier_a_runs: dict[str, dict[str, tuple[NutsRun, bool]]] = {}
     if "A" in tiers and exit_status == 0:
         clock = time.perf_counter()
-        for point in POINTS:
-            a, b, alpha = hyperparameters(point, config.dim_a, calibration)
+        for point in study_points:
+            a, b, alpha = hyperparameters(point, config.dim_a, named)
             truth = _cached_truth(cache, a, b, alpha / config.dim_a, config.dim_a, config.n_truth)
             for impl in IMPLEMENTATIONS:
                 if not represents(impl, a, alpha):
                     continue
                 row, run = tier_a_row(impl, point, dim=config.dim_a, nuts=config.tier_a_nuts,
-                                      truth=truth, calibration=calibration, cache=cache)
+                                      truth=truth, named=named, cache=cache,
+                                      null_replicates=config.null_replicates,
+                                      null_seed=config.null_seed)
                 tier_a_rows.append(row)
                 tier_a_runs.setdefault(point, {})[impl] = (run, row["evaluable"])
-                _log("A", row, "verdict", "failed_checks", "ess_log_a_sq_min", "divergences",
-                     "wall_s")
+                _log("A", row, "verdict", "failed_checks", "null_pass_rate", "ess_log_a_sq_min",
+                     "divergences", "wall_s")
         walls["A"] = time.perf_counter() - clock
 
     if "B" in tiers and exit_status == 0:
@@ -985,13 +1207,13 @@ def main(argv: list[str] | None = None) -> int:
             nuts = replace(config.tier_b_nuts, max_tree_depth=depth)
             for dim in config.dims_b:
                 for impl in IMPLEMENTATIONS:
-                    for point in POINTS:
-                        a, b, alpha = hyperparameters(point, dim, calibration)
+                    for point in study_points:
+                        a, b, alpha = hyperparameters(point, dim, named)
                         if not represents(impl, a, alpha):
                             continue
                         for seed in config.seeds:
-                            row = tier_b_row(impl, point, dim, seed, nuts,
-                                             calibration=calibration, cache=cache)
+                            row = tier_b_row(impl, point, dim, seed, nuts, named=named,
+                                             cache=cache)
                             tier_b_rows.append(row)
                             _log("B", row, "seed", "depth", "gate", "n_eff_min",
                                  "divergences", "wall_s")
@@ -1001,12 +1223,12 @@ def main(argv: list[str] | None = None) -> int:
     if "C" in tiers and exit_status == 0:
         clock = time.perf_counter()
         for dim in config.dims_b:
-            for point in POINTS:
-                a, b, alpha = hyperparameters(point, dim, calibration)
+            for point in study_points:
+                a, b, alpha = hyperparameters(point, dim, named)
                 truth = _cached_truth(cache, a, b, alpha / dim, dim, config.n_truth)
                 for impl in IMPLEMENTATIONS:
                     if represents(impl, a, alpha):
-                        row = tier_c_row(impl, point, dim, truth=truth, calibration=calibration,
+                        row = tier_c_row(impl, point, dim, truth=truth, named=named,
                                          num_samples=config.tier_c_samples)
                         tier_c_rows.append(row)
                         _log("C", row, "matches", "ks_p_log_phi_1", "ks_p_logit_R2")
@@ -1015,18 +1237,18 @@ def main(argv: list[str] | None = None) -> int:
     if "D" in tiers and exit_status == 0:
         clock = time.perf_counter()
         written["tier_d_counts"], written["tier_d_calibration"] = tier_d(
-            config, calibration, tier_a_runs, cache)
+            config, calibration, named, study_points, tier_a_runs, cache)
         walls["D"] = time.perf_counter() - clock
 
     written |= {"tier_a": tier_a_rows, "tier_b": tier_b_rows, "tier_c": tier_c_rows}
     if "A" in tiers and "B" in tiers and exit_status == 0:
         written["acceptance"] = acceptance(tier_a_rows, tier_b_rows, seeds=config.seeds,
-                                           calibration=calibration, dim=config.dim_a)
+                                           named=named, dim=config.dim_a)
     for name, rows in written.items():
         write_table(rows, tables / name)
     (tables / "run_config.json").write_text(json.dumps({
         "tiers": tiers, "config": asdict(config), "calibration": {
-            name: calibration[name] for name in ("C_tied", "C_untied", "target")},
+            name: calibration[name] for name in (*CALIBRATED, "target")}, "extra_points": extras,
         "control_passes_depth6_p100": control_ok, "exit_status": exit_status,
         "wall_s": walls, "started": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)),
         "finished": time.strftime("%Y-%m-%d %H:%M:%S"), "git_head": _git_head(),

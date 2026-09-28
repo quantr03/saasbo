@@ -14,7 +14,8 @@ This module holds the implementations the study runs and everything it checks th
   the code the study certifies is the code the cells run;
 - `half_cauchy_control`: the amplitude cells' own half-Cauchy prior, the study's control;
 - `prior_model`: the harness wrapper that adds the one deterministic site the statistics read;
-- `ground_truth`: the NumPy sampler of the prior, which shares no code with any model;
+- `ground_truth`: the NumPy sampler of the prior, which shares no code with any model, and
+  `exact_log_theta`, the same law's full draws, which the null pass rates are computed on;
 - `closed_forms` and `p_active_tied`: the closed-form identities;
 - `count_pmf` and `count_quartiles`: the law of the active count, exact given one scalar;
 - `gate`: the study's own convergence verdict.
@@ -217,6 +218,31 @@ def p_active_tied(k: float, b: float, eps: float) -> float:
 _TRUTH_CHUNK = 10_000
 
 
+def _log_shares(rng: np.random.Generator, k: float, shape: tuple[int, int]) -> np.ndarray:
+    """log phi for `shape` = (draws, dim) Dirichlet(k, ..., k) draws, from log-space Gammas.
+
+    log G = log G' + log(U) / k with G' ~ Gamma(k + 1) and log U drawn as -Exp(1);
+    phi = softmax(log G).
+    """
+    log_g = np.log(rng.gamma(k + 1.0, size=shape)) - rng.standard_exponential(size=shape) / k
+    return log_g - special.logsumexp(log_g, axis=1, keepdims=True)
+
+
+def exact_log_theta(
+    a: float, b: float, k: float, *, dim: int, n: int, seed: int | np.random.SeedSequence,
+) -> np.ndarray:
+    """n exact i.i.d. draws of log theta = logit R2 + log phi, (n, dim), by NumPy alone.
+
+    The ground truth's construction kept whole: R2 ~ Beta(a, b), phi from `_log_shares`. It is
+    what a perfect sampler would return, so the Tier A checks run on it give their null pass rate.
+    """
+    rng = np.random.default_rng(seed)
+    r2 = rng.beta(a, b, size=n)
+    with np.errstate(divide="ignore"):
+        logit_r2 = np.log(r2) - np.log1p(-r2)
+    return logit_r2[:, None] + _log_shares(rng, k, (n, dim))
+
+
 def active_count(log_theta: np.ndarray, eps: float, *, scale: float = 1.0) -> np.ndarray:
     """#{i : scale * theta_i > eps} per draw, from log theta (..., dim) -> (...)."""
     with np.errstate(over="ignore"):
@@ -250,9 +276,7 @@ def ground_truth(
     truth |= {name: np.empty(n, dtype=np.int64) for name in ("n_active", "n_active_rho")}
     for start in range(0, n, _TRUTH_CHUNK):
         stop = min(start + _TRUTH_CHUNK, n)
-        shape = (stop - start, dim)
-        log_g = np.log(rng.gamma(k + 1.0, size=shape)) - rng.standard_exponential(size=shape) / k
-        log_phi = log_g - special.logsumexp(log_g, axis=1, keepdims=True)
+        log_phi = _log_shares(rng, k, (stop - start, dim))
         log_theta = logit_r2[start:stop, None] + log_phi
         truth["log_phi_1"][start:stop] = log_phi[:, 0]
         truth["log_a_sq_1"][start:stop] = log_theta[:, 0]
@@ -284,6 +308,14 @@ def _gamma_quantiles(b: float, log2_n: int) -> np.ndarray:
     xi = special.gammaincinv(b, _qmc_uniforms(log2_n)[:, 0])
     xi.setflags(write=False)
     return xi
+
+
+@lru_cache(maxsize=256)
+def _beta_quantiles(a: float, c: float, log2_n: int) -> np.ndarray:
+    """B = F_Beta(a, c)^-1(u) at the second Sobol coordinate: fixed per (a, k) while b moves."""
+    inv_b = special.betaincinv(a, c, _qmc_uniforms(log2_n)[:, 1])
+    inv_b.setflags(write=False)
+    return inv_b
 
 
 def _binomial_mixture(p: np.ndarray, dim: int) -> np.ndarray:
@@ -332,7 +364,7 @@ def count_pmf(
         t = xi
     elif a < total:
         with np.errstate(divide="ignore"):
-            t = xi / special.betaincinv(a, total - a, _qmc_uniforms(qmc_log2)[:, 1])
+            t = xi / _beta_quantiles(float(a), float(total - a), qmc_log2)
     else:
         raise ValueError(
             f"a = {a} > k * dim = {total}: the active count has no exact one-scalar mixture there"

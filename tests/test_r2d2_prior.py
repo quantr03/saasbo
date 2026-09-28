@@ -24,7 +24,9 @@ from experiments.r2d2_prior import (
     ground_truth, half_cauchy_count_pmf, p_active_tied, pmf_quantile, prior_model,
 )
 from experiments.r2d2_prior_study import (
-    hyperparameters, main, median_matched_k, run_nuts, tier_a_statistics, tier_b_row, tier_c_row,
+    K_BOUND, K_BOUND_SENSITIVITY, CalibrationConfig, calibrate, hyperparameters, main,
+    median_roots_in_k, null_pass_rate, parse_point, run_nuts, tier_a_statistics, tier_b_row,
+    tier_c_row,
 )
 from sagp.gp import ACTIVE_EPS, ALPHA_AMPLITUDE, NUTSConfig, RHO_EPS
 
@@ -144,9 +146,41 @@ def test_the_half_cauchy_target_and_the_tied_median_match():
     # The four cells' prior count, as `test_alpha_matches_reference_count` states it.
     assert pmf_quantile(target, 0.5) == 37
     assert pmf_quantile(target, 0.25) in (16, 17) and pmf_quantile(target, 0.75) in (64, 65)
-    k = median_matched_k(None, 0.5, target, dim=100, eps=ACTIVE_EPS)  # tied: a = k * dim
+    roots = median_roots_in_k(None, 0.5, target, dim=100, eps=ACTIVE_EPS)  # tied: a = k * dim
+    assert [branch for _, branch in roots] == ["rising"]  # one root: the tied median rises in k
+    k = roots[0][0]
     assert 0.085 < k < 0.095
     assert pmf_quantile(count_pmf(100 * k, 0.5, k, ACTIVE_EPS, dim=100), 0.5) == 37
+
+
+def test_the_untied_median_can_match_at_two_k():
+    # Where median omega < eps D = 2 the median rises, peaks and falls in k, so matching it in k
+    # alone does not fix k: at (a, b) = (10, 5.573) it crosses the target up near k = 3.3 and back
+    # down near k = 4.8 (the review of f2b7d646f).
+    target = half_cauchy_count_pmf(ALPHA_AMPLITUDE, ACTIVE_EPS, dim=100)
+    roots = median_roots_in_k(10.0, 5.573, target, dim=100, eps=ACTIVE_EPS)
+    assert [branch for _, branch in roots] == ["rising", "falling"]
+    (k_up, _), (k_down, _) = roots
+    assert 3.1 < k_up < 3.5 and 4.7 < k_down < 5.3
+    for k in (k_up, k_down):
+        assert pmf_quantile(count_pmf(10.0, 5.573, k, ACTIVE_EPS, dim=100), 0.5) == 37
+
+
+@pytest.mark.slow
+def test_the_constrained_search_matches_the_median_inside_its_k_bounds():
+    """Ruling R15's search on a three-point profile: about 15 s, most of it the reported rows'
+    root listings at the full 2^14 resolution, so slow-marked by the repository's 10 s rule."""
+    config = CalibrationConfig(a_grid=(1.0, 1.5, 2.0), k_scan=6, trend_a=(), refine=False)
+    calibration = calibrate(config)
+    target = half_cauchy_count_pmf(ALPHA_AMPLITUDE, ACTIVE_EPS, dim=100)
+    for name, bound in (("C_untied", K_BOUND), ("C_untied_k1", K_BOUND_SENSITIVITY)):
+        point = calibration[name]
+        a, b, k = point["a"], point["b"], point["k"]
+        assert k <= bound and a >= 0.5 and b >= 0.5 and a <= 100 * k, name
+        assert pmf_quantile(count_pmf(a, b, k, ACTIVE_EPS, dim=100), 0.5) == 37, name
+    tied = calibration["C_tied"]
+    assert math.isclose(tied["a"], 100 * tied["k"]) and tied["b"] == 0.5
+    assert calibration["C_untied_k1"]["k"] > K_BOUND  # the looser bound is used, not the rule's
 
 
 def test_forward_draws_miss_the_prior_for_i1_only():
@@ -261,10 +295,37 @@ def test_tier_a_checks_pass_exact_draws_and_fail_a_shifted_law():
     # The global scale off by a factor e moves every coordinate's mean by 12 standard errors.
     shifted = tier_a_statistics(exact + 1.0, quiet, a=a, b=b, alpha=alpha, truth=truth)
     assert shifted["verdict"] == "fail" and shifted["frac_outside_mean"] > 0.9
+    # A failing verdict names each failing check with its statistic against its tolerance.
+    assert "mean_log_a_sq" in shifted["failed_checks"]
+    assert "mean_log_a_sq: fraction outside 1 > 0.01" in shifted["margins"]
+    assert good["margins"] == ""
     # 41 divergences in 4,000 draws is more than 1 %: neither a pass nor a fail.
     noisy = dict(quiet, diverging=np.arange(n) < 41)
     assert tier_a_statistics(exact, noisy, a=a, b=b, alpha=alpha, truth=truth)["verdict"] == (
         "not evaluable")
+
+
+def test_the_null_pass_rate_is_reproducible_from_its_seed():
+    dim, n = 20, 400
+    a, b, alpha = hyperparameters("P1", dim)
+    truth = ground_truth(a, b, alpha / dim, dim=dim, n=20_000, seed=0)
+    first = null_pass_rate(a, b, alpha, dim=dim, n_draws=n, truth=truth, replicates=12, seed=5)
+    again = null_pass_rate(a, b, alpha, dim=dim, n_draws=n, truth=truth, replicates=12, seed=5)
+    assert first == again
+    assert 0.0 <= first["null_pass_rate"] <= 1.0 and first["null_replicates"] == 12
+    assert set(first["null_fail_by_check"]) <= {
+        "mean_log_a_sq", "var_log_a_sq", "log_R2", "log_omega", "phi_pairs", "ks", "count",
+        "p_active"}
+
+
+def test_point_option_parses_a_named_point_and_rejects_malformed_ones(capsys):
+    assert parse_point("C_mine=1.5,0.75,0.47") == ("C_mine", 1.5, 0.75, 0.47)
+    for bad in ("C_mine=1.5,0.75", "=1,1,1", "C_mine=a,b,c", "C_mine=-1,1,1", "C mine=1,1,1",
+                "P1=1,1,1"):
+        with pytest.raises(SystemExit) as exit_info:
+            main(["--point", bad, "--tiers", "D"])
+        assert exit_info.value.code == 2, bad
+    assert "--point" in capsys.readouterr().err
 
 
 def test_cli_help_exits_zero(capsys):
