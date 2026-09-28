@@ -327,8 +327,8 @@ def test_a_new_prior_string_is_read_out_as_its_twin(monkeypatch, twin_key):
     # A registry entry that differs from its twin in nothing but the prior string must be read
     # out exactly as the twin: the readouts may depend on the declared native site, never on the
     # string. Dispatching on the string misroutes three of the four (share_hat None, KeyError
-    # 'a_sq', QMC instead of exact).
-    cell = dataclasses.replace(CELLS[twin_key], prior=twin_key[1] + "_x")
+    # 'a_sq', QMC instead of exact). The string is opaque, so no prefix test on it can pass.
+    cell = dataclasses.replace(CELLS[twin_key], prior="twin")
     monkeypatch.setitem(gp.CELLS, cell.key, cell)
     X, y, samples = _draws_for(CELLS[twin_key].native_site, S=3, D=4, seed=31)
     ours = readouts.readouts(_fitted(cell.key, X, y, samples), sobol_n=256)

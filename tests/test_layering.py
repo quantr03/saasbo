@@ -5,10 +5,10 @@ Rules (a)-(c) run one way through the `sagp`/`experiments` split; rule (d) is th
 `synthobj` off the torch stack, so `import synthobj` works on a machine with neither torch nor
 botorch installed and only `synthobj/botorch_adapter.py` -- the module nobody imports at package
 import -- may name them. Rule (e) keeps a cell's parameterization where the cell declares it, in
-its `native_site`: nothing under `sagp/` or `experiments/` compares against a prior string, so a
-new cell can share its twin's parameterization under a prior string of its own. All five are
-properties of the source, not of any run, so they are checked with `ast` over every file rather
-than by importing anything. Each test also feeds its checker a deliberately violating source
+its `native_site`: nothing under `sagp/` or `experiments/` compares a cell's prior against a prior
+string, so a new cell can share its twin's parameterization under a prior string of its own. All
+five are properties of the source, not of any run, so they are checked with `ast` over every file
+rather than by importing anything. Each test also feeds its checker a deliberately violating source
 string, so a checker that quietly stopped looking would fail here instead of passing vacuously
 over a tree that happens to be clean.
 """
@@ -49,8 +49,12 @@ _ALLOWED_SAGP_IMPORTS: dict[str, set[str]] = {
 }
 
 # The prior strings rule (e) forbids comparing against: the ones a dispatch written for the four
-# half-Cauchy cells would name.
-_PRIOR_STRINGS = frozenset({"amplitude", "lengthscale"})
+# half-Cauchy cells would name, and the R2-D2 cells' own, so no dispatch on those starts either.
+_PRIOR_STRINGS = frozenset({"amplitude", "lengthscale", "amplitude_r2d2", "lengthscale_r2d2"})
+# A literal holding one of these beside a prior string is a cell key, whatever it is compared to.
+_STRUCTURE_STRINGS = frozenset({"additive", "product"})
+# The comparisons a dispatch is written with.
+_DISPATCH_OPS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn)
 
 
 def _imported_modules(source: str) -> set[str]:
@@ -111,15 +115,46 @@ def _private_sagp_uses(source: str) -> list[str]:
     return sorted(private)
 
 
+def _literal_strings(node: ast.AST) -> set[str]:
+    """Every string in a constant or a Tuple/List/Set literal, at any depth of nesting."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return set().union(*(_literal_strings(element) for element in node.elts))
+    return set()
+
+
+def _holds_a_prior(node: ast.AST) -> bool:
+    """A cell-key subscript `X[1]` or a `.prior` attribute: where a cell's prior string lives."""
+    if isinstance(node, ast.Subscript):
+        return isinstance(node.slice, ast.Constant) and node.slice.value == 1
+    return isinstance(node, ast.Attribute) and node.attr == "prior"
+
+
 def _prior_string_comparisons(source: str) -> list[int]:
-    """Lines comparing anything against a bare prior string, alone or inside a tuple."""
+    """Lines comparing a cell's prior against a prior string: a dispatch on the string.
+
+    A comparison (==, !=, in, not in) against a literal holding a prior string at any depth counts
+    when the other side is `X[1]` or `.prior`, or when the literal also holds a structure string
+    (it is then a cell key). A site-name filter such as `site in ("mean", "lengthscale")` is
+    neither: "lengthscale" is a site name too.
+    """
     lines = []
     for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Compare):
-            for operand in (node.left, *node.comparators):
-                parts = operand.elts if isinstance(operand, ast.Tuple) else [operand]
-                if any(isinstance(p, ast.Constant) and p.value in _PRIOR_STRINGS for p in parts):
-                    lines.append(node.lineno)
+        if not isinstance(node, ast.Compare):
+            continue
+        operands = (node.left, *node.comparators)
+        pairs = [
+            (literal, other)
+            for op, left, right in zip(node.ops, operands, operands[1:])
+            if isinstance(op, _DISPATCH_OPS)
+            for literal, other in ((left, right), (right, left))
+        ]
+        for literal, other in pairs:
+            strings = _literal_strings(literal)
+            if strings & _PRIOR_STRINGS and (strings & _STRUCTURE_STRINGS or _holds_a_prior(other)):
+                lines.append(node.lineno)
+                break
     return lines
 
 
@@ -175,5 +210,11 @@ def test_the_objectives_never_import_the_torch_stack(path: Path):
 def test_nothing_dispatches_on_a_prior_string(path: Path):
     """Rule (e): a cell's parameterization is its declared `native_site`, never its prior string."""
     assert _prior_string_comparisons(path.read_text()) == []
-    violating = 'a = cell[1] == "amplitude"\nb = key == ("product", "lengthscale")\n'
-    assert _prior_string_comparisons(violating) == [1, 2]
+    violating = (
+        'a = cell[1] == "amplitude"\n'
+        'b = key == ("product", "lengthscale")\n'
+        'c = key in (("product", "amplitude"),)\n'
+        'd = cell[1] in {"lengthscale"}\n'
+        'e = site in ("mean", "lengthscale")\n'  # a site-name filter, not a dispatch
+    )
+    assert _prior_string_comparisons(violating) == [1, 2, 3, 4]
