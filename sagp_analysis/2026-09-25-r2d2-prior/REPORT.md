@@ -8,10 +8,13 @@ This study samples the prior alone. Nothing here fits data or touches the BO loo
 
 - **The harness check holds.** The half-Cauchy control passes the depth-6 gate at p = 100 for all three seeds: r_hat max 1.023-1.047, ESS min 55.7-83.9, no divergence.
 - **I2 and I3 pass the acceptance rule; I1 does not.** All three are exact on Tier A at P1, and I1 and I2 at P3. But I1, the supervisor's reference, fails the depth-6 gate at P1 in 3 of 3 seeds (r_hat 1.31-1.40, ESS 6.5-7.0, every iteration at the 63-step cap). I2, the reference-form copula Quan chose, passes the depth-6 gate in all 36 of its depth-6 runs, at p = 30 and p = 100 and at all six points; I3 passes all 18 of its own.
-- **At the calibrated points.** I2 at C_untied: Tier A **fail** (the variance check: 5 of 100 coordinates outside their 3-sigma band; null pass rate 0.835), and the Tier B depth-6 gate 3/3. I2 at C_untied_k1: Tier A pass (null 0.86), and Tier B 3/3.
+- **At the calibrated points.** I2 at C_untied: Tier A **fail** (the variance check: 5 of 100 coordinates outside their 3-sigma band; null pass rate 0.835), and the Tier B depth-6 gate 3/3. I2 at C_untied_k1: Tier A pass (null 0.86), and Tier B 3/3. At C_tied, the tied point of D1's fallback, I2 and I3 both pass Tier A (null 0.84) and Tier B (3/3).
 - **The C_untied fail is a false fail of the variance check on a NUTS chain, not a wrong density** (supplementary). The check's tolerance uses the ESS of the draws of log a_sq_i, median 4,767 from 4,000 draws. That is 1.67 times the ESS of their squared deviations, which is the ESS a variance estimate actually has. On the latter, 0 of 100 coordinates are outside. The i.i.d. null cannot show this, because both ESS equal the draw count there, and it never puts more than 4 coordinates outside in 1,200 replicates. Over nine further seeds, I2 fails the protocol's Tier A at P1, C_untied and C_untied_k1 alike (3, 3 and 5 of 9 seeds). With the variance check on its own ESS, 8 of 10 chains pass at each of the three points, which is the null's rate.
-- **G0.** The harness condition is met. The program condition is met (I2 and I3). The calibrated-point condition is **not met at C_untied** by the harness's verdict, and met at C_untied_k1. G0 therefore stops here for Quan's decision.
-- **Recommendation (D1-D2; a recommendation, not a choice).** Form F = reference (I2). Calibration C = C_untied: (a, b, k) = (1.578, 0.8044, 0.4994), alpha = 49.94. It matches the median (37); its quartiles are (14, 37, 61) against the half-Cauchy's (17, 37, 64), a residual of 3 on each quartile (continuous 2.93). Its Tier A fail is read as the false fail above. The alternative is C_untied_k1 = (3.049, 1.674, 0.9981), residual 3 (q25 3, q75 2; continuous 2.50). It passes every protocol check, but it lies outside D2's k ≤ 1/2, where its shares are near-flat (Dir(1)). Its Tier A pass is also no stronger evidence than C_untied's fail.
+- **G0.** The harness condition is met. The program condition is met (I2 and I3). The calibrated-point condition is **not met at C_untied** by the harness's verdict. It is met at C_untied_k1, and at C_tied, the point of D1's fallback, which this failure triggers. G0 therefore stops here for Quan's decision.
+- **Recommendation (D1-D2; a recommendation, not a choice).** Form F = reference (I2). Calibration C = C_untied: (a, b, k) = (1.578, 0.8044, 0.4994), alpha = 49.94. It matches the median (37); its quartiles are (14, 37, 61) against the half-Cauchy's (17, 37, 64), a residual of 3 on each quartile (continuous 2.93). Its Tier A fail is read as the false fail above. There are three alternatives (section G0).
+  - C_untied_k1 = (3.049, 1.674, 0.9981), residual 3 (q25 3, q75 2; continuous 2.50). It passes every protocol check, but it lies outside D2's k ≤ 1/2, where its shares are near-flat (Dir(1)). Its Tier A pass is also no stronger evidence than C_untied's fail.
+  - D1's own fallback: the tied form at b = 0.5, median-matched, C_tied = (9.379, 0.5, 0.09379). It passes every protocol check, in both forms. It is not recommended: its residual is 18, and it puts 0.2 % of R2's mass below 0.6.
+  - Fix the harness's variance check first, then rerun Tier A over several seeds at C_untied before ruling.
 
 ## G0: the stop conditions
 
@@ -21,16 +24,30 @@ This study samples the prior alone. Nothing here fits data or touches the BO loo
 | Program | I2 or I3 passes acceptance: Tier A within tolerance at P1 (and at P3 where represented), and the depth-6 Tier B gate for all three seeds at p = 100 at P1 | I2: Tier A pass at P1 (null 0.88) and at P3 (null 0.91); Tier B at P1 3/3 (r_hat 1.043 / 1.043 / 1.028, ESS 102 / 94.4 / 87.3). I3: Tier A pass at P1 (null 0.88), P3 not representable; Tier B at P1 3/3 (r_hat 1.027 / 1.035 / 1.038, ESS 150 / 136 / 108). | **met** (both) |
 | Calibrated point: C_untied | I2 at C_untied: Tier A within tolerance, and the depth-6 gate 3/3 at p = 100 | Tier A **fail**: var_log_a_sq, 5 of 100 coordinates outside (1 allowed), need_k_var 3.79. Every other check is within tolerance: KS min p 0.012 on 4,000 draws; count quartiles 13 / 38 / 63 against 14 / 37 / 61. Null pass rate 0.835; the null fails this check 2.5 % of the time. Tier B 3/3: r_hat 1.030 / 1.013 / 1.036; ESS 163 / 124 / 159; log a_sq ESS 150 / 150 / 89.1; 0 divergences. | **not met** (Tier A) |
 | Calibrated point: C_untied_k1 | the same at C_untied_k1 | Tier A pass (null 0.86; ESS median / min 4,660 / 3,618). Tier B 3/3: r_hat 1.030 / 1.034 / 1.026; ESS 133.5 / 78.8 / 95.6; log a_sq ESS 137 / 105 / 188; 0 divergences. | **met** |
+| Calibrated point: C_tied (D1's fallback: the tied form at b = 0.5, median-matched) | the same at C_tied, for I3 (the tied form) and for I2 (the reference form, which represents the tie) | I2: Tier A pass (null 0.84; ESS median / min 4,133 / 3,552). Tier B 3/3: r_hat 1.048 / 1.024 / 1.072; ESS 103 / 124 / 96.3; 0 divergences. I3: Tier A pass (null 0.84; ESS 4,377 / 3,326). Tier B 3/3: r_hat 1.027 / 1.035 / 1.038; ESS 150 / 136 / 108; 0 divergences. Against it: residual 18 (quartiles 30 / 37 / 46), and P(R2 < 0.6) = 0.0022. | **met** |
 
-By the plan, a failure at the calibrated point means "stop and ask". Quan, with the supervisor, decides whether C_untied stands, reading its Tier A fail as below, or whether C moves to C_untied_k1 or elsewhere. Nothing in stage 1 that consumes C (Task 6) should start before that ruling.
+By the plan, a failure at the calibrated point means "stop and ask". D1 made the reference form conditional: "the reference (untied) form calibrated on the count quartiles, if it passes stage 0 at that point; the tied form at the paper's b = 0.5, median-matched, as the fallback". By the harness's verdict, that conditional has now triggered. Quan, with the supervisor, has four options:
+
+1. **Keep C_untied,** reading its Tier A fail as the false fail below. This is the recommendation.
+2. **Move to C_untied_k1,** R15's sensitivity point, which passes every protocol check.
+3. **Take D1's fallback, C_tied,** in the tied form (I3) or the reference form (I2). It passes every protocol check in both. It is not recommended. Its residual of 18 matches the half-Cauchy count at the median only: the interquartile range is 16 against 47. And its P(R2 < 0.6) = 0.0022 is the prior-data conflict on R2 of D1's reason 2.
+4. **Fix the harness's variance check first:** put the tolerance on the ESS of the squared deviations, then rerun Tier A over several seeds at C_untied before ruling.
+
+Nothing in stage 1 that consumes C (Task 6) should start before that ruling.
 
 ### Reading the C_untied fail beside the null (ruling R16; supplementary)
 
 R16 asks whether the failing check sits within the null's false-fail profile. At C_untied the variance check fails in 2.5 % of the harness's 200 i.i.d. replicates, never with more than 3 coordinates outside. In 1,000 further replicates (root seed 1) it never has more than 4 outside (Table S2). Against that profile alone, 5 of 100 is outside what i.i.d. draws produce. Three measurements point to the chain as the cause, not the density.
 
 1. **The variance check's tolerance is too tight for these chains.** The harness takes the brief's `3 Var sqrt((kappa - 1) / ESS_i)` with ESS_i the ESS of log a_sq_i itself. On a near-Gaussian target, NUTS draws can be antithetic in x, with ESS above the draw count as here, but not in (x - mean)^2, and the sample variance's standard error depends on the latter. For I2 at C_untied the first ESS is 1.67 times the second (medians 4,767 and 2,879). On the second, 0 of 100 coordinates lie outside 3 sigma, with largest z 2.94 (Table S1). The same correction leaves every I2 and I3 chain of Tier A at 0 coordinates outside. It leaves I1's two variance fails, at C_tied and C_untied_k1, at 1 coordinate each, within the 1 % allowance.
-2. **The global coordinate moved all 100 variances together.** The chain's sample variance of log omega lies 2.64 sigma above its closed form (3.36 against 3.15, on the draws' ESS), and 79 of the 100 coordinates' sample variances lie above theirs. At C_untied, log omega carries 39 % of every log a_sq_i's variance (Var log omega 3.15 of 8.08). One fluctuation of that one shared coordinate therefore shifts all 100 per-coordinate variances the same way. The chain's lowest KS p, 0.012, is on logit R2, which is that same coordinate.
+2. **The global coordinate moved all 100 variances together.** The chain's sample variance of log omega is 3.36 against its closed form's 3.15. On the draws' ESS, the ESS this note argues is wrong for a variance, that is +2.64 sigma; on its own squared-deviation ESS it is +1.68 sigma. 79 of the 100 coordinates' sample variances lie above theirs. At C_untied, log omega carries 39 % of every log a_sq_i's variance (Var log omega 3.15 of 8.08). One fluctuation of that one shared coordinate therefore shifts all 100 per-coordinate variances the same way. The chain's lowest KS p, 0.012, is on logit R2, which is that same coordinate. The most direct evidence is the ten chains at C_untied pooled: the protocol chain and seeds 1-9, 40,000 draws. There, log omega's sample variance is 3.174 against 3.155, a signed z of +0.49 on the summed squared-deviation ESS. The per-coordinate ratio s²/Var is 1.0027 ± 0.0042 (between-chain standard error). Both are the review's figures, and both reproduce in a scratch recomputation (+0.498; 1.0027 ± 0.0042).
 3. **I2's chains fail the protocol's Tier A at the same rate at every point.** Table S3 runs nine further seeds (1-9) at the Tier A budget: 6 pass at P1, 6 at C_untied and 4 at C_untied_k1. With seed 0, the protocol's verdict passes 7, 6 and 5 chains of 10. With the variance check on the squared deviations' ESS and every other check unchanged, 8 of 10 pass at each point, against null pass rates of 0.88, 0.835 and 0.86. C_untied behaves like P1, where the protocol verdict passed and I2 is accepted.
+
+The review of this note (fix round 1) confirmed the argument independently, in theory and by three measurements:
+
+- batch means on the chain give a standard error for s² 1.03 times the squared-deviation one;
+- an AR(1) simulation gives an ESS ratio of 1.63, against theory's 1.62;
+- on exact i.i.d. draws at C_untied the corrected check fails 0.035 and 0.048 of replicates (the 200 and the 1,000), against the harness check's 0.025 and 0.048, so the correction does not loosen the check.
 
 Nothing in I2's construction depends on the point except two things: the table's shape k, verified against the Newton solver at every shape the study uses (worst relative error 9.95e-13, Task 2 review), and the Beta site, which is NumPyro's own. So for NUTS chains the single-seed Tier A verdict is a noisy measurement at every point (section 2).
 
@@ -161,7 +178,7 @@ Table A. The tolerances are binding:
 
 A run with ESS_min below 100, or with more than 1 % of its draws divergent, is not evaluable. Each row carries its point's null pass rate: the same verdict on 200 exact i.i.d. replicates (R16).
 
-Reading (R16). 12 of the 15 chains pass. The three that do not:
+Reading (R16). 11 of the 15 chains pass. Of the four that do not, one is not evaluable and three fail:
 
 - I1 at P2 is not evaluable. Its ESS_min is 3.76 (median 31.4), 99.9 % of its iterations hit the 1,023-step cap, and it has 4 divergences. The tolerance it would need is 4.66 sigma on the means and 4.91 on the variances (need_k). Its count quartiles, (1, 2, 4) against (2, 4, 5), show a stuck chain.
 - I1 at C_tied and at C_untied_k1 fails the variance check, with 2 and 3 coordinates outside. Both are within the null's false-fail profile at those points: the null has 2 or more coordinates outside in 6.0 % and 5.0 % of replicates, and 3 in 0.5 % and 1.0 % (Table S2). They are reported as false fails, not as evidence against I1's density.
@@ -473,7 +490,12 @@ The verdicts above were computed from the harness's output and written into this
   - I1's cap fraction at depth 6, p = 100 reads "92-100 %" where the draft said "every iteration" (P2's chains cap at 92-97 %);
   - the count check "failed on no evaluable chain" where the draft said "on any chain" (I1 at P2, which is not evaluable, fails it);
   - the G0 reading adds the log omega variances (3.36 against 3.15) and the 79 of 100 coordinates above their closed form;
-- the appendix's reproduction of the supplementary scripts, and one row for the checks of this section.
+- the appendix's reproduction of the supplementary scripts, and one row for the checks of this section;
+- fix round 1 after the review (ruling R17), in the decision sections only:
+  - C_tied and the four G0 options;
+  - the Tier A pass count, 11 of 15 where the draft said 12;
+  - log omega's variance z on its own ESS, and the ten-seed pooled result;
+  - the chains' failure rates, now with their intervals.
 
 No verdict, and no number from the harness, changed after the scouting was read.
 
@@ -509,21 +531,21 @@ Item 6's 4,000-draw runs are at depth 6, and this study's Tier A at depth 10, so
 
 **Carry I2 (form "reference") into the next study.** It passes the acceptance rule and every Tier B run. It draws the prior forward correctly. It represents untied points, which the calibration needs: the tied form's residual is 18 at best. And it is the form Quan chose on 2026-09-28. I3 is the tied fallback and passes wherever it applies. I1 is not a candidate at this budget.
 
-**Calibration.** C_untied, recommended under D2 and R15 and subject to the G0 ruling above, or C_untied_k1. The constants Task 6 would take:
+**Calibration.** C_untied is recommended under D2 and R15, subject to the G0 ruling above; the table also gives C_untied_k1 and D1's fallback, C_tied, for the other options. The constants Task 6 would take:
 
-| constant or property | C_untied | C_untied_k1 |
-|---|---|---|
-| `R2D2_FORM` | `"reference"` | `"reference"` |
-| `R2D2_K` | 0.49942145555129697 | 0.9981098100451032 |
-| `R2D2_A` | 1.577790731256835 | 3.0486546035543407 |
-| `R2D2_B` | 0.8043916352200708 | 1.67377856733023 |
-| alpha = K D | 49.94 | 99.81 |
-| count quartiles (target 17 / 37 / 64) | 14 / 37 / 61 | 14 / 37 / 62 |
-| `Q25_RESIDUAL`, `Q75_RESIDUAL` | 3, 3 | 3, 2 |
-| continuous residual | 2.93 | 2.50 |
-| sd log omega; P(R2 < 0.6) | 1.78; 0.37 | 1.09; 0.39 |
-| I2, Tier A (seed 0) | fail: variance check, 5 of 100 (a false fail, supplementary) | pass |
-| I2, Tier B depth 6, p = 100 | 3/3; ESS 124-163 | 3/3; ESS 78.8-133.5 |
+| constant or property | C_untied | C_untied_k1 | C_tied (D1's fallback) |
+|---|---|---|---|
+| `R2D2_FORM` | `"reference"` | `"reference"` | `"tied"` (D1), or `"reference"` |
+| `R2D2_K` | 0.49942145555129697 | 0.9981098100451032 | 0.09378587497618585 |
+| `R2D2_A` | 1.577790731256835 | 3.0486546035543407 | None under `"tied"`; 9.378587497618584 (= K D) under `"reference"` |
+| `R2D2_B` | 0.8043916352200708 | 1.67377856733023 | 0.5 |
+| alpha = K D | 49.94 | 99.81 | 9.379 |
+| count quartiles (target 17 / 37 / 64) | 14 / 37 / 61 | 14 / 37 / 62 | 30 / 37 / 46 |
+| `Q25_RESIDUAL`, `Q75_RESIDUAL` | 3, 3 | 3, 2 | 13, 18 |
+| continuous residual | 2.93 | 2.50 | 18.5 |
+| sd log omega; P(R2 < 0.6) | 1.78; 0.37 | 1.09; 0.39 | 2.25; 0.0022 |
+| I2, Tier A (seed 0) | fail: variance check, 5 of 100 (a false fail, supplementary) | pass | pass (I3: pass) |
+| I2, Tier B depth 6, p = 100 | 3/3; ESS 124-163 | 3/3; ESS 78.8-133.5 | 3/3; ESS 96.3-124 (I3: 3/3; 108-150) |
 
 **What this study cannot establish, and the next one must:**
 
@@ -536,7 +558,7 @@ Item 6's 4,000-draw runs are at depth 6, and this study's Tier A at depth 10, so
 
 ## 10. Not done or not verified
 
-- **One Tier A chain per point, as the protocol prescribes.** Its verdict is a single draw from a check that NUTS chains fail at 30-50 % at the protocol tolerance (Table S3). Only I2, and only at three points, was run at further seeds (supplementary).
+- **One Tier A chain per point, as the protocol prescribes.** Its verdict is a single draw from a noisy check. At the protocol tolerance, I2's chains, ten per point, failed it 3, 4 and 5 times at P1, C_untied and C_untied_k1 (Table S3). The 95 % intervals are 7-65 %, 12-74 % and 19-81 %, and the pooled rate is 12 of 30 (23-59 %). That is far above the i.i.d. null's failure rates of 12-16.5 %: the binomial tail is 4.5e-4 at the three per-point null rates. With the variance check on the corrected ESS, 8 of 10 pass at each point. Only I2, and only at three points, was run at further seeds (supplementary).
 - **The null pass rate models i.i.d. draws, not chains.** No chain-level null exists beyond Table S3.
 - **The variance check's ESS.** The harness uses the ESS of log a_sq for the variance tolerance, as the brief's formula reads. The tolerance on the squared deviations' ESS was computed only in the supplementary analysis; the harness and its verdicts are unchanged.
 - **The Tier A count check** has a fixed median tolerance of 1. For chains with ESS well below 4,000 it fails more often than the null says. It failed on no evaluable chain here.
