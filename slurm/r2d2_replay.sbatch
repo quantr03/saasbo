@@ -28,8 +28,10 @@
 # replay fails does not stop the task's other seeds; the task then exits 1, and a re-submission
 # retries only what is missing.
 #
-# GPU cost probe (Task 11, before the bulk array), t = 199 of aligned10 seed 0 for all eight cells
-# into runs_smoke/replay_probe/:
+# GPU cost probe (Task 11, before the bulk array): sixteen fits, t = 100 then t = 199 for each cell,
+# read at t = 199 -- aligned10 seed 0, all eight cells, one process per cell, into
+# runs_smoke/replay_probe/. The t = 100 fit takes the process's one-time start-up, so the t = 199
+# fit the cost criterion reads holds a fit and its compilation alone (ruling R28):
 #   sbatch --export=ALL,PROBE=1 --array=0 slurm/r2d2_replay.sbatch
 # Submit from the repo root so logs/ resolves. RUNS and OUT override the roots read and written.
 set -eo pipefail
@@ -67,7 +69,7 @@ if [ "$PROBE" = 1 ]; then
     status=0
     for cell in "${R2D2_CELLS[@]}" "${HC_CELLS[@]}"; do
         srun python -m experiments.replay fit --runs "$RUNS" --out runs_smoke/replay_probe/ \
-            --family aligned10 --seed 0 --cell "$cell" --t 199 || status=1
+            --family aligned10 --seed 0 --cell "$cell" --t 100,199 || status=1
     done
     exit $status
 fi

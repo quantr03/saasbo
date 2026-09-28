@@ -463,19 +463,21 @@ def _fake_stored_run(root: Path, method: str, seed: int, ts: tuple[int, ...]) ->
 
 
 def _fake_replay(root: Path, method: str, source: str, seed: int, ts: tuple[int, ...],
-                 marker: float) -> None:
+                 marker: float, *, status: str = "ok", scores: list[float] = _REPLAY_SCORES,
+                 fit_wall_s: dict[int, float] | None = None) -> None:
     replay_dir = root / "aligned3" / method.replace("/", "-") / f"seed{seed:02d}"
     rows = [
         {"t": t, "n": t, "method": method, "source_method": source, "family": "aligned3",
-         "seed": seed, "nuts_seed": 7, "budget": "16/16/4/6", "status": "ok", "reason": "",
-         **_diagnostics(marker + seed / 10 + t / 1000), "fit_wall_s": marker + t,
+         "seed": seed, "nuts_seed": 7, "budget": "16/16/4/6", "status": status, "reason": "",
+         **_diagnostics(marker + seed / 10 + t / 1000),
+         "fit_wall_s": marker + t if fit_wall_s is None else fit_wall_s[t],
          "readout_wall_s": 1.0, "y_mean": 0.0, "y_std": 1.0, "r2d2_r2": 0.4,
          "first_order_r2": 0.6, "device": "replay-gpu"}
         for t in ts
     ]
     _write_csv(replay_dir / "replay.csv", list(replay_module._REPLAY_FIELDS), rows)
     _write_csv(replay_dir / "coords.csv", ["t", "i", "native_median", "p_active", "sobol_hat"],
-               _coords(ts, _REPLAY_SCORES, sobol=True))
+               _coords(ts, scores, sobol=True))
 
 
 def test_compare_joins_one_row_per_cell_family_seed_and_t(tmp_path):
@@ -529,3 +531,37 @@ def test_compare_joins_one_row_per_cell_family_seed_and_t(tmp_path):
     assert (out / "tables" / "cost.csv").exists()
     report = (out / "REPORT.md").read_text()
     assert "G2" in report and "4 of 960" in report and "2 of 240" in report
+
+
+def test_the_cost_criterion_reads_t_199_alone(tmp_path):
+    """Ruling R28: G2's cost criterion pairs each R2-D2 fit with its twin's control refit at
+    t = 199 only, when every replay process has already fitted its cell once. Here the t = 50 and
+    t = 100 pairs cost 3 times the control (a process's one-time start-up, in the replay) and the
+    t = 199 pair 1.1 times: read over every t, the median ratio of 3 would stop the gate on cost.
+    The control reproduces its stored fits exactly, so the harness holds and the verdict turns on
+    the cost reading and the R2-D2 cell alone (its median n_eff_min, about 2, reads FAIL)."""
+    runs, replay, out = tmp_path / "runs", tmp_path / "replay", tmp_path / "report"
+    ts = (50, 100, 199)
+    _fake_stored_run(runs, "additive/amplitude", 0, ts)
+    _fake_replay(replay, "additive/amplitude_r2d2", "additive/amplitude", 0, ts, 2.0,
+                 fit_wall_s={50: 30.0, 100: 30.0, 199: 11.0})
+    _fake_replay(replay, "additive/amplitude", "additive/amplitude", 0, ts, 1.0,
+                 status="excluded", scores=_STORED_SCORES, fit_wall_s={t: 10.0 for t in ts})
+
+    compare(runs, replay, out)
+
+    lines = (out / "REPORT.md").read_text().splitlines()
+    verdict = next(line for line in lines if line.startswith("**G2: "))
+    assert verdict.startswith("**G2: FAIL") and "cost" not in verdict
+    (cost_row,) = [
+        line for line in lines if line.startswith("| additive/amplitude_r2d2 | replay-gpu")
+    ]
+    cell, device, pairs, mine, theirs, ratio, holds = (
+        column.strip() for column in cost_row.strip("|").split("|")
+    )
+    assert (pairs, mine, theirs, ratio, holds) == ("1", "11", "10", "1.1", "yes")
+    # cost.csv keeps every t for the record; only the criterion reads t = 199 alone.
+    cost = _read_rows(out / "tables" / "cost.csv")
+    assert {r["t"] for r in cost if (r["kind"], r["method"]) == ("replay", cell)} == {
+        "50", "100", "199", "all"
+    }

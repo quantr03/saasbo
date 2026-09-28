@@ -478,11 +478,14 @@ def _append_row(path: Path, row: dict[str, object]) -> None:
 # median n_eff_min at or below 10. PASS: every R2-D2 cell at or below 0.60 and at or above 16.
 # Harness: each control cell's exclusion rate within 0.15 of its stored fits', and its median
 # |delta r_hat_max| and |delta AP_native| against them at most 0.05. Cost: an R2-D2 cell's median
-# fit_wall_s at most 1.5 times its twin's control refits' on the same device.
+# fit_wall_s at t = 199 at most 1.5 times its twin's control refits' there, on the same device.
 _G2_FAIL_EXCLUSION, _G2_FAIL_N_EFF = 0.90, 10.0
 _G2_PASS_EXCLUSION, _G2_PASS_N_EFF = 0.60, 16.0
 _G2_HARNESS_EXCLUSION, _G2_HARNESS_R_HAT, _G2_HARNESS_AP = 0.15, 0.05, 0.05
 _G2_COST_RATIO = 1.5
+# The one t the cost criterion reads (ruling R28): by t = 199 every replay process has fitted its
+# cell once, so the reading excludes a process's one-time start-up.
+_G2_COST_T = 199
 # The full replay: 4 R2-D2 cells x 8 families x 10 seeds x 3 t, and 4 controls x 2 x 10 x 3.
 _G2_R2D2_FITS, _G2_CONTROL_FITS = 960, 240
 # The three groups the per-group diagnostics attribute a gate failure to.
@@ -502,7 +505,8 @@ def compare(
     iteration reached the tree cap, for the replay and for its stored fits),
     `identification.csv` (AP of native_median and of sobol_hat, and precision, recall and F1 of
     p_active > 0.5, against the manifest's S, for each replayed and each stored fit) and
-    `cost.csv` (fit_wall_s by cell and device); `REPORT.md` states the G2 verdict with its numbers.
+    `cost.csv` (fit_wall_s by cell and device, every t); `REPORT.md` states the G2 verdict with its
+    numbers, its cost criterion reading t = 199 alone (`_G2_COST_T`, ruling R28).
     NumPy and csv only, so it runs in the study environment.
     """
     runs, replay, out = Path(runs), Path(replay), Path(out)
@@ -869,9 +873,12 @@ def _report(joined: list[dict[str, object]], runs: Path, replay: Path) -> str:
         harness.append([cell, len(rows), exclusion, stored, abs(exclusion - stored), d_r_hat, d_ap,
                         "yes" if holds else "no"])
 
-    cost = []  # [cell, device, pairs, median fit_wall_s, control's, ratio, holds]
+    cost = []  # [cell, device, pairs, median fit_wall_s, control's, ratio, holds], at t = 199
     for cell, rows in r2d2.items():
-        paired = [row for row in rows if row["control_device"] == row["device"]]
+        paired = [
+            row for row in rows
+            if row["t"] == _G2_COST_T and row["control_device"] == row["device"]
+        ]
         for device in sorted({row["device"] for row in paired}):
             on_device = [row for row in paired if row["device"] == device]
             mine = _median(row["fit_wall_s"] for row in on_device)
@@ -887,16 +894,20 @@ def _report(joined: list[dict[str, object]], runs: Path, replay: Path) -> str:
         stops.append("harness -- the control refits do not reproduce their stored fits: stop, "
                      "fix, rerun")
     if any(row[-1] == "no" for row in cost):
-        stops.append(f"cost -- an R2-D2 cell costs more than {_G2_COST_RATIO} times its control "
-                     "on the same device: ask before the bulk array")
+        stops.append(f"cost -- at t = {_G2_COST_T} an R2-D2 cell costs more than "
+                     f"{_G2_COST_RATIO} times its control on the same device: ask before the "
+                     "bulk array")
     if not cells:
         verdict = "NO R2-D2 FITS: nothing to decide"
     elif stops:
         verdict = "STOP (" + "; ".join(stops) + ")"
-    elif not harness or not cost:
-        verdict = ("INCONCLUSIVE: no control refit " + ("at all" if not harness else "shares a "
-                   "device with an R2-D2 fit") + ", so the harness or the cost is unchecked -- "
-                   "stop and ask")
+    elif not harness:
+        verdict = (
+            "INCONCLUSIVE: no control refit at all, so the harness is unchecked -- stop and ask"
+        )
+    elif not cost:
+        verdict = (f"INCONCLUSIVE: no R2-D2 fit at t = {_G2_COST_T} has a control refit on its "
+                   "device, so the cost is unchecked -- stop and ask")
     elif any(row[-1] == "FAIL" for row in cells):
         verdict = ("FAIL: the half-Cauchy amplitude signature -- nothing in-loop is launched; "
                    "Quan decides the budget for all eight cells (D10)")
@@ -942,9 +953,13 @@ def _report(joined: list[dict[str, object]], runs: Path, replay: Path) -> str:
         "stored fits of the same (family, seed, t).\n\n",
         _md_table(["cell", "fits", "exclusion rate", "stored exclusion rate", "|delta|",
                    "median |delta r_hat_max|", "median |delta AP_native|", "holds"], harness),
-        "\n## Cost: R2-D2 against its twin's control refits on the same device\n\n",
-        f"Medians over the (family, seed, t) where both were fitted on one device; holds at a "
-        f"ratio of {_G2_COST_RATIO} or less.\n\n",
+        f"\n## Cost at t = {_G2_COST_T}: R2-D2 against its twin's control refits on the same "
+        "device\n\n",
+        f"Medians of fit_wall_s at t = {_G2_COST_T} alone, over the (family, seed) where the "
+        "R2-D2 fit and its twin's control refit ran on one device; holds at a ratio of "
+        f"{_G2_COST_RATIO} or less. By then every replay process has fitted its cell once, so "
+        "the reading holds a fit and its compilation at that n and no one-time start-up (ruling "
+        "R28); `tables/cost.csv` keeps every t.\n\n",
         _md_table(["cell", "device", "pairs", "median fit_wall_s", "control's median",
                    "ratio", "holds"], cost),
         "\n## Per-group attribution\n\n",
@@ -962,7 +977,8 @@ def _report(joined: list[dict[str, object]], runs: Path, replay: Path) -> str:
         "(`at_tree_cap`: every sampling iteration at 2^depth - 1 leapfrog steps).\n",
         "- `tables/identification.csv`: AP of native_median and of sobol_hat, and precision, "
         "recall and F1 of p_active > 0.5, against S.\n",
-        "- `tables/cost.csv`: fit_wall_s by cell, device and t.\n",
+        "- `tables/cost.csv`: fit_wall_s by cell, device and t, every t (the cost criterion "
+        f"reads t = {_G2_COST_T}).\n",
     ])
 
 
