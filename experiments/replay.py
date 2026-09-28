@@ -39,7 +39,8 @@ import numpy as np
 from experiments.runlog import RunConfig, RunLogger, config_hash, run_dir_for
 from sagp.bo import iteration_rngs
 from sagp.diagnostics import DiagThresholds, Diagnostics
-from sagp.gp import CELLS, Cell, NUTSConfig, fit, standardize
+from sagp.gp import CELLS, R2D2_K, Cell, NUTSConfig, fit, standardize
+from sagp.r2d2 import log_gamma_icdf
 from sagp.readouts import first_order_r2, r2d2_r2, readouts
 
 
@@ -173,6 +174,11 @@ def run_replay(
     others nothing. Each fit takes `alpha`, `fixed_noise`, `thresholds` and `ell_prior` from the
     source's configuration, and its budget too unless `nuts` (every field) or `max_tree_depth`
     replaces it; the readouts take `sobol_n`, and compute the Sobol index where the loop did.
+    A twin replay -- a cell other than the source's -- is refused when the source set `alpha`,
+    the half-Cauchy global scale there but k on an R2-D2 cell (ruling R27); a control takes the
+    source's `alpha` through. Before its first timed fit the process builds the R2-D2 map's
+    table at `R2D2_K`, whatever the cell (ruling R26), so `fit_wall_s` holds a fit and that n's
+    compilation but not the table's one-time build.
 
     The replay directory, `<out>/<family>/<method>/seed##` (`run_dir_for`): `replay.csv`, one row
     per t (`_REPLAY_FIELDS`); `coords.csv` and `samples/t###.npz`, written by `RunLogger` exactly
@@ -199,6 +205,13 @@ def run_replay(
             f"{source.dir}/manifest.json names family={source.cfg.family}, "
             f"seed={source.cfg.seed}, method={source.cfg.method}, not the run its path does"
         )
+    if method != source_method and source.cfg.alpha is not None:
+        raise ValueError(
+            f"{source.dir} ran at alpha={source.cfg.alpha!r}: alpha is the half-Cauchy global "
+            "scale in the source's family but k on an R2-D2 cell, so a twin replay cannot carry "
+            f"it over to {method} (ruling R27); only a control replay, a cell on its own run, "
+            "takes the source's alpha"
+        )
     budget = source.cfg.nuts if nuts is None else nuts
     if max_tree_depth is not None:
         budget = dataclasses.replace(budget, max_tree_depth=max_tree_depth)
@@ -224,12 +237,21 @@ def run_replay(
     todo = [t for t in datasets if t not in done]
     if not todo:
         return replay_dir
+    # A process's one-time start-up, done before its first timed fit so that no `fit_wall_s`
+    # carries it (ruling R26): the R2-D2 map's table at R2D2_K, built on first use and cached per
+    # shape. Every cell's replay builds it, so every cell's first fit starts from the same state.
+    start = time.perf_counter()
+    jax.block_until_ready(log_gamma_icdf(np.zeros(1), R2D2_K))
+    startup_s = time.perf_counter() - start
     logger = RunLogger(replay_dir, cfg)
     if logger.manifest.exists():
         logger.note_resume()
     else:
         _write_manifest(logger, source)
-    logger.log(f"replay method={method} on {source.dir} t={todo} budget={budget_text}")
+    logger.log(
+        f"replay method={method} on {source.dir} t={todo} budget={budget_text}; "
+        f"R2-D2 table at k={R2D2_K!r} ready in {startup_s:.3f} s before the first fit"
+    )
     _drop_unfinished(logger, done)
     for t in todo:
         _replay_one(logger, source, cell, t, datasets[t], budget, budget_text)
@@ -343,8 +365,9 @@ def _replay_one(
     """Fit, read out and record one t: the coordinates, the draws, then the row, as the loop does.
 
     `fit_wall_s` is taken around `fit` as the loop takes it (`sagp.bo`), and so includes the
-    compilation every new n costs; the draws are on the host before `fit` returns, so the clock
-    does not stop before the chain has run. The two R2 medians are an amplitude cell's
+    compilation every new n costs, but not the R2-D2 table `run_replay` built before the first
+    fit; the draws are on the host before `fit` returns, so the clock does not stop before the
+    chain has run. The two R2 medians are an amplitude cell's
     (`r2d2_r2`, and `first_order_r2` on the noise prediction uses); NaN for a lengthscale cell.
     """
     X, z, y_mean, y_std = dataset

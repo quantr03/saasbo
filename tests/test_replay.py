@@ -22,13 +22,14 @@ import jax
 import numpy as np
 import pytest
 
+import sagp.r2d2
 from experiments import replay as replay_module
 from experiments.replay import REPLAY_T, TWINS, compare, load_source, main, run_replay
 from experiments.run_bo import run
 from experiments.runlog import config_hash
 from sagp.bo import iteration_rngs
 from sagp.diagnostics import DiagThresholds
-from sagp.gp import CELLS, NUTSConfig
+from sagp.gp import CELLS, NUTSConfig, R2D2_K
 from synthobj.families import make_family
 
 
@@ -313,6 +314,83 @@ def test_a_dry_run_prints_the_datasets_seeds_and_budget_and_writes_nothing(runs,
     assert "product/lengthscale" in printed and "16/16/4/5" in printed
     for t in (5, 6, 7):
         assert f"t={t} n={t} nuts_seed={iteration_rngs(1, t).nuts_seed}" in printed
+
+
+class _FitReached(Exception):
+    """Raised by a stub `fit`: the replay got as far as its first timed fit."""
+
+
+def _fit_reached(*args, **kwargs):
+    raise _FitReached
+
+
+@pytest.mark.parametrize("method", ["product/lengthscale", "product/lengthscale_r2d2"])
+def test_every_replay_builds_the_r2d2_table_before_its_first_timed_fit(
+    runs, tmp_path, monkeypatch, method
+):
+    """Ruling R26: a process's one-time build of the R2-D2 map's table (cached per shape) is
+    done before the first timed fit, for a half-Cauchy cell as for an R2-D2 one, so no
+    `fit_wall_s` carries it. The table is removed from the cache first; the stub `fit` looks."""
+    monkeypatch.delitem(sagp.r2d2._TABLES, float(R2D2_K), raising=False)
+    seen = []
+
+    def first_fit(*args, **kwargs):
+        seen.append(float(R2D2_K) in sagp.r2d2._TABLES)
+        raise _FitReached
+
+    monkeypatch.setattr(replay_module, "fit", first_fit)
+    with pytest.raises(_FitReached):
+        run_replay(runs, tmp_path / "replay", family="aligned3", seed=1, method=method, ts=(6,))
+    assert seen == [True]
+
+
+def test_a_dry_run_builds_no_table(runs, tmp_path, monkeypatch):
+    monkeypatch.delitem(sagp.r2d2._TABLES, float(R2D2_K), raising=False)
+    run_replay(runs, tmp_path / "dry", family="aligned3", seed=1,
+               method="product/lengthscale_r2d2", ts=(6,), dry_run=True)
+    assert float(R2D2_K) not in sagp.r2d2._TABLES
+
+
+# A source run under an explicit alpha: twice the half-Cauchy lengthscale prior's global scale.
+_SOURCE_ALPHA = 0.2
+
+
+@pytest.fixture(scope="module")
+def alpha_runs(tmp_path_factory) -> Path:
+    """A stored runs root holding one product/lengthscale run at alpha = 0.2, rows t = 5-6."""
+    root = tmp_path_factory.mktemp("alpha_runs")
+    run(_objective(), "product/lengthscale", seed=1, T=7, n_init=5, out_dir=root,
+        nuts=NUTSConfig(16, 16, 4), alpha=_SOURCE_ALPHA, **_LOOP_KW)
+    return root
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["fit", "dry_run"])
+def test_a_twin_replay_refuses_a_source_run_with_its_own_alpha(
+    alpha_runs, tmp_path, monkeypatch, dry_run
+):
+    """Ruling R27: alpha is the half-Cauchy global scale in the source's prior family and k on
+    an R2-D2 cell, so a twin replay refuses to carry it over -- before writing anything."""
+    monkeypatch.setattr(replay_module, "fit", _fit_reached)
+    out = tmp_path / "replay"
+    with pytest.raises(ValueError, match="half-Cauchy global scale"):
+        run_replay(alpha_runs, out, family="aligned3", seed=1,
+                   method="product/lengthscale_r2d2", ts=(6,), dry_run=dry_run)
+    assert not out.exists()
+
+
+def test_a_control_replay_passes_the_source_alpha_through(alpha_runs, tmp_path, monkeypatch):
+    """Ruling R27's other branch: the cell refitted on its own run takes the run's alpha (D9)."""
+    passed = []
+
+    def first_fit(*args, **kwargs):
+        passed.append(kwargs["alpha"])
+        raise _FitReached
+
+    monkeypatch.setattr(replay_module, "fit", first_fit)
+    with pytest.raises(_FitReached):
+        run_replay(alpha_runs, tmp_path / "replay", family="aligned3", seed=1,
+                   method="product/lengthscale", ts=(6,))
+    assert passed == [_SOURCE_ALPHA]
 
 
 def test_each_r2d2_cell_is_replayed_on_its_half_cauchy_twin():
