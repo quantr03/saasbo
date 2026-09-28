@@ -22,6 +22,7 @@ import math
 import re
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import jax
 import numpy as np
@@ -542,6 +543,29 @@ def test_a_control_replay_passes_the_source_alpha_through(alpha_runs, tmp_path, 
         run_replay(alpha_runs, tmp_path / "replay", family="aligned3", seed=1,
                    method="product/lengthscale", ts=(6,))
     assert passed == [_SOURCE_ALPHA]
+
+
+@pytest.mark.parametrize("method", [
+    "/".join(key) for key in CELLS
+])
+def test_the_r2_columns_are_written_only_where_they_mean_what_they_say(method):
+    """`r2d2_r2` = S/(1 + S) is what the R2-D2 prior's Beta is on, for any amplitude cell.
+    `first_order_r2` = S/(S + sigma^2) is the fitted model's first-order R^2 only in an
+    additive amplitude cell: a product/amplitude cell's signal variance is prod(1 + a_sq) - 1,
+    not S (ruling R20), so its column is NaN, as both are in a lengthscale cell."""
+    cell = CELLS[tuple(method.split("/"))]
+    a_sq = np.array([[0.3, 0.1, 0.0], [0.5, 0.2, 0.1]])  # S = 0.4 and 0.8
+    noise = np.array([0.1, 0.2])
+    fitted = SimpleNamespace(samples={"a_sq": a_sq}, noises=lambda: noise)
+    r2d2, first_order = replay_module._r2_medians(cell, fitted)
+    if cell.native_site != "a_sq":
+        assert math.isnan(r2d2) and math.isnan(first_order)
+        return
+    assert r2d2 == pytest.approx(np.median([0.4 / 1.4, 0.8 / 1.8]))
+    if cell.structure == "additive":
+        assert first_order == pytest.approx(np.median([0.4 / 0.5, 0.8 / 1.0]))
+    else:
+        assert math.isnan(first_order)
 
 
 def test_each_r2d2_cell_is_replayed_on_its_half_cauchy_twin():

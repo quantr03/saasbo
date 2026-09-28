@@ -428,8 +428,9 @@ def _replay_one(
     `fit_wall_s` is taken around `fit` as the loop takes it (`sagp.bo`), and so includes the
     compilation every new n costs, but not the R2-D2 table `run_replay` built before the first
     fit; the draws are on the host before `fit` returns, so the clock does not stop before the
-    chain has run. The two R2 medians are an amplitude cell's
-    (`r2d2_r2`, and `first_order_r2` on the noise prediction uses); NaN for a lengthscale cell.
+    chain has run. The two R2 medians (`_r2_medians`): `r2d2_r2` for an amplitude cell, and
+    `first_order_r2`, on the noise prediction uses, for an additive amplitude cell only; NaN
+    otherwise.
     """
     X, z, y_mean, y_std = dataset
     cfg = source.cfg
@@ -447,11 +448,7 @@ def _replay_one(
     )
     readout_wall_s = time.perf_counter() - start
 
-    r2d2, first_order = float("nan"), float("nan")
-    if cell.native_site == "a_sq":
-        a_sq = fitted.samples["a_sq"]
-        r2d2 = float(np.median(np.asarray(r2d2_r2(a_sq))))
-        first_order = float(np.median(np.asarray(first_order_r2(a_sq, fitted.noises()))))
+    r2d2, first_order = _r2_medians(cell, fitted)
 
     diagnostics = fitted.attempts[-1]
     row = {
@@ -482,6 +479,25 @@ def _replay_one(
         f"readout_wall_s={readout_wall_s:.3f} device={row['device']}"
         + (f" reason={row['reason']!r}" if row["reason"] else "")
     )
+
+
+def _r2_medians(cell: Cell, fitted: object) -> tuple[float, float]:
+    """The fit's `r2d2_r2` and `first_order_r2` medians over its draws; NaN where not the cell's.
+
+    `r2d2_r2` = S/(1 + S), S = sum_i a_sq_i, is what the R2-D2 prior's Beta is on, in any
+    amplitude cell. `first_order_r2` = S/(S + sigma^2) is the fitted model's first-order R^2 in an
+    additive amplitude cell only: a product/amplitude cell's signal variance is
+    prod_i(1 + a_sq_i) - 1 >= S, so its first-order R^2 is S/(prod_i(1 + a_sq_i) - 1 + sigma^2)
+    (ruling R20), which the analysis computes from the npz draws; its column here is NaN. A
+    lengthscale cell has neither.
+    """
+    r2d2, first_order = float("nan"), float("nan")
+    if cell.native_site == "a_sq":
+        a_sq = fitted.samples["a_sq"]
+        r2d2 = float(np.median(np.asarray(r2d2_r2(a_sq))))
+        if cell.structure == "additive":
+            first_order = float(np.median(np.asarray(first_order_r2(a_sq, fitted.noises()))))
+    return r2d2, first_order
 
 
 # --- CSV files ---

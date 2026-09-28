@@ -46,9 +46,11 @@ def r2d2_r2(a_sq: ArrayLike) -> Array:
     `a_sq` is (S, D), from any amplitude cell. Normalized components make omega the first-order
     variance of the standardized target, and under the R2-D2 prior it is exactly the global scale
     R2 / (1 - R2), the shares summing to one: this is the R2 its Beta is on, recomputed from the
-    retained amplitudes rather than stored as a site. It is not the first-order R^2 of the data --
-    a well-fitted standardized target has omega near 1, so this sits near 0.5 however much of the
-    target is noise; `first_order_r2` is that R^2.
+    retained amplitudes rather than stored as a site. It is not the first-order R^2 of the data:
+    a standardized target has omega + sigma^2 near 1 (in an additive cell; at most that in a
+    product one), so omega is about the first-order R^2 and this is about R^2 / (1 + R^2) -- at
+    most about 1/2, and near 1/2 only for an almost noise-free first-order target (ruling R20).
+    `first_order_r2` is that R^2, for the additive amplitude cells.
     """
     omega = jnp.sum(jnp.asarray(a_sq), axis=-1)
     return omega / (1.0 + omega)
@@ -57,11 +59,13 @@ def r2d2_r2(a_sq: ArrayLike) -> Array:
 def first_order_r2(a_sq: ArrayLike, noise: ArrayLike) -> Array:
     """First-order R^2 per draw, omega / (omega + sigma^2) with omega = sum_i a_sq_i; (S,).
 
-    The fitted model's: `a_sq` is (S, D), from any amplitude cell, and `noise` is sigma^2 per
-    draw, (S,), as `FittedGP.noises()` gives it -- the only source when the noise is fixed, since
-    then there is no `noise` site. Interaction variance an additive cell cannot represent goes to
-    the noise, so on the interaction sweep this falls to about 1 - gamma: the misspecification
-    readout.
+    The fitted model's, for an additive amplitude cell: `a_sq` is (S, D), and `noise` is sigma^2
+    per draw, (S,), as `FittedGP.noises()` gives it -- the only source when the noise is fixed,
+    since then there is no `noise` site. Only there is omega the signal variance. A
+    product/amplitude cell's is prod_i(1 + a_sq_i) - 1 >= omega, so its first-order R^2 is
+    omega / (prod_i(1 + a_sq_i) - 1 + sigma^2) (ruling R20), which this function does not give.
+    Interaction variance an additive cell cannot represent goes to the noise, so on the
+    interaction sweep this falls to about 1 - gamma: the misspecification readout.
     """
     omega = jnp.sum(jnp.asarray(a_sq), axis=-1)
     return omega / (omega + jnp.reshape(jnp.asarray(noise), (-1,)))
