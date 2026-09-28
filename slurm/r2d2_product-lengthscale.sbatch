@@ -12,12 +12,15 @@
 # the R2-D2 cost is not yet measured on GPU.
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/%x_%A_%a.out
-#SBATCH --partition=gpu-h200-141g-short
+#SBATCH --partition=gpu-h200-141g-short,gpu-h100-80g-short,gpu-h100-80g
 #SBATCH --gpus=1
-# One H200 per task, on gpu-h200-141g-short with no account: Quan's instruction of 2026-09-28 not
-# to use ELLIS for now (ruling R37). Its 2-day limit covers --time; every R2-D2 run then runs on
-# the same GPU type as the replay, so wall times are comparable. ELLIS jobs have priority on these
-# nodes, so tasks may queue.
+# One H200 or one H100 per task, whichever Slurm can start first, under the default account and
+# not ELLIS (Quan, 2026-09-29; ruling R37 had set H200 -short only, and ellis_users is not
+# accepted on the H100 partitions). These three partitions admit the 2-day --time;
+# gpu-h200-141g-m does not, since its limit is 8 h. Wall times are therefore compared within a
+# GPU type (each row and manifest records its device); regret and readouts do not depend on the
+# device. ELLIS jobs have priority on the H200 nodes, and the H100 pool is only 16 GPUs, so tasks
+# may queue.
 #
 # The product/lengthscale_r2d2 cell (plan D10): one (family, seed) per array task; task i runs seed i % NSEEDS of
 # family FAMILIES[i / NSEEDS]. FAMILIES (space-separated, default all eight) and NSEEDS (default
