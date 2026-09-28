@@ -218,9 +218,10 @@ def test_an_r2d2_cell_runs_end_to_end(tmp_path):
     """An R2-D2 cell is one more value of `method`, and the loop runs it as it runs any other.
 
     Its run directory flattens only the method's "/" (the underscore keeps the name splittable at
-    its first "-"), its rows name it, its readouts reach `coords.csv`, and its draws are keyed by
-    its own `sites`: the R2-D2 prior's sampled sites where its half-Cauchy twin has `kernel_tausq`
-    and `_a_sq`.
+    its first "-"). Its rows name it, and each records one fit call with one NUTS attempt, a gate
+    passed and a finite acquisition value. Its readouts, the Sobol index included, reach
+    `coords.csv`. And its draws are keyed by its own `sites`: the reference form's `r2d2_R2` and
+    `r2d2_z_lam`, spelled out, where its half-Cauchy twin has `kernel_tausq` and `_a_sq`.
     """
     method = "additive/amplitude_r2d2"
     cell = CELLS[("additive", "amplitude_r2d2")]
@@ -239,6 +240,7 @@ def test_an_r2d2_cell_runs_end_to_end(tmp_path):
         assert row["method"] == method and row["family"] == "aligned3"
         assert int(row["nuts_attempts"]) == 1 and row["status"] == "ok"
         assert np.isfinite(float(row["acq_value"]))
+        assert int(row["fit_calls"]) == 1
 
     # Both iterations compute the Sobol readout: t = 5 is on the schedule and t = 6 is T - 1.
     coords = _read_rows(run_dir / "coords.csv")
@@ -250,6 +252,10 @@ def test_an_r2d2_cell_runs_end_to_end(tmp_path):
         assert set(data.files) == set(cell.sites) | {"status", "nuts_attempts", "schema_version"}
         assert int(data["schema_version"]) == 2
         assert {data[site].shape[0] for site in cell.sites} == {4}
+        # The R2-D2 prior's sites by name, not read off `cell.sites`: the reference form's (the
+        # form G0 chose), and none of the half-Cauchy block's.
+        assert {"r2d2_R2", "r2d2_z_lam", "a_sq"} <= set(data.files)
+        assert not {"kernel_tausq", "_a_sq"} & set(data.files)
 
 
 def test_resume_after_a_partial_write_rebuilds_the_missing_rows(tmp_path):

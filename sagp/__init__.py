@@ -7,8 +7,9 @@ batched GPyTorch model it loads the retained draws into.
 `sagp.diagnostics` is the convergence verdict `sagp.gp.fit` calls once per attempt. `sagp.bo`
 runs the Bayesian-optimization loop against any cell through `FittedGP`/`posterior` alone, never
 learning how a cell is parameterized; `sagp.references` and `sagp.readouts` sit beside it, the
-study's two MAP references/Sobol proposer and its posterior readouts respectively. `sagp.gp` and
-`sagp.diagnostics` are the bottom of this stack and import none of the other three. `sagp.readouts`
+study's two MAP references/Sobol proposer and its posterior readouts respectively. `sagp.gp`
+and the three modules beneath it -- `sagp.diagnostics`, `sagp.kernels_torch` and `sagp.r2d2`,
+which import nothing from the package -- import none of those three. `sagp.readouts`
 is reached as the submodule it is: callers write `from sagp.readouts import readouts`. `fit`,
 `FittedGP` and `run_bo` are re-exported here from `sagp.gp` and `sagp.bo`, lazily via
 `__getattr__` (PEP 562) rather than eagerly -- matching `synthobj/__init__.py` -- so `import sagp`

@@ -1,10 +1,10 @@
 """Tests for sagp.readouts' posterior readouts: Sobol indices, shares and the two active rules.
 
 The thesis's primary identification readout is the first-order Sobol index of the posterior mean
-under the reference measure, and it is the one number the four cells are compared on, so it has to
-mean the same thing in each. Three of the four have it in closed form -- every centered component
-integrates to *exactly* zero against the 64-node rule that defines nu -- and the fourth needs a
-Saltelli estimator. What is pinned here is therefore: that each closed form is the quantity it
+under the reference measure, and it is the one number the eight cells are compared on, so it has
+to mean the same thing in each. Six of the eight have it in closed form -- every centered
+component integrates to *exactly* zero against the 64-node rule that defines nu -- and the two on
+SAASBO's ARD kernel need a Saltelli estimator. What is pinned here is therefore: that each closed form is the quantity it
 claims to be, checked against a brute-force tensor-grid quadrature of the very posterior mean
 `FittedGP.posterior` returns; that the estimator agrees with the closed form where both apply; and
 that on a synthetic objective whose first-order shares are known the index recovers them, on and

@@ -103,7 +103,8 @@ def test_identify_returns_every_key_at_the_right_shape(method):
         assert isinstance(out[key], float)
     assert out["amplitude_vs_realized"].shape == (3, 2)  # aligned3 has |S| = 3
 
-    # The cell's `sites`, under BoTorch's own names for them.
+    # The cell's `sites`, under the model's own names: BoTorch's, and for an R2-D2 cell its
+    # prior's `r2d2_*` sites.
     assert set(out["samples"]) == _SAMPLES[method]
     s = out["samples"]["a_sq"].shape[0]
     for draws in out["samples"].values():

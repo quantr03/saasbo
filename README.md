@@ -106,8 +106,8 @@ parameterization, under either of two sparsity priors, SAASBO's half-Cauchy or R
 run on BoTorch 0.18.1's SAASBO (`SaasFullyBayesianSingleTaskGP`, NumPyro NUTS through a copy of
 `fit_fully_bayesian_model_nuts`'s sampler lines, `LogExpectedImprovement`, `optimize_acqf`) under
 Papenmeier et al. (2025)'s loop protocol, so that a difference in regret or in identification is
-attributable to the parameterization and to nothing else. `sagp` is a seven-module library and
-`experiments` is the study code built on it:
+attributable to the cell. `sagp` is a seven-module library and `experiments` is the study code
+built on it:
 
 | module | owns |
 |---|---|
@@ -121,9 +121,13 @@ attributable to the parameterization and to nothing else. `sagp` is a seven-modu
 | `experiments/identify.py` | SQ1's offline identification runner |
 | `experiments/runlog.py` | one run directory: config, provenance, checkpointing, resume |
 | `experiments/run_bo.py` | SQ2/SQ3 entry point and CLI |
+| `experiments/replay.py` | stage 2's offline replay (plan D9): refits a cell on a stored run's iteration-t data into `replay.csv` (`r2d2_r2` for the amplitude cells, `first_order_r2` for the additive amplitude cells only), and `compare` reads gate G2 off the refits |
+| `experiments/r2d2_prior.py` | the prior-only R2-D2 study's models (the supervisor's reference and the two forms of `sagp.r2d2`), its half-Cauchy control, and the NumPy ground truth and closed forms they are checked against |
+| `experiments/r2d2_prior_study.py` | that study's harness and CLI: Tiers A-D, the calibration search, and the acceptance table in `sagp_analysis/2026-09-25-r2d2-prior/` |
 
-Nothing under `sagp/` imports `experiments`, and `sagp.gp`/`sagp.diagnostics`/`sagp.kernels_torch`
-are the bottom of the stack -- they never import `sagp.bo`/`sagp.references`/`sagp.readouts` -- so
+Nothing under `sagp/` imports `experiments`, and the core -- `sagp.gp` and the three modules
+beneath it, `sagp.diagnostics`, `sagp.kernels_torch` and `sagp.r2d2`, which import nothing from
+the package -- never imports `sagp.bo`/`sagp.references`/`sagp.readouts`, so
 a cell's parameterization and the loop's acquisition and budget stay on opposite sides of
 `fit(X, y, seed, cell) -> FittedGP` and `FittedGP.posterior(X_test) -> (mean, var)` of shape
 `(S, n_test)` per retained sample.
@@ -194,7 +198,10 @@ entry point and exits non-zero.
 - **The R2-D2 prior** (Zhang et al. 2016; `sagp/r2d2.py`) puts `a_i^2 = omega phi_i` on the
   amplitudes, with a global `omega = R2 / (1 - R2)`, `R2 ~ Beta(a, b)`, and shares
   `phi ~ Dirichlet(k, ..., k)`, in its untied form (`R2D2_FORM = "reference"`: the paper's tie
-  `a = k D` is not imposed). NUTS samples `R2` itself (`r2d2_R2`) and D standard normals
+  `a = k D` is not imposed). That `R2` is the prior's variable, `omega / (1 + omega)`, not the
+  data's R^2: on a standardized target `omega` is about the first-order R^2, so `R2` is about
+  `R^2 / (1 + R^2)`, at most about 1/2 (`sagp.readouts.r2d2_r2`, `first_order_r2`). NUTS
+  samples `R2` itself (`r2d2_R2`) and D standard normals
   (`r2d2_z_lam`), which a Gaussian copula maps onto the Gamma(k) variables the shares normalize,
   through a loop-free table of the inverse CDF. The two lengthscale R2-D2 cells carry it on
   `rho_i = 7.62 omega phi_i`, the constant being `rho_eps / eps` (`R2D2_RHO_SCALE`): then
@@ -234,7 +241,7 @@ Outputs land in `<out>/<family>/<cell with '/' as '-'>/seed{seed:02d}/`:
 |---|---|
 | `iterations.csv` | one row per iteration: `y`, `f`, `best_obs`, `best_f`, `regret`, the acquisition value (a log EI, so it is negative whenever the improvement is small), wall times, `status`, the fit's diagnostics, `y_mean`/`y_std`, and the query point |
 | `coords.csv` | long format, `t, i, native_median, p_active, sobol_hat` -- the per-coordinate readouts (absent for `sobol` runs, which fit no model) |
-| `samples/t{t:03d}.npz` | that iteration's retained posterior draws (16 for a cell, 1 for a MAP reference), keyed by BoTorch's own site names, plus its `status`, `nuts_attempts` and `schema_version` (2) |
+| `samples/t{t:03d}.npz` | that iteration's retained posterior draws (16 for a cell, 1 for a MAP reference), keyed by the model's own site names (BoTorch's, and the R2-D2 prior's `r2d2_*`), plus its `status`, `nuts_attempts` and `schema_version` (2) |
 | `manifest.json` | the resolved `RunConfig` and its hash, the git commit, package versions (torch, gpytorch and botorch among them), thread environment and JAX device, `acquisition_constants` -- the maximizer's whole operating point -- the objective's labels, and a `resumed` entry per resume |
 | `environment.lock.txt` | every installed distribution as `name==version` |
 | `checkpoint.npz`, `log.txt` | the resume point, and the run's narrative (timings, statuses, tracebacks) |
@@ -254,7 +261,11 @@ On SLURM, one array task per `(family, seed, method)`; re-submitting the same ar
 run in it. Five arrays, because the four cells and the three references have different budgets:
 one `slurm/sagp_<cell>.sbatch` per cell (40 tasks, one core, 8 GB and one GPU each -- an H200 or an
 H100, whichever partition can start the task first -- `--time` sized to that cell's cost) and
-`slurm/sagp_refs.sbatch` (120 tasks, 2 h, on CPUs). `sagp` takes a visible GPU first and the CPU
+`slurm/sagp_refs.sbatch` (120 tasks, 2 h, on CPUs). Stage 2's offline replay has its own array,
+`slurm/r2d2_replay.sbatch` (40 tasks on ELLIS H200s: the four R2-D2 cells on their twins' runs of
+the eight families, and the four half-Cauchy cells on their own `aligned10` and `decoupled` runs
+as the control; `PROBE=1` runs the GPU cost probe instead), read by `python -m experiments.replay
+compare` (`--probe` for the probe). `sagp` takes a visible GPU first and the CPU
 otherwise, for the NUTS chain and a cell's acquisition alike (`sagp/__init__.py`, `sagp.gp.fit`);
 `JAX_PLATFORMS=cpu` forces the CPU. The cell files also set `TORCH_DISABLE_NATIVE_JIT=1`, since
 torch 2.14 JIT-compiles a C launcher for a few CUDA ops and the GPU nodes have no C compiler, and

@@ -33,15 +33,16 @@ assert _SAGP_FILES and _EXPERIMENT_FILES and _SYNTHOBJ_FILES, (
 # The four distributions rule (d) forbids, by the first dotted component of the imported name.
 _TORCH_STACK: frozenset[str] = frozenset({"torch", "botorch", "gpytorch", "linear_operator"})
 
-# D4 written out as a table: what each module under `sagp/` may import from the package. `gp.py`
-# and `diagnostics.py` are the bottom of the library, so nothing above them may be imported back
-# down; the three modules above the core reach `gp` and never each other. A module missing from
-# this table is a decision that has not been made, so the test says so rather than passing.
+# D4 written out as a table: what each module under `sagp/` may import from the package. The
+# bottom of the library is `r2d2.py`, `diagnostics.py` and `kernels_torch.py`, which import
+# nothing from it; `gp.py` stands on those three alone, and the three modules above the core
+# reach `gp` and never each other. A module missing from this table is a decision that has
+# not been made, so the test says so rather than passing.
 _ALLOWED_SAGP_IMPORTS: dict[str, set[str]] = {
     "gp": {"sagp.diagnostics", "sagp.kernels_torch", "sagp.r2d2"},
     "diagnostics": set(),
     "kernels_torch": set(),  # torch only, so `gp` can import it without a cycle
-    "r2d2": set(),  # jax and numpyro only, so the prior-only harness can import it without torch
+    "r2d2": set(),  # jax and numpyro only: the prior-only harness imports it without BoTorch
     "references": {"sagp.gp"},
     "readouts": {"sagp.gp"},
     "bo": {"sagp.gp"},

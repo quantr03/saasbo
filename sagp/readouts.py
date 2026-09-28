@@ -315,8 +315,9 @@ def manipulation_checks(readout: dict[str, object], labels: object) -> dict[str,
     """Rank agreement between one fit's readouts and the objective's labels.
 
     Spearman rather than Pearson, over all D coordinates: the question is whether the surrogate
-    *orders* the coordinates the way the objective does, and in three of the four cells the two
-    quantities are not even on the same scale (rho_i is not a share). Both readouts are scored
+    *orders* the coordinates the way the objective does, and in six of the eight cells -- all but
+    the two additive amplitude cells -- the two quantities are not even on the same scale (rho_i
+    is not a share, nor is a product cell's a_sq_i). Both readouts are scored
     against both labels: `labels.s`, the variance share `sobol_hat` estimates, and `labels.g`, the
     realized slope share a lengthscale readout can track; `spearman_native_vs_sobol` measures how
     much the cell's own parameterization already tells you, against the parameterization-neutral

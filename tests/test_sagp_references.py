@@ -1,6 +1,6 @@
 """Tests for sagp.references: Papenmeier's `dsp` model as this study's two MAP references.
 
-The BO study has two references that are not one of the four NUTS-fitted cells but that the loop
+The BO study has two references that are not one of the eight NUTS-fitted cells but that the loop
 must not be able to tell apart from one: Hvarfner et al. 2024's "vanilla BO" -- an ARD Matern-5/2
 under the dimension-scaled lengthscale prior, fitted at the MAP and served as a single posterior
 "sample" -- and that same model handed the objective's true active set. The claim `sagp.references`
