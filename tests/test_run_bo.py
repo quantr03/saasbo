@@ -211,6 +211,47 @@ def test_samples_npz_carries_the_schema_version_and_botorch_site_names(tmp_path)
         assert {data[site].shape[0] for site in cell.sites} == {4}
 
 
+# At the marker's 10 s line (9.7-10.2 s measured on the laptop): two fits' compilations and the
+# process's first build of the R2-D2 map's table.
+@pytest.mark.slow
+def test_an_r2d2_cell_runs_end_to_end(tmp_path):
+    """An R2-D2 cell is one more value of `method`, and the loop runs it as it runs any other.
+
+    Its run directory flattens only the method's "/" (the underscore keeps the name splittable at
+    its first "-"), its rows name it, its readouts reach `coords.csv`, and its draws are keyed by
+    its own `sites`: the R2-D2 prior's sampled sites where its half-Cauchy twin has `kernel_tausq`
+    and `_a_sq`.
+    """
+    method = "additive/amplitude_r2d2"
+    cell = CELLS[("additive", "amplitude_r2d2")]
+    run_dir = run(
+        _objective(), method, seed=1, T=7, n_init=5, out_dir=tmp_path,
+        # The gate that can never fail, as in the npz schema test above: the gate is not what is
+        # tested here, and at 16/16/4 a real one would make `status == "ok"` a coin toss.
+        nuts=NUTSConfig(16, 16, 4), thresholds=DiagThresholds(float("inf"), 0.0, 10**9),
+        **_LOOP_KW,
+    )
+    assert run_dir == tmp_path / "aligned3" / "additive-amplitude_r2d2" / "seed01"
+
+    rows = _read_rows(run_dir / "iterations.csv")
+    assert [int(row["t"]) for row in rows] == [5, 6]
+    for row in rows:
+        assert row["method"] == method and row["family"] == "aligned3"
+        assert int(row["nuts_attempts"]) == 1 and row["status"] == "ok"
+        assert np.isfinite(float(row["acq_value"]))
+
+    # Both iterations compute the Sobol readout: t = 5 is on the schedule and t = 6 is T - 1.
+    coords = _read_rows(run_dir / "coords.csv")
+    assert len(coords) == 5 * 2
+    for row in coords:
+        assert all(np.isfinite(float(row[k])) for k in ("native_median", "p_active", "sobol_hat"))
+
+    with np.load(run_dir / "samples" / "t006.npz") as data:
+        assert set(data.files) == set(cell.sites) | {"status", "nuts_attempts", "schema_version"}
+        assert int(data["schema_version"]) == 2
+        assert {data[site].shape[0] for site in cell.sites} == {4}
+
+
 def test_resume_after_a_partial_write_rebuilds_the_missing_rows(tmp_path):
     run_dir = run(
         _objective(), "dsp_map", seed=1, T=9, n_init=_N_INIT, out_dir=tmp_path, **_LOOP_KW

@@ -1,6 +1,6 @@
 """experiments.run_bo: the study's BO entry point -- one (family, seed, method) per invocation.
 
-The seven methods differ only in the two adapters they hand `sagp.bo.run_bo` -- the four cells
+The eleven methods differ only in the two adapters they hand `sagp.bo.run_bo` -- the eight cells
 fit through `sagp.gp.fit`, the two MAP references through `sagp.references.fit_map`, and the Sobol
 search fits nothing and proposes from its own sequence -- and are otherwise the same run: one
 loop, with the run directory of `experiments.runlog` observing it. `surrogate_for` and
@@ -30,7 +30,7 @@ from synthobj.families import make_family
 from synthobj.objective import SyntheticObjective
 
 
-# The seven methods a run can take, as they are spelled on the command line and in a run's path.
+# The eleven methods a run can take, as they are spelled on the command line and in a run's path.
 METHODS: list[str] = [f"{structure}/{prior}" for (structure, prior) in CELLS] + [
     "sobol",
     "dsp_map",
@@ -44,7 +44,7 @@ METHODS: list[str] = [f"{structure}/{prior}" for (structure, prior) in CELLS] + 
 def surrogate_for(cfg: RunConfig, labels: object) -> Callable[..., object] | None:
     """The surrogate `run_bo` fits each iteration under this method, or None for the Sobol search.
 
-    The whole of the study's method dispatch, and the only place it exists: the four cells differ
+    The whole of the study's method dispatch, and the only place it exists: the eight cells differ
     from each other only in the `Cell` handed to one `fit` call, and the two MAP references only
     in whether `fit_map` is told which coordinates matter. Nothing downstream of here -- the loop
     above all -- can tell them apart, which is what makes the comparison a comparison.
@@ -76,7 +76,7 @@ def surrogate_for(cfg: RunConfig, labels: object) -> Callable[..., object] | Non
 def propose_for(cfg: RunConfig) -> Callable[..., tuple[np.ndarray, float]]:
     """How this method chooses its next query: the acquisition's maximizer, or the next Sobol row.
 
-    The six model-based methods share one proposer at one operating point -- BoTorch's LogEI under
+    The ten model-based methods share one proposer at one operating point -- BoTorch's LogEI under
     `optimize_acqf`, with the five maximizer sizes the config carries -- because a budget that
     varied by method would be an alternative explanation for every regret difference the study
     reports. The Sobol search continues the design's own sequence, so its first `n_init` rows
@@ -303,7 +303,7 @@ def resolve_config(args: argparse.Namespace) -> RunConfig:
 
     Separate from `main` so that `--dry-run` prints the very object the run would be given, and
     so that two command lines can be compared without either being run -- which is how the study
-    checks that its seven methods differ in `method` and in nothing else.
+    checks that its eleven methods differ in `method` and in nothing else.
     """
     return RunConfig(
         family=args.family,

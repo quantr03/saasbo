@@ -2,16 +2,16 @@
 
 What a run directory has to be able to prove, and what these tests check it proves:
 
-- that the seven methods were run under the *same* settings, since a difference in any other
+- that the eleven methods were run under the *same* settings, since a difference in any other
   setting would be an alternative explanation for every regret difference the thesis reports.
-  `test_resolve_config_differs_only_in_method` builds all seven from one command line and
+  `test_resolve_config_differs_only_in_method` builds all eleven from one command line and
   compares each to `dataclasses.replace(reference, method=...)`, so a flag that leaked a
   per-method default would fail; `test_every_flag_reaches_the_resolved_config` is its mirror --
   every flag set away from its default at once, compared to one hand-written `RunConfig`, so a
   flag that reaches nothing fails too.
 - that every method started from the same points *and* maximized the acquisition the same way.
   `initial_design` takes no method, so the end-to-end runs here are the check that `run` really
-  calls it before the method matters, and `propose_for` is compared across all seven: the
+  calls it before the method matters, and `propose_for` is compared across all eleven: the
   maximizer is the other half of "the methods differ in `method` and in nothing else".
 - that the manifest describes the run rather than the reader's environment: it round-trips into
   the `RunConfig` the run used, its `acquisition_constants` name the whole operating point the
@@ -150,8 +150,8 @@ def test_the_config_hash_moves_with_every_maximizer_setting(field, value):
 def test_every_method_gets_the_same_design_and_maximizer(tmp_path):
     """The two things a method may not choose for itself: where it starts, and how it maximizes.
 
-    `propose_for` is compared across all seven rather than run, because what has to hold is that
-    the six model-based methods hand `optimize_acqf` the *same* operating point -- a maximizer
+    `propose_for` is compared across all eleven rather than run, because what has to hold is that
+    the ten model-based methods hand `optimize_acqf` the *same* operating point -- a maximizer
     budget that varied by method would be an alternative explanation for every regret difference
     the thesis reports. `sobol` is the one exception by construction: it fits nothing, so it
     walks the design's own sequence instead of maximizing anything.
@@ -174,7 +174,7 @@ def test_every_method_gets_the_same_design_and_maximizer(tmp_path):
 
     design = initial_design(5, _N_INIT, _SEED)
     # One method that fits nothing and the two MAP references, whose fits are milliseconds. The
-    # remaining four would each buy a NUTS run and no new information: `initial_design` takes
+    # remaining eight would each buy a NUTS run and no new information: `initial_design` takes
     # (D, n_init, seed) and no method, and the loop calls it once, before `cfg.method` has been
     # used for anything at all.
     for method in ("sobol", "dsp_map", "oracle_S"):

@@ -101,7 +101,8 @@ decisions behind them. `make -C docs/thesis pdf` builds it as a standalone PDF.
 ## Sparse additive GP cells (`sagp`)
 
 `sagp` is the thesis's 2 x 2 of Gaussian-process surrogates for high-dimensional Bayesian
-optimization -- {additive, product} kernel structure x {amplitude, lengthscale} sparsity prior --
+optimization -- {additive, product} kernel structure x {amplitude, lengthscale} sparsity
+parameterization, under either of two sparsity priors, SAASBO's half-Cauchy or R2-D2 --
 run on BoTorch 0.18.1's SAASBO (`SaasFullyBayesianSingleTaskGP`, NumPyro NUTS through a copy of
 `fit_fully_bayesian_model_nuts`'s sampler lines, `LogExpectedImprovement`, `optimize_acqf`) under
 Papenmeier et al. (2025)'s loop protocol, so that a difference in regret or in identification is
@@ -110,7 +111,7 @@ attributable to the parameterization and to nothing else. `sagp` is a seven-modu
 
 | module | owns |
 |---|---|
-| `sagp/gp.py` | the four cells as BoTorch `PyroModel`s, `CellGP`, `NUTSConfig`, `FittedGP`, `fit`, `standardize`; the JAX kernels are the log density |
+| `sagp/gp.py` | the eight cells as BoTorch `PyroModel`s, `CellGP`, `NUTSConfig`, `FittedGP`, `fit`, `standardize`; the JAX kernels are the log density |
 | `sagp/kernels_torch.py` | the three centered kernels in torch, batched over draws, for prediction and the acquisition's gradients |
 | `sagp/diagnostics.py` | the convergence verdict on a NUTS attempt |
 | `sagp/r2d2.py` | the R2-D2 prior's two forms behind `sample_log_theta`, and their Gaussian-copula map: the reference Newton solver and the loop-free table the cells run |
@@ -129,7 +130,7 @@ a cell's parameterization and the loop's acquisition and budget stay on opposite
 `python -m experiments.run_bo --help` is the entry point. `python -m sagp.bo` is no longer an
 entry point and exits non-zero.
 
-**The four cells and the three references** are the seven values `--cell` accepts:
+**The eight cells and the three references** are the eleven values `--cell` accepts:
 
 | `--cell` | what it is |
 |---|---|
@@ -137,6 +138,10 @@ entry point and exits non-zero.
 | `additive/lengthscale` | the same additive structure under the reference's SAAS prior on `rho_i = 1/ell_i^2` |
 | `product/amplitude` | the centered components multiplied, `prod_i (1 + a_i^2 kbar_i)`; sparsity on `a_i^2` |
 | `product/lengthscale` | **SAASBO itself**: BoTorch's `SaasPyroModel` with `sample()` inherited untouched |
+| `additive/amplitude_r2d2` | `additive/amplitude` with the R2-D2 prior (below) on `a_i^2` in place of the half-Cauchy |
+| `additive/lengthscale_r2d2` | `additive/lengthscale` with the R2-D2 prior on `rho_i` |
+| `product/amplitude_r2d2` | `product/amplitude` with the R2-D2 prior on `a_i^2` |
+| `product/lengthscale_r2d2` | SAASBO's kernel with the R2-D2 prior on `rho_i`; `sample()` is still BoTorch's |
 | `sobol` | a scrambled Sobol search, no model at all |
 | `dsp_map` | Papenmeier et al. 2025's `dsp` model: an ARD Matern-5/2 in a `ScaleKernel` with `Gamma(2, 0.15)`, `LogNormal(sqrt(2) + log(D)/2, sqrt(3))` lengthscales started at the prior mode and `Gamma(1.1, 0.05)` noise, fitted by `fit_gpytorch_mll` with his Adam fallback |
 | `oracle_S` | the same model behind a `FilterFeatures` transform on the objective's true active coordinates |
@@ -146,7 +151,7 @@ entry point and exits non-zero.
 - **Budget 512 / 256 / 16** -- 512 warm-up, 256 samples, thinning 16, so 16 retained draws --
   with `max_tree_depth = 6`, one chain, a **dense mass matrix** (BoTorch's scheme) and a **fresh
   chain per fit with no warm start**. Not the brief's 128 + 128 / 8, which survives only as the
-  preregistered fallback (see the cost note below), applied identically to all four cells if it is
+  preregistered fallback (see the cost note below), applied identically to all eight cells if it is
   ever taken. **One NUTS run per fit**: a fit whose chain fails the gate (split-R-hat `<= 1.1` and
   ESS `>= 16` over every sampled site, `mean` included, and at most 5 divergences) is marked
   `excluded` and its draws are still used.
@@ -164,12 +169,14 @@ entry point and exits non-zero.
   D = 20 the split is skipped entirely and all 512 perturb every coordinate. Seeding is the only
   change: the Sobol scramble and the RAASP draws come from `(seed, t)`, where the reference draws
   them from global state.
-- **Priors are BoTorch's SAAS priors**, so the four cells differ in their kernel/prior block and
-  in nothing else: constant mean `N(0, 1)`; outputscale `Gamma(2, 0.15)` in the lengthscale cells
-  (the amplitude cells carry none -- it would be unidentifiable against `tausq`); noise
-  `1e-4 + Gamma(0.9, 10)`, or a fixed value, which must be at least 1e-4 because BoTorch clamps
-  `train_Yvar` there before the sampler sees it; the half-Cauchy scale mixture at `alpha = 0.1` on
-  `rho` or `0.0131` on `a^2`; and, in the amplitude cells only, `kernel_ell ~ LogNormal(0, 1.5)`.
+- **Priors are BoTorch's SAAS priors**, so the four half-Cauchy cells differ in their kernel/prior
+  block and in nothing else: constant mean `N(0, 1)`; outputscale `Gamma(2, 0.15)` in the
+  lengthscale cells (the amplitude cells carry none -- it would be unidentifiable against `tausq`);
+  noise `1e-4 + Gamma(0.9, 10)`, or a fixed value, which must be at least 1e-4 because BoTorch
+  clamps `train_Yvar` there before the sampler sees it; the half-Cauchy scale mixture at
+  `alpha = 0.1` on `rho` or `0.0131` on `a^2`; and, in the amplitude cells only,
+  `kernel_ell ~ LogNormal(0, 1.5)`. Each R2-D2 cell is its half-Cauchy twin with that scale
+  mixture replaced by the R2-D2 prior on the same parameter, and every other prior kept.
 - **Standardization is `(y - mean) / std` with ddof 0**, recomputed every iteration, and the
   incumbent handed to LogEI is `best_f = max z`. Papenmeier's code uses torch's ddof 1: the
   difference is a recorded deviation rather than an oversight, because the readouts' share mapping
@@ -184,6 +191,29 @@ entry point and exits non-zero.
   `rho`-count at the variance-matched threshold `rho_eps = 0.1524` gives
   `alpha_a = 0.1 * 0.02 / 0.1524 = 0.0131` -- which matches the whole count distribution, not just
   its median (both have median 37 active coordinates at D = 100).
+- **The R2-D2 prior** (Zhang et al. 2016; `sagp/r2d2.py`) puts `a_i^2 = omega phi_i` on the
+  amplitudes, with a global `omega = R2 / (1 - R2)`, `R2 ~ Beta(a, b)`, and shares
+  `phi ~ Dirichlet(k, ..., k)`, in its untied form (`R2D2_FORM = "reference"`: the paper's tie
+  `a = k D` is not imposed). NUTS samples `R2` itself (`r2d2_R2`) and D standard normals
+  (`r2d2_z_lam`), which a Gaussian copula maps onto the Gamma(k) variables the shares normalize,
+  through a loop-free table of the inverse CDF. The two lengthscale R2-D2 cells carry it on
+  `rho_i = 7.62 omega phi_i`, the constant being `rho_eps / eps` (`R2D2_RHO_SCALE`): then
+  `rho_i > rho_eps` exactly when `omega phi_i > eps`, draw for draw, so the two R2-D2 columns share
+  one calibration as `alpha_a` makes the two half-Cauchy columns share one. There `log rho` is
+  floored at -450, because below `log rho = -473` the derivative of `rho^(-1/2)` overflows and
+  turns the whole gradient into NaN; the prior puts about 1e-97 of each coordinate's mass below the
+  floor. On all four R2-D2 cells `--alpha` sets `k`, the Dirichlet concentration per coordinate;
+  `a` and `b` are constants.
+- **The R2-D2 calibration** (decided 2026-09-28 on the prior-only study in
+  `sagp_analysis/2026-09-25-r2d2-prior/`, `tables/tier_d_calibration.csv`) is
+  `(a, b, k) = (1.5778, 0.8044, 0.4994)` (`R2D2_A`, `R2D2_B`, `R2D2_K`), matched to the
+  half-Cauchy cells on the same prior-predictive count of coordinates with `a_i^2 > eps` at
+  D = 100. The median is matched exactly (37 active coordinates); the quartiles are 14 and 61
+  against the half-Cauchy's 17 and 64, a residual of 3 on each (2.93 on the continuous quartiles),
+  the least the proper region `a, b >= 0.5` with `k <= 1/2` allows. The bound on `k` keeps the
+  paper's regime of a spike at zero: without it the match keeps improving towards uniform shares,
+  a dense prior. The residual confounds the prior family with the dispersion of sparsity, not with
+  its level, and every comparison of the two families inherits it.
 
 **Running it.** One `(family, seed, cell)` per invocation:
 

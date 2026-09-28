@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from synthobj.families import make_family
 
@@ -26,17 +27,28 @@ from synthobj.families import make_family
 # NUTS chain rather than stubbed diagnostics, per the task's global test constraints.
 _FAST_NUTS = NUTSConfig(32, 32, 4)
 
+# The retained sites of each cell the record test runs, spelled out rather than read off `CELLS`:
+# BoTorch's own names for the half-Cauchy cell's, and for its R2-D2 twin the sampled sites of the
+# prior's form in place of `kernel_tausq` and `_a_sq`.
+_R2D2_PRIOR_SITES = {"reference": ("r2d2_R2", "r2d2_z_lam"), "tied": ("r2d2_z_xi", "r2d2_z_lam")}
+_SAMPLES = {
+    "additive/amplitude": {"mean", "noise", "kernel_tausq", "_a_sq", "a_sq", "kernel_ell"},
+    "additive/amplitude_r2d2": {
+        "mean", "noise", *_R2D2_PRIOR_SITES[gp.R2D2_FORM], "a_sq", "kernel_ell",
+    },
+}
 
-def _identify_aligned3():
+
+def _identify_aligned3(cell=("additive", "amplitude")):
     """`identify` on the fixed design the brief pins its tests to: aligned3 at D=6, n=25."""
-    return identify(
-        make_family("aligned3", 0, D=6), ("additive", "amplitude"), n=25, seed=0, nuts=_FAST_NUTS
-    )
+    return identify(make_family("aligned3", 0, D=6), cell, n=25, seed=0, nuts=_FAST_NUTS)
 
 
-def test_identify_returns_every_key_at_the_right_shape():
+@pytest.mark.parametrize("method", list(_SAMPLES))
+def test_identify_returns_every_key_at_the_right_shape(method):
     D = 6
-    out = _identify_aligned3()
+    cell = tuple(method.split("/"))
+    out = _identify_aligned3(cell)
 
     expected_keys = {
         "family", "seed", "cell", "n", "D", "alpha", "status", "status_reason", "nuts_attempts",
@@ -57,10 +69,10 @@ def test_identify_returns_every_key_at_the_right_shape():
 
     assert out["family"] == "aligned3"
     assert out["seed"] == 0
-    assert out["cell"] == "additive/amplitude"
+    assert out["cell"] == method
     assert out["n"] == 25
     assert out["D"] == D
-    assert out["alpha"] == gp.CELLS[("additive", "amplitude")].alpha_default
+    assert out["alpha"] == gp.CELLS[cell].alpha_default
     assert out["status"] in {"ok", "excluded"}
     assert isinstance(out["status_reason"], str)
     assert out["nuts_attempts"] == 1
@@ -91,10 +103,8 @@ def test_identify_returns_every_key_at_the_right_shape():
         assert isinstance(out[key], float)
     assert out["amplitude_vs_realized"].shape == (3, 2)  # aligned3 has |S| = 3
 
-    # The additive/amplitude cell's `sites`, under BoTorch's own names for them.
-    assert set(out["samples"]) == {
-        "mean", "noise", "kernel_tausq", "_a_sq", "a_sq", "kernel_ell",
-    }
+    # The cell's `sites`, under BoTorch's own names for them.
+    assert set(out["samples"]) == _SAMPLES[method]
     s = out["samples"]["a_sq"].shape[0]
     for draws in out["samples"].values():
         assert isinstance(draws, np.ndarray)
