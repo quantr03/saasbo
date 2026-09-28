@@ -1,11 +1,12 @@
-"""sagp.gp: the four surrogate cells -- kernels, models, NUTS inference and prediction.
+"""sagp.gp: the surrogate cells -- kernels, models, NUTS inference and prediction.
 
-The thesis compares four Gaussian-process cells ({additive, product} kernel structure x {amplitude,
-lengthscale} sparsity prior) that must differ in *nothing* but the kernel/prior block, so every
-cell is a BoTorch `PyroModel` differing only there, fitted by BoTorch's own NUTS scheme and
-predicted through the batched GPyTorch model BoTorch loads the draws into. The JAX kernels beside
-them all take `(X, Z, params)` and return a noise-free (n, m) matrix, so a readout reaches any cell
-through `KERNELS`.
+The thesis compares Gaussian-process cells in a 2 x 2 ({additive, product} kernel structure x
+{amplitude, lengthscale} sparsity parameterization) under two sparsity-prior families, SAASBO's
+half-Cauchy and R2-D2 (`sagp.r2d2`), that must differ in *nothing* but the kernel/prior block, so
+every cell is a BoTorch `PyroModel` differing only there, fitted by BoTorch's own NUTS scheme and
+predicted through the batched GPyTorch model BoTorch loads the draws into; an R2-D2 cell is its
+half-Cauchy twin with another prior block. The JAX kernels beside them all take `(X, Z, params)`
+and return a noise-free (n, m) matrix, so a readout reaches any cell through `KERNELS`.
 """
 from __future__ import annotations
 
@@ -37,13 +38,16 @@ from numpy.polynomial.legendre import leggauss
 from numpyro.infer import MCMC, NUTS
 from scipy.optimize import brentq
 
+from sagp import r2d2
 from sagp.diagnostics import DiagThresholds, Diagnostics, diagnose
 from sagp.kernels_torch import (
     CenteredAdditiveAmplitudeKernel, CenteredAdditiveLengthscaleKernel,
     CenteredProductAmplitudeKernel,
 )
 
-# (structure in {"additive", "product"}, sparsity prior in {"amplitude", "lengthscale"}).
+# (structure in {"additive", "product"}, sparsity prior in {"amplitude", "lengthscale",
+# "amplitude_r2d2", "lengthscale_r2d2"}): the parameterization, a_sq or rho, and the prior family,
+# half-Cauchy or R2-D2, on it.
 CellKey = tuple[str, str]
 
 # What a cell's `load_mcmc_samples` hands back; the trailing entry is BoTorch's input-warping
@@ -190,12 +194,17 @@ def _diag_product_lengthscale(X: Array, params: dict[str, Array]) -> Array:
     return params["outputscale"] * jnp.ones(X.shape[-2])
 
 
-# (kernel, diagonal) per cell: the one place a readout has to look to serve any of the four.
+# (kernel, diagonal) per cell: the one place a readout has to look to serve any of them. An R2-D2
+# cell holds its half-Cauchy twin's two function objects: the prior is all that differs.
 KERNELS: dict[CellKey, tuple[Callable[..., Array], Callable[..., Array]]] = {
     ("additive", "amplitude"): (kernel_additive_amplitude, _diag_additive_amplitude),
     ("additive", "lengthscale"): (kernel_additive_lengthscale, _diag_additive_lengthscale),
     ("product", "amplitude"): (kernel_product_amplitude, _diag_product_amplitude),
     ("product", "lengthscale"): (kernel_product_lengthscale, _diag_product_lengthscale),
+    ("additive", "amplitude_r2d2"): (kernel_additive_amplitude, _diag_additive_amplitude),
+    ("additive", "lengthscale_r2d2"): (kernel_additive_lengthscale, _diag_additive_lengthscale),
+    ("product", "amplitude_r2d2"): (kernel_product_amplitude, _diag_product_amplitude),
+    ("product", "lengthscale_r2d2"): (kernel_product_lengthscale, _diag_product_lengthscale),
 }
 
 
@@ -237,6 +246,25 @@ ALPHA_AMPLITUDE: float = ALPHA_LENGTHSCALE * ACTIVE_EPS / RHO_EPS
 # white noise and competes with `noise`. The lengthscale cells have none: there the half-Cauchy on
 # rho *is* the lengthscale prior.
 ELL_PRIOR: tuple[float, float] = (0.0, 1.5)
+
+# The R2-D2 cells' prior, theta_i = omega * phi_i with omega = R2 / (1 - R2), R2 ~ Beta(R2D2_A,
+# R2D2_B), and phi ~ Dir(R2D2_K, ..., R2D2_K) -- `sagp.r2d2`'s reference (untied) form, whose (a, b,
+# k) are free. Calibrated by gate G0 on the same prior-predictive active count as the half-Cauchy
+# cells, #{i : a_sq_i > ACTIVE_EPS} at D = 100 (sagp_analysis/2026-09-25-r2d2-prior/tables/
+# tier_d_calibration.csv, row C_untied): the median matched exactly (37), the quartiles 14 and 61
+# against the half-Cauchy cells' 17 and 64 -- a residual of 3 coordinates on each (2.93 on the
+# continuous quartiles), the least the proper region a, b >= 0.5 with k <= 1/2 allows. The
+# residual confounds prior family with the *dispersion* of sparsity, not with its level.
+# `R2D2_K` is the per-coordinate concentration k = alpha / D (alpha = 49.94 at D = 100), the knob
+# `fit(alpha=...)` moves; `R2D2_A` None would be the paper's tie a = k * D.
+R2D2_FORM: str = "reference"
+R2D2_K: float = 0.49942145555129697
+R2D2_A: float | None = 1.577790731256835
+R2D2_B: float = 0.8043916352200708
+# rho_i = R2D2_RHO_SCALE * omega * phi_i on the lengthscale cells: #{rho_i > RHO_EPS} is then
+# #{omega * phi_i > ACTIVE_EPS} draw for draw, so both R2-D2 columns share one calibration and one
+# residual, as ALPHA_AMPLITUDE makes the two half-Cauchy columns share one.
+R2D2_RHO_SCALE: float = RHO_EPS / ACTIVE_EPS
 
 
 def _likelihood_from_samples(
@@ -368,8 +396,8 @@ class AdditiveAmplitudePyroModel(PyroModel):
     The lengthscale cells' half-Cauchy scale mixture applied to the components' variances, at
     `alpha = ALPHA_AMPLITUDE` for the same prior-predictive active count. Components being
     normalized, ell gets a LogNormal prior of its own, and there is no outputscale: it would be
-    unidentifiable against tausq. The mean and noise priors are BoTorch's, so the four cells differ
-    in nothing but their kernel/prior block.
+    unidentifiable against tausq. The mean and noise priors are BoTorch's, so the cells differ in
+    nothing but their kernel/prior block.
     """
 
     alpha: float = ALPHA_AMPLITUDE
@@ -448,22 +476,102 @@ class ProductAmplitudePyroModel(AdditiveAmplitudePyroModel):
     _torch_kernel = CenteredProductAmplitudeKernel
 
 
+# The R2-D2 cells. Each is a subclass of its half-Cauchy twin whose only new method is the prior
+# block; the product/amplitude and additive/lengthscale ones are method-resolution compositions of
+# that block with the twin, with no body. The block reads its form and constants through class
+# attributes, so switching `R2D2_FORM` edits no class and no registry entry.
+
+
+class AdditiveAmplitudeR2D2PyroModel(AdditiveAmplitudePyroModel):
+    """additive/amplitude with the R2-D2 prior on a_sq: `sample_amplitudes` is the only change."""
+
+    alpha: float = R2D2_K  # CellGP sets it from Cell.alpha_default (k, per coordinate)
+    r2d2_form: str = R2D2_FORM
+    r2d2_a: float | None = R2D2_A
+    r2d2_b: float = R2D2_B
+
+    def sample_amplitudes(self, dim: int) -> Array:
+        """a_sq_i = omega * phi_i under the R2-D2 prior; the deterministic (dim,).
+
+        The sites sampled are `r2d2.SAMPLED_SITES[r2d2_form]`, at shape k = `alpha`.
+        """
+        log_theta = r2d2.sample_log_theta(
+            dim, form=self.r2d2_form, k=self.alpha, b=self.r2d2_b, a=self.r2d2_a
+        )
+        return numpyro.deterministic("a_sq", jnp.exp(log_theta))
+
+
+class ProductAmplitudeR2D2PyroModel(AdditiveAmplitudeR2D2PyroModel, ProductAmplitudePyroModel):
+    """product/amplitude with the R2-D2 prior: the prior block from the first base, the product
+    kernels (`_jax_kernel`, `_torch_kernel`) from the second."""
+
+
+class ProductLengthscaleR2D2PyroModel(ProductLengthscalePyroModel):
+    """SAASBO's kernel with the R2-D2 prior on rho; `sample` stays BoTorch's."""
+
+    alpha: float = R2D2_K
+    r2d2_form: str = R2D2_FORM
+    r2d2_a: float | None = R2D2_A
+    r2d2_b: float = R2D2_B
+
+    def sample_inv_length_sq(self, dim: int) -> tuple[Array, Array]:
+        """rho_i = R2D2_RHO_SCALE * omega * phi_i under the R2-D2 prior -> (rho, ell).
+
+        The sites sampled are `r2d2.SAMPLED_SITES[r2d2_form]`, at shape k = `alpha`; rho and ell
+        are then BoTorch's two deterministic sites, returned as the half-Cauchy block returns them.
+        """
+        log_theta = r2d2.sample_log_theta(
+            dim, form=self.r2d2_form, k=self.alpha, b=self.r2d2_b, a=self.r2d2_a
+        )
+        # The floor on log rho keeps the gradient finite deep in the prior's tail, where log theta
+        # reaches -1600 at z = -40: rho ** -0.5 in the additive kernel has the derivative -0.5 rho
+        # ** -1.5, which overflows below log rho = -473 (two thirds of log DBL_MAX), and the zero
+        # cotangent it meets there makes the whole gradient NaN (rho = 0 itself, far below, would
+        # make the power infinite). The prior puts about 1e-97 per coordinate below -450 at the
+        # calibrated constants and D = 100.
+        log_rho = jnp.maximum(jnp.log(R2D2_RHO_SCALE) + log_theta, -450.0)
+        inv_length_sq = numpyro.deterministic("kernel_inv_length_sq", jnp.exp(log_rho))
+        lengthscale = numpyro.deterministic("lengthscale", 1.0 / jnp.sqrt(inv_length_sq))
+        return inv_length_sq, lengthscale
+
+    def postprocess_mcmc_samples(self, mcmc_samples: dict[str, Array]) -> dict[str, torch.Tensor]:
+        """Every site as torch, `lengthscale` recomputed from the retained rho as BoTorch does.
+
+        The twin's own postprocessing reads `kernel_tausq` and `_kernel_inv_length_sq`, sites this
+        block does not have.
+        """
+        mcmc_samples["lengthscale"] = 1.0 / jnp.sqrt(mcmc_samples["kernel_inv_length_sq"])
+        return {
+            site: torch.tensor(
+                np.asarray(draws), dtype=self.train_X.dtype, device=self.train_X.device
+            )
+            for site, draws in mcmc_samples.items()
+        }
+
+
+class AdditiveLengthscaleR2D2PyroModel(
+    ProductLengthscaleR2D2PyroModel, AdditiveLengthscalePyroModel
+):
+    """additive/lengthscale with the R2-D2 prior: the prior block and postprocessing from the first
+    base, `sample` and `load_mcmc_samples` (the additive kernel) from the second."""
+
+
 @dataclass(frozen=True)
 class Cell:
-    """One of the four surrogates: everything inference, prediction and the readouts need of it.
+    """One of the surrogates: everything inference, prediction and the readouts need of it.
 
     One `Cell` per surrogate lets `fit`, `posterior` and `experiments.identify` be written once,
     branch-free.
     """
 
     structure: str  # "additive" or "product"
-    prior: str  # "amplitude" or "lengthscale"
+    prior: str  # "amplitude" or "lengthscale", or either with "_r2d2": a name, never dispatched on
     pyro_model: type[PyroModel]  # the cell itself; `CellGP` instantiates it per fit
     kernel: Callable[..., Array]  # (X, Z, params) -> (n, m), noise-free
     kernel_diag: Callable[..., Array]  # (X, params) -> (n,), noise-free
     native_site: str  # the site the cell's own sparsity lives on: what its active rule thresholds
     sites: tuple[str, ...]  # every site to retain, sampled and deterministic, in declared order
-    alpha_default: float  # calibrated so all four cells' priors have the same active count
+    alpha_default: float  # the prior's sparsity knob, calibrated to one prior active count
 
     @property
     def key(self) -> CellKey:
@@ -471,8 +579,10 @@ class Cell:
         return (self.structure, self.prior)
 
 
-# The four cells of the 2x2. `sites` lists `noise` unconditionally; a fit with `fixed_noise` set
-# drops it, since then it is not a site at all.
+# The 2x2 under each prior family: the four half-Cauchy cells, then their four R2-D2 twins in the
+# same order (after them, so `experiments.run_bo.METHODS` keeps its first four entries). `sites`
+# lists `noise` unconditionally; a fit with `fixed_noise` set drops it, since then it is not a site
+# at all. An R2-D2 cell's sampled prior sites are those of `R2D2_FORM`.
 CELLS: dict[CellKey, Cell] = {
     cell.key: cell
     for cell in (
@@ -504,6 +614,38 @@ CELLS: dict[CellKey, Cell] = {
             sites=(
                 "outputscale", "mean", "noise", "kernel_tausq",
                 "_kernel_inv_length_sq", "kernel_inv_length_sq", "lengthscale",
+            ),
+        ),
+        Cell(
+            structure="additive", prior="amplitude_r2d2", pyro_model=AdditiveAmplitudeR2D2PyroModel,
+            kernel=kernel_additive_amplitude, kernel_diag=_diag_additive_amplitude,
+            native_site="a_sq", alpha_default=R2D2_K,
+            sites=("mean", "noise", *r2d2.SAMPLED_SITES[R2D2_FORM], "a_sq", "kernel_ell"),
+        ),
+        Cell(
+            structure="additive", prior="lengthscale_r2d2",
+            pyro_model=AdditiveLengthscaleR2D2PyroModel,
+            kernel=kernel_additive_lengthscale, kernel_diag=_diag_additive_lengthscale,
+            native_site="kernel_inv_length_sq", alpha_default=R2D2_K,
+            sites=(
+                "outputscale", "mean", "noise", *r2d2.SAMPLED_SITES[R2D2_FORM],
+                "kernel_inv_length_sq", "lengthscale",
+            ),
+        ),
+        Cell(
+            structure="product", prior="amplitude_r2d2", pyro_model=ProductAmplitudeR2D2PyroModel,
+            kernel=kernel_product_amplitude, kernel_diag=_diag_product_amplitude,
+            native_site="a_sq", alpha_default=R2D2_K,
+            sites=("mean", "noise", *r2d2.SAMPLED_SITES[R2D2_FORM], "a_sq", "kernel_ell"),
+        ),
+        Cell(
+            structure="product", prior="lengthscale_r2d2",
+            pyro_model=ProductLengthscaleR2D2PyroModel,
+            kernel=kernel_product_lengthscale, kernel_diag=_diag_product_lengthscale,
+            native_site="kernel_inv_length_sq", alpha_default=R2D2_K,
+            sites=(
+                "outputscale", "mean", "noise", *r2d2.SAMPLED_SITES[R2D2_FORM],
+                "kernel_inv_length_sq", "lengthscale",
             ),
         ),
     )
@@ -547,9 +689,9 @@ class NUTSConfig:
 class CellGP(SaasFullyBayesianSingleTaskGP):
     """BoTorch's SAAS GP with a cell's `PyroModel` bound per instance.
 
-    `SaasFullyBayesianSingleTaskGP` reads the `PyroModel` to build off a class attribute, so a
-    subclass per cell would be four of them; setting that attribute on the instance, before
-    `__init__` reads it, lets this one class serve all four. Input-scaling validation is off
+    `SaasFullyBayesianSingleTaskGP` reads the `PyroModel` to build off a class attribute, so it
+    would take a subclass per cell; setting that attribute on the instance, before `__init__`
+    reads it, lets this one class serve every cell. Input-scaling validation is off
     because the study standardizes with ddof 0 while BoTorch's check uses ddof 1, which would warn
     on every fit with n < 52.
     """
@@ -813,7 +955,8 @@ def fit(
     back either way, because the loop has to keep querying with an excluded fit.
 
     `alpha` None takes the cell's calibrated default: `ALPHA_LENGTHSCALE` on the rho scale, or
-    `ALPHA_AMPLITUDE` on the a^2 scale. `fixed_noise` None learns `noise`, while a value fixes the
+    `ALPHA_AMPLITUDE` on the a^2 scale, or `R2D2_K`, the R2-D2 cells' Dirichlet concentration per
+    coordinate, on either. `fixed_noise` None learns `noise`, while a value fixes the
     observation variance at it -- and must be at least 1e-4, because BoTorch clamps `train_Yvar`
     there before the sampler sees it, so a smaller number would silently be raised. `nuts` is the
     sampler budget (`NUTSConfig()`), `thresholds` the gate the attempt is judged against

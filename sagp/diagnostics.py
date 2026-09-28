@@ -1,8 +1,9 @@
 """sagp.diagnostics: the NUTS convergence verdict for one fit attempt.
 
 Pools every sampled site's R-hat and effective sample size against `DiagThresholds` -- the
-positive ones on the log scale the sampler moves in, over the attempt's un-thinned draws, not the
-thinned draws `fit` retains -- into one pass/fail `Diagnostics` record.
+positive ones on the log scale and the unit-interval one on the logit scale the sampler moves in,
+over the attempt's un-thinned draws, not the thinned draws `fit` retains -- into one pass/fail
+`Diagnostics` record.
 """
 from __future__ import annotations
 
@@ -55,9 +56,9 @@ class Diagnostics:
     reason: str
 
 
-# Every *sampled* positive site across the four cells; the deterministic `kernel_inv_length_sq`
-# and `a_sq` are left out, so the gate reads the sampler's own coordinates. R-hat and ESS are
-# taken on the logs: on the constrained half-Cauchy sites both are dominated by single draws.
+# Every *sampled* positive site across the cells; the deterministic `kernel_inv_length_sq` and
+# `a_sq` are left out, so the gate reads the sampler's own coordinates. R-hat and ESS are taken on
+# the logs: on the constrained half-Cauchy sites both are dominated by single draws.
 _POSITIVE_SAMPLED_SITES: tuple[str, ...] = (
     "outputscale",
     "noise",
@@ -67,18 +68,25 @@ _POSITIVE_SAMPLED_SITES: tuple[str, ...] = (
     "kernel_ell",
 )
 
-# The sampled sites that are real-valued rather than positive: `mean` is a Normal draw, so its
-# R-hat and ESS are taken on its natural scale and a log would be NaN half the time.
-_REAL_SAMPLED_SITES: tuple[str, ...] = ("mean",)
+# The sampled sites that are real-valued rather than positive: `mean` is a Normal draw, and so are
+# the R2-D2 prior's copula coordinates in either form, so their R-hat and ESS are taken on their
+# natural scale and a log would be NaN half the time.
+_REAL_SAMPLED_SITES: tuple[str, ...] = ("mean", "r2d2_z_xi", "r2d2_z_lam")
 
-# The three blocks the per-group fields report over, together exactly the two tuples above:
-# `native` is whichever site the cell's own sparsity lives on, `ell` the shape parameter only the
-# amplitude cells carry (2D + 3 pooled statistics against a lengthscale cell's D + 4), and
-# `global` the scalars every cell has.
+# The sampled sites on the unit interval: the R2-D2 reference form's Beta site, read on the logit
+# scale log(x) - log1p(-x), NumPyro's own unconstrained coordinate for it.
+_UNIT_SAMPLED_SITES: tuple[str, ...] = ("r2d2_R2",)
+
+# The three blocks the per-group fields report over, together exactly the three tuples above:
+# `native` is whichever site the cell's own sparsity lives on (R2-D2's D copula coordinates where
+# the half-Cauchy cells have their D local scales), `ell` the shape parameter only the amplitude
+# cells carry (2D + 3 pooled statistics against a lengthscale cell's D + 4), and `global` the
+# scalars every cell has. Both R2-D2 forms' sites are listed, so switching the form edits nothing
+# here.
 _DIAG_GROUPS: dict[str, tuple[str, ...]] = {
-    "native": ("_kernel_inv_length_sq", "_a_sq"),
+    "native": ("_kernel_inv_length_sq", "_a_sq", "r2d2_z_lam"),
     "ell": ("kernel_ell",),
-    "global": ("outputscale", "noise", "kernel_tausq", "mean"),
+    "global": ("outputscale", "noise", "kernel_tausq", "mean", "r2d2_R2", "r2d2_z_xi"),
 }
 
 
@@ -109,17 +117,26 @@ def diagnose(
 
     `numpyro.diagnostics.summary` is the reference's own, and with one chain its split-R-hat
     compares the chain's two halves. Every sampled site is read -- the positive ones on the log
-    scale, `mean` on its own -- and every per-coordinate site contributes D statistics, all of them
-    pooled, so the rule reads "every scalar the sampler moved converged", not "the average did".
-    The criteria are negations of the pass conditions, so a NaN R-hat -- what a site that never
-    moved produces -- fails rather than silently passing; the per-group fields are read off these
-    very statistics and so cannot disagree with the verdict.
+    scale, the real ones on their own, the unit-interval one on the logit scale -- and every
+    per-coordinate site contributes D statistics, all of them pooled, so the rule reads "every
+    scalar the sampler moved converged", not "the average did". The criteria are negations of the
+    pass conditions, so a NaN R-hat -- what a site that never moved produces -- fails rather than
+    silently passing; the per-group fields are read off these very statistics and so cannot
+    disagree with the verdict.
     """
-    stats_input = {
-        site: jnp.log(flat_samples[site])
-        for site in _POSITIVE_SAMPLED_SITES
-        if site in flat_samples
-    } | {site: flat_samples[site] for site in _REAL_SAMPLED_SITES if site in flat_samples}
+    stats_input = (
+        {
+            site: jnp.log(flat_samples[site])
+            for site in _POSITIVE_SAMPLED_SITES
+            if site in flat_samples
+        }
+        | {site: flat_samples[site] for site in _REAL_SAMPLED_SITES if site in flat_samples}
+        | {
+            site: jnp.log(flat_samples[site]) - jnp.log1p(-flat_samples[site])
+            for site in _UNIT_SAMPLED_SITES
+            if site in flat_samples
+        }
+    )
     stats = summary(stats_input, prob=0.9, group_by_chain=False)
     per_site = {
         site: (np.ravel(site_stats["r_hat"]), np.ravel(site_stats["n_eff"]))

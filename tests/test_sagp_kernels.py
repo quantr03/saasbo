@@ -17,10 +17,15 @@ from sagp.gp import (
     ACTIVE_EPS,
     ALPHA_AMPLITUDE,
     ALPHA_LENGTHSCALE,
+    CELLS,
     ELL_EPS,
     GL_NODES,
     GL_WEIGHTS,
     KERNELS,
+    R2D2_A,
+    R2D2_B,
+    R2D2_K,
+    R2D2_RHO_SCALE,
     RHO_EPS,
     cell_kernel_diag,
     centered_matern52_1d,
@@ -37,6 +42,7 @@ import numpy as np
 import pytest
 
 from botorch.models.fully_bayesian import matern52_kernel
+from scipy.special import logsumexp
 from synthobj.kernel import centered, normalized
 from synthobj.kernel import v as v_numpy
 
@@ -44,9 +50,10 @@ D = 7
 CELL_KEYS = list(KERNELS)
 CELL_IDS = ["/".join(key) for key in CELL_KEYS]
 
-# The three cells built out of the centered component; ("product", "lengthscale") is pinned
-# against BoTorch's `matern52_kernel` instead.
-CENTERED_CELL_KEYS = [key for key in CELL_KEYS if key != ("product", "lengthscale")]
+# The cells built out of the centered component; those on ("product", "lengthscale")'s ARD
+# kernel are pinned against BoTorch's `matern52_kernel` instead. By kernel identity rather than by
+# name, so an R2-D2 cell is tested against its own kernel's oracle.
+CENTERED_CELL_KEYS = [key for key in CELL_KEYS if KERNELS[key][0] is not kernel_product_lengthscale]
 CENTERED_CELL_IDS = ["/".join(key) for key in CENTERED_CELL_KEYS]
 
 # The lengthscales the brief exercises the centered component at: rough, middling and so smooth
@@ -58,17 +65,25 @@ ELLS_TABLE = [0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0]
 V_TABLE = [0.88574, 0.78149, 0.60296, 0.28218, 0.10680, 0.03183, 0.01478, 0.00546, 0.00138, 0.00015]
 
 # Every cell's `cell_kernel_diag` agrees with its own matrix diagonal to float64 round-off,
-# except ("product", "lengthscale"): BoTorch floors the squared distance at 1e-30 before the
-# square root, so the matrix's own diagonal is var * (1 - sqrt(5) * 1e-15) rather than var. That
-# floor is BoTorch's, and reproducing it in an O(n D Q) diagonal would state it twice, so the
-# diagonal stays var * ones and the tolerance absorbs the floor instead.
-DIAG_ATOL = dict.fromkeys(CELL_KEYS, 1.0e-12)
-DIAG_ATOL[("product", "lengthscale")] = 1.0e-11
+# except on ("product", "lengthscale")'s kernel, which its R2-D2 twin shares: BoTorch floors the
+# squared distance at 1e-30 before the square root, so the matrix's own diagonal is var * (1 -
+# sqrt(5) * 1e-15) rather than var. That floor is BoTorch's, and reproducing it in an O(n D Q)
+# diagonal would state it twice, so the diagonal stays var * ones and the tolerance absorbs the
+# floor instead.
+DIAG_ATOL = {
+    key: 1.0e-11 if KERNELS[key][0] is kernel_product_lengthscale else 1.0e-12 for key in CELL_KEYS
+}
 
 # Plan decision D2's simulation, at the size it was run during planning: 10^4 prior draws of the
 # half-Cauchy scale mixture over D_ALPHA coordinates.
 N_DRAWS = 10**4
 D_ALPHA = 100
+
+# G0's calibration of the R2-D2 cells (sagp_analysis/2026-09-25-r2d2-prior/tables/
+# tier_d_calibration.csv): the active-count median matched to the half-Cauchy cells', and each
+# quartile off by this many coordinates at D = 100 -- 14 and 61 against 17 and 64.
+Q25_RESIDUAL = 3
+Q75_RESIDUAL = 3
 
 
 def _params() -> dict[str, jax.Array | float]:
@@ -102,7 +117,7 @@ def _numpy_oracle(key, X, Z, params) -> np.ndarray:
     cancels -- and nothing else pins the *sign* of the rho -> ell exponent.
     """
     X, Z = np.asarray(X), np.asarray(Z)
-    if key[1] == "amplitude":
+    if CELLS[key].native_site == "a_sq":
         a_sq, ell = np.asarray(params["a_sq"]), np.asarray(params["kernel_ell"])
         terms = np.array([a_sq[i] * normalized(X[:, i], Z[:, i], ell[i]) for i in range(D)])
         return terms.sum(axis=0) if key[0] == "additive" else (1.0 + terms).prod(axis=0)
@@ -236,7 +251,7 @@ def test_cell_kernel_gradients_match_central_differences(key):
     """
     X, params = _points(12, seed=6), _params()
     kernel = KERNELS[key][0]
-    site = "a_sq" if key[1] == "amplitude" else "kernel_inv_length_sq"
+    site = CELLS[key].native_site
     theta = params[site]
 
     def total(value):
@@ -285,6 +300,35 @@ def test_alpha_matches_reference_count():
     # The constants the plan quotes, pinned to the precision it quotes them at.
     assert abs(ALPHA_AMPLITUDE - 0.01312) < 2.0e-4
     assert abs(ELL_EPS - 2.5613) < 2.0e-3
+
+
+def _r2d2_counts(rng, a, b, k, cutoff, scale=1.0):
+    """#{i : scale * omega * phi_i > cutoff} per draw, in NumPy only: R2 ~ Beta(a, b), log-space
+    Gamma(k) draws (log G' + log(U)/k, G' ~ Gamma(k + 1)), phi = softmax(log G)."""
+    R2 = rng.beta(a, b, N_DRAWS)
+    log_g = (np.log(rng.gamma(k + 1.0, size=(N_DRAWS, D_ALPHA)))
+             + np.log(rng.random((N_DRAWS, D_ALPHA))) / k)
+    log_phi = log_g - logsumexp(log_g, axis=1, keepdims=True)
+    log_theta = np.log(scale) + (np.log(R2) - np.log1p(-R2))[:, None] + log_phi
+    return np.count_nonzero(log_theta > np.log(cutoff), axis=1)
+
+
+def test_r2d2_calibration_matches_reference_count():
+    # G0's calibration: the median matched to the half-Cauchy cells' count, the quartiles off by
+    # at most the residual G0 recorded (confounding prior family with the dispersion of
+    # sparsity, not with its level), and the rho scale transported exactly, draw for draw.
+    rng = np.random.default_rng(0)
+    reference = _active_counts(rng, ALPHA_LENGTHSCALE, RHO_EPS)
+    a = R2D2_K * D_ALPHA if R2D2_A is None else R2D2_A
+    state = rng.bit_generator.state
+    amplitude = _r2d2_counts(rng, a, R2D2_B, R2D2_K, ACTIVE_EPS)
+    rng.bit_generator.state = state
+    rho = _r2d2_counts(rng, a, R2D2_B, R2D2_K, RHO_EPS, scale=R2D2_RHO_SCALE)
+    assert np.array_equal(amplitude, rho)
+    assert abs(np.median(reference) - np.median(amplitude)) <= 1
+    for q, residual in ((0.25, Q25_RESIDUAL), (0.75, Q75_RESIDUAL)):  # literals from G0
+        assert abs(np.quantile(reference, q) - np.quantile(amplitude, q)) <= residual + 1
+    assert abs(R2D2_RHO_SCALE - 7.6218) < 1e-4
 
 
 def test_gp_constants_are_bit_identical_to_synthobjs():

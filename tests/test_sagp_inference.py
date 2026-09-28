@@ -1,6 +1,6 @@
 """Tests for sagp.gp's NUTS inference: BoTorch equivalence, the gate and prediction.
 
-The thesis's claim that the four cells differ in nothing but the kernel/prior block rests on the
+The thesis's claim that the cells differ in nothing but the kernel/prior block rests on the
 sampler being BoTorch's. `_run_nuts` is `fit_fully_bayesian_model_nuts`'s sampler lines copied -- a
 copy nothing but a test can keep honest -- so the first tests run
 `SaasFullyBayesianSingleTaskGP` + `fit_fully_bayesian_model_nuts` and `fit` on the same data at the
@@ -29,6 +29,7 @@ from sagp.gp import (
 
 import botorch.settings
 import gpytorch.settings
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -38,6 +39,8 @@ from botorch.models.fully_bayesian import (
     MIN_INFERRED_NOISE_LEVEL,
     SaasFullyBayesianSingleTaskGP,
 )
+from numpyro import handlers
+from numpyro.infer.util import constrain_fn, potential_energy, unconstrain_fn
 
 import sagp.gp
 
@@ -142,21 +145,27 @@ def test_fit_reproduces_botorch_nuts_bit_for_bit_with_a_fixed_noise():
     assert np.array_equal(np.asarray(ours.noises()), np.full(16, 1.0e-4))
 
 
-def test_fit_is_deterministic_in_its_seed():
+@pytest.mark.parametrize(
+    ("cell_key", "site"),
+    [(("additive", "amplitude"), "kernel_tausq"), (("additive", "amplitude_r2d2"), "r2d2_z_lam")],
+    ids=["additive/amplitude", "additive/amplitude_r2d2"],
+)
+def test_fit_is_deterministic_in_its_seed(cell_key, site):
     # `seed` is the whole of the fit's randomness: a run is reproducible from its record, and two
-    # cells at the same seed are comparable because they saw the same stream.
+    # cells at the same seed are comparable because they saw the same stream. An R2-D2 cell adds
+    # nothing random of its own: its map's table is built from the shape alone.
     X, y = _data(n=12, D=3, seed=1)
     nuts = NUTSConfig(32, 32, 8)
 
-    first = fit(X, y, 4, ("additive", "amplitude"), nuts=nuts, thresholds=NEVER_FAILS)
-    again = fit(X, y, 4, ("additive", "amplitude"), nuts=nuts, thresholds=NEVER_FAILS)
-    other = fit(X, y, 5, ("additive", "amplitude"), nuts=nuts, thresholds=NEVER_FAILS)
+    first = fit(X, y, 4, cell_key, nuts=nuts, thresholds=NEVER_FAILS)
+    again = fit(X, y, 4, cell_key, nuts=nuts, thresholds=NEVER_FAILS)
+    other = fit(X, y, 5, cell_key, nuts=nuts, thresholds=NEVER_FAILS)
 
     assert set(first.samples) == set(again.samples)
-    for site, draws in first.samples.items():
-        assert np.array_equal(np.asarray(draws), np.asarray(again.samples[site]))
+    for name, draws in first.samples.items():
+        assert np.array_equal(np.asarray(draws), np.asarray(again.samples[name]))
     assert not np.array_equal(
-        np.asarray(first.samples["kernel_tausq"]), np.asarray(other.samples["kernel_tausq"])
+        np.asarray(first.samples[site]), np.asarray(other.samples[site])
     )
 
 
@@ -375,7 +384,7 @@ def test_posterior_is_right_when_draws_equal_points(cell_key):
 @pytest.mark.parametrize("fixed_noise", [None, 1.0e-3], ids=["learned_noise", "fixed_noise"])
 @pytest.mark.parametrize("cell_key", CELL_KEYS, ids=CELL_IDS)
 def test_all_cells_fit_and_predict(cell_key, fixed_noise):
-    # One code path serves all four cells and both noise conventions: what is pinned is the site
+    # One code path serves every cell and both noise conventions: what is pinned is the site
     # set each fit retains, the shapes prediction answers with, and that `noises()` reports the
     # variance prediction actually used -- BoTorch's floor, or the fixed value exactly.
     S, D, n_test = 4, 3, 5
@@ -395,6 +404,7 @@ def test_all_cells_fit_and_predict(cell_key, fixed_noise):
         "outputscale": (), "mean": (), "noise": (), "kernel_tausq": (),
         "_kernel_inv_length_sq": (D,), "kernel_inv_length_sq": (D,), "lengthscale": (D,),
         "_a_sq": (D,), "a_sq": (D,), "kernel_ell": (D,),
+        "r2d2_R2": (), "r2d2_z_xi": (), "r2d2_z_lam": (D,),
     }
     for site in expected:
         assert fitted.samples[site].shape == (S,) + per_site[site]
@@ -406,6 +416,43 @@ def test_all_cells_fit_and_predict(cell_key, fixed_noise):
     assert np.all(np.asarray(fitted.noises()) >= 1.0e-4)
     if fixed_noise is not None:
         assert np.array_equal(np.asarray(fitted.noises()), np.full(S, fixed_noise))
+
+
+R2D2_KEYS = [("additive", "amplitude_r2d2"), ("product", "amplitude_r2d2"),
+             ("additive", "lengthscale_r2d2"), ("product", "lengthscale_r2d2")]
+
+
+@pytest.mark.parametrize("fixed_noise", [None, 1.0e-3], ids=["learned_noise", "fixed_noise"])
+@pytest.mark.parametrize("cell_key", R2D2_KEYS, ids=["/".join(key) for key in R2D2_KEYS])
+def test_r2d2_log_density_gradient_is_finite_deep_in_the_tail(cell_key, fixed_noise):
+    # A copula coordinate at z = -40 sends its log theta to about -1600, far below any double. Its
+    # a_sq underflows to 0, which the amplitude kernels take in stride; its rho would too, and
+    # long before that the derivative of rho ** -0.5 in the additive lengthscale kernel overflows
+    # and turns the whole gradient NaN. The floor on log rho is what keeps it finite. The gradient
+    # checked is the one NUTS follows: the potential energy's, on the unconstrained coordinates,
+    # with and without a `noise` site.
+    X, y = _data(n=12, D=3, seed=15)
+    Xt, zt = torch.as_tensor(X), torch.as_tensor(y)[:, None]
+    train_Yvar = None if fixed_noise is None else torch.full_like(zt, fixed_noise)
+    model = sagp.gp.CellGP(Xt, zt, train_Yvar, cell=CELLS[cell_key]).pyro_model.sample
+    trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace()
+    constrained = {
+        name: site["value"]
+        for name, site in trace.items()
+        if site["type"] == "sample" and not site["is_observed"]
+    }
+    params = unconstrain_fn(model, (), {}, constrained)
+    params["r2d2_z_lam"] = params["r2d2_z_lam"].at[0].set(-40.0)
+
+    native = constrain_fn(model, (), {}, params, return_deterministic=True)[
+        CELLS[cell_key].native_site
+    ]
+    grads = jax.grad(lambda p: potential_energy(model, (), {}, p))(params)
+
+    assert float(native[0]) < 1.0e-150  # the point is in the deep tail the test is about
+    assert set(grads) == set(params)
+    for name, grad in grads.items():
+        assert np.all(np.isfinite(np.asarray(grad))), name
 
 
 # --- standardize ---

@@ -90,7 +90,7 @@ def test_resolve_config_differs_only_in_method(tmp_path):
         "--n-init", "20", "--out", str(tmp_path),
     ]
     configs = {method: resolve_config(_parse(*base, "--cell", method)) for method in METHODS}
-    assert list(configs) == METHODS and len(configs) == 7
+    assert list(configs) == METHODS and len(configs) == 11
 
     reference = configs["sobol"]
     for method, cfg in configs.items():
