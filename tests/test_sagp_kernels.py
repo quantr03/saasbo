@@ -84,6 +84,16 @@ D_ALPHA = 100
 # quartile off by this many coordinates at D = 100 -- 14 and 61 against 17 and 64.
 Q25_RESIDUAL = 3
 Q75_RESIDUAL = 3
+# The exact active-count quartiles at D = 100 that G0 compared (plan D2; that table): the
+# half-Cauchy cells', and the R2-D2 cells' at the residuals above, 14 / 37 / 61.
+HALF_CAUCHY_QUARTILES = (17, 37, 64)
+R2D2_QUARTILES = (HALF_CAUCHY_QUARTILES[0] - Q25_RESIDUAL, HALF_CAUCHY_QUARTILES[1],
+                  HALF_CAUCHY_QUARTILES[2] - Q75_RESIDUAL)
+# The calibration test's own draw count. The R2-D2 count's CDF crosses 0.25, 0.5 and 0.75 within
+# 0.002-0.005 of an integer step (P(N <= 60) = 0.741, P(N <= 61) = 0.750), so a sample quartile
+# can sit one coordinate off its exact value; at 4 * 10^4 draws each lies within one coordinate
+# of it by 4.5 standard errors or more (200 of 200 seeds pass; k x 1.2 and k / 1.2 fail all 200).
+N_CALIBRATION_DRAWS = 4 * 10**4
 
 
 def _params() -> dict[str, jax.Array | float]:
@@ -266,7 +276,9 @@ def test_cell_kernel_gradients_match_central_differences(key):
     assert analytic == pytest.approx(finite_difference, rel=1.0e-6)
 
 
-def _active_counts(rng: np.random.Generator, alpha: float, cutoff: float) -> np.ndarray:
+def _active_counts(
+    rng: np.random.Generator, alpha: float, cutoff: float, n: int = N_DRAWS
+) -> np.ndarray:
     """#{i : tausq * lam_i > cutoff} per draw, for tausq ~ HalfCauchy(alpha), lam_i ~ HalfCauchy(1).
 
     The prior-predictive active count of either cell: `alpha` and `cutoff` are (0.1, RHO_EPS) on
@@ -274,8 +286,8 @@ def _active_counts(rng: np.random.Generator, alpha: float, cutoff: float) -> np.
     |standard Cauchy| times the scale, which is exactly `dist.HalfCauchy(scale)`, in numpy so the
     check is independent of the JAX code it calibrates.
     """
-    tausq = alpha * np.abs(rng.standard_cauchy(N_DRAWS))[:, None]
-    lam = np.abs(rng.standard_cauchy((N_DRAWS, D_ALPHA)))
+    tausq = alpha * np.abs(rng.standard_cauchy(n))[:, None]
+    lam = np.abs(rng.standard_cauchy((n, D_ALPHA)))
     return np.count_nonzero(tausq * lam > cutoff, axis=1)
 
 
@@ -302,12 +314,12 @@ def test_alpha_matches_reference_count():
     assert abs(ELL_EPS - 2.5613) < 2.0e-3
 
 
-def _r2d2_counts(rng, a, b, k, cutoff, scale=1.0):
+def _r2d2_counts(rng, a, b, k, cutoff, scale=1.0, n=N_DRAWS):
     """#{i : scale * omega * phi_i > cutoff} per draw, in NumPy only: R2 ~ Beta(a, b), log-space
     Gamma(k) draws (log G' + log(U)/k, G' ~ Gamma(k + 1)), phi = softmax(log G)."""
-    R2 = rng.beta(a, b, N_DRAWS)
-    log_g = (np.log(rng.gamma(k + 1.0, size=(N_DRAWS, D_ALPHA)))
-             + np.log(rng.random((N_DRAWS, D_ALPHA))) / k)
+    R2 = rng.beta(a, b, n)
+    log_g = (np.log(rng.gamma(k + 1.0, size=(n, D_ALPHA)))
+             + np.log(rng.random((n, D_ALPHA))) / k)
     log_phi = log_g - logsumexp(log_g, axis=1, keepdims=True)
     log_theta = np.log(scale) + (np.log(R2) - np.log1p(-R2))[:, None] + log_phi
     return np.count_nonzero(log_theta > np.log(cutoff), axis=1)
@@ -315,19 +327,25 @@ def _r2d2_counts(rng, a, b, k, cutoff, scale=1.0):
 
 def test_r2d2_calibration_matches_reference_count():
     # G0's calibration: the median matched to the half-Cauchy cells' count, the quartiles off by
-    # at most the residual G0 recorded (confounding prior family with the dispersion of
-    # sparsity, not with its level), and the rho scale transported exactly, draw for draw.
+    # the residual G0 recorded (confounding prior family with the dispersion of sparsity, not
+    # with its level), and the rho scale transported exactly, draw for draw. Both counts are read
+    # against G0's exact quartiles, within one coordinate, at the test's own draw count; and the
+    # constants the Triton runs use are pinned at G0's full precision.
+    assert (R2D2_A, R2D2_B, R2D2_K) == (1.577790731256835, 0.8043916352200708, 0.49942145555129697)
+    assert R2D2_QUARTILES == (14, 37, 61)
     rng = np.random.default_rng(0)
-    reference = _active_counts(rng, ALPHA_LENGTHSCALE, RHO_EPS)
+    reference = _active_counts(rng, ALPHA_LENGTHSCALE, RHO_EPS, n=N_CALIBRATION_DRAWS)
     a = R2D2_K * D_ALPHA if R2D2_A is None else R2D2_A
     state = rng.bit_generator.state
-    amplitude = _r2d2_counts(rng, a, R2D2_B, R2D2_K, ACTIVE_EPS)
+    amplitude = _r2d2_counts(rng, a, R2D2_B, R2D2_K, ACTIVE_EPS, n=N_CALIBRATION_DRAWS)
     rng.bit_generator.state = state
-    rho = _r2d2_counts(rng, a, R2D2_B, R2D2_K, RHO_EPS, scale=R2D2_RHO_SCALE)
+    rho = _r2d2_counts(
+        rng, a, R2D2_B, R2D2_K, RHO_EPS, scale=R2D2_RHO_SCALE, n=N_CALIBRATION_DRAWS
+    )
     assert np.array_equal(amplitude, rho)
-    assert abs(np.median(reference) - np.median(amplitude)) <= 1
-    for q, residual in ((0.25, Q25_RESIDUAL), (0.75, Q75_RESIDUAL)):  # literals from G0
-        assert abs(np.quantile(reference, q) - np.quantile(amplitude, q)) <= residual + 1
+    for q, half_cauchy, r2d2 in zip((0.25, 0.5, 0.75), HALF_CAUCHY_QUARTILES, R2D2_QUARTILES):
+        assert abs(np.quantile(reference, q) - half_cauchy) <= 1
+        assert abs(np.quantile(amplitude, q) - r2d2) <= 1
     assert abs(R2D2_RHO_SCALE - 7.6218) < 1e-4
 
 

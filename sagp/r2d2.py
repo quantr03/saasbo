@@ -245,10 +245,13 @@ def log_gamma_icdf(z: ArrayLike, k: float) -> Array:
     over the table at every study shape (0.005 to 20.93). Outside the table:
 
     - below z = -38, the small-x asymptote y = (log Phi(z) + r(-38)) / k: r(-38) is lgamma(k + 1)
-      up to k x / (k + 1), below 1e-15 for every shape up to 21, and taking it from the table
-      makes the map continuous there;
-    - above z = 36, the tangent line at 36 (past z = 37 the solver's Q underflows; the prior mass
-      beyond 36 is about 1e-284).
+      up to k x / (k + 1), which is far below rounding there, and up to the solver's rounding,
+      which is not -- the two differ by up to 3e-13 at the study's shapes (the tail test bounds it
+      at 1e-12). Taking r(-38) from the table makes the map continuous there, and it agrees with
+      the solver there to 1e-14 relative in y (measured 2e-16);
+    - above z = 36, the tangent line at 36, y(36) + y'(36) (z - 36) with the solver's y and
+      closed-form y' (past z = 37 the solver's Q underflows; the prior mass beyond 36 is about
+      1e-284).
 
     So the map is finite and strictly increasing with a finite positive derivative for every
     finite z, and continuously differentiable everywhere. Autodiff through the interpolant is

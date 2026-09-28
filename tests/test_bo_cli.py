@@ -137,6 +137,18 @@ def test_the_other_argument_errors_also_exit_2(tmp_path):
     assert not (tmp_path / "runs").exists()
 
 
+def test_the_alpha_help_says_what_alpha_sets_in_each_prior_family(capsys):
+    """`--alpha` is the global scale of the half-Cauchy cells' prior but k, the Dirichlet
+    concentration, on the R2-D2 cells: a half-Cauchy-scale value such as 0.0131 given to an R2-D2
+    cell would silently make its prior far sparser, so the help names both meanings."""
+    assert main(["--help"]) == 0
+    text = " ".join(capsys.readouterr().out.split())
+    start = text.rindex("--alpha ALPHA")  # the option's entry, after the usage line
+    alpha_help = text[start:text.index("--fixed-noise", start)]
+    assert "global scale on the four half-Cauchy cells" in alpha_help
+    assert "k, the Dirichlet concentration, on the four R2-D2 cells" in alpha_help
+
+
 def test_no_resume_starts_the_run_over_and_the_default_continues_it(tmp_path):
     # The SLURM array re-submits the same tasks and must *continue* them; `--no-resume` is the
     # opt-out, so a flag wired the wrong way round would silently discard finished work on every

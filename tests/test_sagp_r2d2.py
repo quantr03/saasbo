@@ -14,7 +14,7 @@ import numpyro
 import pytest
 from numpyro.distributions import constraints
 from numpyro.infer import Predictive
-from scipy.special import gammaincinv, gammainccinv
+from scipy.special import gammaincinv, gammainccinv, gammaln, log_ndtr
 from scipy.stats import ks_2samp, norm
 
 from sagp.r2d2 import (
@@ -58,6 +58,40 @@ def test_runtime_map_is_finite_monotone_and_differentiable_far_out(k):
     g = np.asarray(jax.vmap(jax.grad(lambda t: log_gamma_icdf(t, k)))(z))
     assert np.all(np.isfinite(y)) and np.all(np.diff(y) > 0)
     assert np.all(np.isfinite(g)) and np.all(g > 0)
+
+
+@pytest.mark.parametrize("k", SHAPES)
+def test_runtime_map_tails_are_the_asymptote_and_the_tangent_line(k):
+    # Beyond the table the map is two formulas: below z = -38 the small-x asymptote
+    # y = (log Phi(z) + r(-38)) / k, r(-38) = k y(-38) - log Phi(-38), and above z = 36 the
+    # tangent line y(36) + y'(36) (z - 36). Each is checked against its formula with y(-38),
+    # y(36) and y'(36) from the solver (y' from its closed-form custom_jvp), so an off-by-one knot
+    # or a wrong constant shows; the lower tail against the solver itself too, which stays valid
+    # there, and r(-38) against lgamma(k + 1), its limit. Monotone, with a finite positive
+    # gradient, out to |z| = 40.
+    lower = np.linspace(-40.0, -38.0, 201)[:-1]
+    upper = np.linspace(36.0, 40.0, 201)[1:]
+    y_lower = np.asarray(log_gamma_icdf(jnp.asarray(lower), k))
+    y_upper = np.asarray(log_gamma_icdf(jnp.asarray(upper), k))
+
+    r_edge = k * float(log_gamma_icdf_newton(-38.0, k)) - log_ndtr(-38.0)
+    asymptote = (log_ndtr(lower) + r_edge) / k
+    solver = np.asarray(log_gamma_icdf_newton(jnp.asarray(lower), k))
+    y_edge = float(log_gamma_icdf_newton(36.0, k))
+    slope_edge = float(jax.grad(lambda z: log_gamma_icdf_newton(z, k))(36.0))
+    tangent = y_edge + slope_edge * (upper - 36.0)
+
+    def relative(a, b):
+        return np.max(np.abs(a - b) / np.maximum(1.0, np.abs(b)))
+
+    assert relative(y_lower, asymptote) <= 1e-14
+    assert relative(y_lower, solver) <= 1e-14
+    assert abs(r_edge - gammaln(k + 1.0)) <= 1e-12
+    assert relative(y_upper, tangent) <= 1e-14
+    for z, y in ((lower, y_lower), (upper, y_upper)):
+        g = np.asarray(jax.vmap(jax.grad(lambda t: log_gamma_icdf(t, k)))(jnp.asarray(z)))
+        assert np.all(np.diff(y) > 0)
+        assert np.all(np.isfinite(g)) and np.all(g > 0)
 
 
 @pytest.mark.parametrize("k", (0.0892, 0.44, 20.93))

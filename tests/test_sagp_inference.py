@@ -453,6 +453,12 @@ def test_r2d2_log_density_gradient_is_finite_deep_in_the_tail(cell_key, fixed_no
     assert set(grads) == set(params)
     for name, grad in grads.items():
         assert np.all(np.isfinite(np.asarray(grad))), name
+    # And compiled, as NUTS evaluates it: XLA may fuse and reorder what the eager trace computes
+    # op by op, so the jitted gradient is checked in its own right.
+    jitted = jax.jit(jax.grad(lambda p: potential_energy(model, (), {}, p)))(params)
+    assert set(jitted) == set(params)
+    for name, grad in jitted.items():
+        assert np.all(np.isfinite(np.asarray(grad))), name
 
 
 # --- standardize ---

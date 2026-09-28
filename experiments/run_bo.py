@@ -24,7 +24,7 @@ import numpy as np
 import sagp.bo
 from experiments.runlog import RunConfig, RunLogger, config_hash, run_dir_for
 from sagp.bo import BOState, initial_design, propose_ei
-from sagp.gp import CELLS, NUTSConfig, fit
+from sagp.gp import ALPHA_AMPLITUDE, ALPHA_LENGTHSCALE, CELLS, R2D2_K, NUTSConfig, fit
 from sagp.references import fit_map, propose_sobol
 from synthobj.families import make_family
 from synthobj.objective import SyntheticObjective
@@ -245,7 +245,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--D", type=int, default=100, help="ambient dimension (default 100)")
     parser.add_argument(
         "--alpha", type=float, default=None,
-        help="global-shrinkage scale; the cell's own prior default when unset",
+        help="the prior's sparsity knob: the half-Cauchy global scale on the four half-Cauchy "
+        f"cells (default {ALPHA_LENGTHSCALE:g} on rho, {ALPHA_AMPLITUDE:.3g} on a^2), but k, the "
+        f"Dirichlet concentration, on the four R2-D2 cells (default {R2D2_K:.4g}) -- not a "
+        "half-Cauchy scale there; the cell's own default when unset",
     )
     parser.add_argument(
         "--fixed-noise", type=float, default=None,

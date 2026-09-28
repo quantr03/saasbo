@@ -258,14 +258,15 @@ def _gamma_quantile(z: np.ndarray, k: float) -> np.ndarray:
                     gammainccinv(k, scipy.stats.norm.sf(z)))
 
 
-def _r2d2_theta(draws: dict[str, np.ndarray], form: str) -> np.ndarray:
+def _r2d2_theta(draws: dict[str, np.ndarray], form: str, k: float = R2D2_K) -> np.ndarray:
     """theta = omega * phi from an R2-D2 draw's sampled sites, in SciPy: no code shared with sagp.
 
-    lam_i is the Gamma(R2D2_K) quantile of each copula coordinate. "reference": omega = R2 / (1 -
-    R2) and phi = lam / sum lam; "tied": theta = lam / xi, xi the Gamma(R2D2_B) quantile of
-    `r2d2_z_xi`. Coordinates last, any leading shape.
+    lam_i is the Gamma(k) quantile of each copula coordinate, k the cell's `alpha` (R2D2_K
+    unless a fit sets another). "reference": omega = R2 / (1 - R2) and phi = lam / sum lam;
+    "tied": theta = lam / xi, xi the Gamma(R2D2_B) quantile of `r2d2_z_xi`. Coordinates last, any
+    leading shape.
     """
-    lam = _gamma_quantile(draws["r2d2_z_lam"], R2D2_K)
+    lam = _gamma_quantile(draws["r2d2_z_lam"], k)
     if form == "reference":
         R2 = np.asarray(draws["r2d2_R2"])[..., None]
         return R2 / (1.0 - R2) * lam / lam.sum(axis=-1, keepdims=True)
@@ -383,16 +384,21 @@ def test_pyro_model_trace_sites_per_cell(key, fixed_noise):
         assert np.all(np.asarray(trace["kernel_ell"]["fn"].scale) == ELL_PRIOR[1])
 
 
+@pytest.mark.parametrize("alpha", [None, 0.2], ids=["alpha_default", "alpha_0.2"])
 @pytest.mark.parametrize("form", ["reference", "tied"])
 @pytest.mark.parametrize("key", list(R2D2_TWINS), ids=["/".join(k) for k in R2D2_TWINS])
-def test_both_r2d2_forms_trace_the_same_natives(key, form):
+def test_both_r2d2_forms_trace_the_same_natives(key, form, alpha):
     # Switching the form is one constant, read through the class attribute `r2d2_form`: set on
     # the instance, it must swap the prior's sampled sites for that form's and leave every other
     # site, and its place, as it was -- and the deterministic native must be theta = omega * phi
     # (times the rho scale on the lengthscale cells), as SciPy computes it from the same sites.
+    # And `alpha` is k on an R2-D2 cell: the fit's alpha, here 0.2 against R2D2_K's 0.4994, must
+    # be the shape the copula map runs at, so a block that hard-coded R2D2_K would fail.
     cell = CELLS[key]
-    gp = sagp.gp.CellGP(*_torch_data(), cell=cell)
+    gp = sagp.gp.CellGP(*_torch_data(), cell=cell, alpha=alpha)
     _set_r2d2_form(gp.pyro_model, form)
+    k = cell.alpha_default if alpha is None else alpha
+    assert gp.pyro_model.alpha == k
 
     trace = numpyro.handlers.trace(
         numpyro.handlers.seed(gp.pyro_model.sample, rng_seed=0)
@@ -402,7 +408,7 @@ def test_both_r2d2_forms_trace_the_same_natives(key, form):
     for site in R2D2_PRIOR_SITES[form]:
         assert trace[site]["type"] == "sample"
     theta = _r2d2_theta(
-        {site: np.asarray(trace[site]["value"]) for site in R2D2_PRIOR_SITES[form]}, form
+        {site: np.asarray(trace[site]["value"]) for site in R2D2_PRIOR_SITES[form]}, form, k
     )
     scale = 1.0 if cell.native_site == "a_sq" else R2D2_RHO_SCALE
     np.testing.assert_allclose(
