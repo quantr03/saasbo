@@ -6,4 +6,6 @@ data/
 docs/thesis/*.pdf
 logs/
 runs/
+runs_r2d2/
+runs_replay/
 runs_smoke/

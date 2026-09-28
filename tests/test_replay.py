@@ -1,0 +1,453 @@
+"""Tests for `experiments.replay`: refitting a cell on the data a stored run fitted at iteration t.
+
+What gate G2 needs the replay to be, one contract per test. On a CPU, replaying a cell on its own
+run is the loop's own fit again, bit for bit. A stored run that could hand the replay other data
+than its loop fitted is refused -- four ways -- before anything is fitted or written. An R2-D2 cell
+replayed on its twin's run writes the loop's own vocabulary: the row, the coordinates and the
+draws. A second call skips what the first finished and redoes, without duplicating, what a kill
+interrupted; a replay directory holds one budget. And `compare` joins every replayed fit to the
+stored fit of the same (family, seed, t) and, for an R2-D2 fit, to its twin's control refit. Runs
+are the loop tests' D = 5 problem at a 16/16/4 chain, so a fit costs seconds.
+"""
+from __future__ import annotations
+
+import csv
+import dataclasses
+import json
+import math
+import shutil
+from pathlib import Path
+
+import jax
+import numpy as np
+import pytest
+
+from experiments import replay as replay_module
+from experiments.replay import REPLAY_T, TWINS, compare, load_source, main, run_replay
+from experiments.run_bo import run
+from experiments.runlog import config_hash
+from sagp.bo import iteration_rngs
+from sagp.diagnostics import DiagThresholds
+from sagp.gp import CELLS, NUTSConfig
+from synthobj.families import make_family
+
+
+# `_LOOP_KW`, `_objective` and `_read_rows` are copies of tests/test_run_bo.py:36-57 (ruling R5):
+# importing them would make pytest run that module's tests a second time under another name.
+
+# The study's maximizer is 5 L-BFGS-B restarts off 512 raw Sobol candidates (plus as many RAASP
+# perturbations again), each restart run to `maxiter` on a fully Bayesian posterior; one restart
+# off 64 candidates keeps the loop tests inside the per-test time budget. It is still BoTorch's
+# `optimize_acqf` on the same seeded candidate set.
+_LOOP_KW = dict(raw_samples=64, num_restarts=1, sobol_every=5)
+
+
+def _objective():
+    """The fixed D = 5 problem every loop test runs: three active coordinates, exact `f_star`."""
+    return make_family("aligned3", 0, D=5)
+
+
+def _read_rows(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+# --- the replay ---
+
+
+def test_replaying_a_run_reproduces_its_stored_fit_bit_for_bit(tmp_path):
+    # The harness check that a GPU cannot give: on CPU, refitting iteration t's data with
+    # iteration t's seed and the run's budget is the same computation as the loop's own fit.
+    source = run(_objective(), "product/lengthscale", seed=1, T=8, n_init=5,
+                 out_dir=tmp_path / "runs", nuts=NUTSConfig(16, 16, 4), **_LOOP_KW)
+    replay_dir = run_replay(tmp_path / "runs", tmp_path / "replay", family="aligned3", seed=1,
+                            method="product/lengthscale", ts=(6,))
+    with np.load(source / "samples" / "t006.npz") as a, np.load(replay_dir / "samples" / "t006.npz") as b:
+        for site in CELLS[("product", "lengthscale")].sites:
+            assert np.array_equal(a[site], b[site])
+    stored = next(r for r in _read_rows(source / "iterations.csv") if r["t"] == "6")
+    replayed = _read_rows(replay_dir / "replay.csv")[0]
+    for field in ("status", "r_hat_max", "n_eff_min", "divergences", "y_mean", "y_std"):
+        assert replayed[field] == stored[field]
+
+
+@pytest.fixture(scope="module")
+def runs(tmp_path_factory) -> Path:
+    """A stored runs root holding one product/lengthscale run, rows t = 5-7, never written to.
+
+    The refusal, resume and dry-run tests read it; the ones that tamper with it copy it first.
+    """
+    root = tmp_path_factory.mktemp("runs")
+    run(_objective(), "product/lengthscale", seed=1, T=8, n_init=5, out_dir=root,
+        nuts=NUTSConfig(16, 16, 4), **_LOOP_KW)
+    return root
+
+
+def _source_dir(root: Path) -> Path:
+    return root / "aligned3" / "product-lengthscale" / "seed01"
+
+
+def _rewrite_checkpoint(run_dir: Path, **changes: object) -> None:
+    """Rewrite `checkpoint.npz` with some arrays replaced and every other one kept."""
+    path = run_dir / "checkpoint.npz"
+    with np.load(path) as data:
+        arrays = {name: data[name] for name in data.files}
+    arrays.update(changes)
+    with path.open("wb") as handle:
+        np.savez(handle, **arrays)
+
+
+def _checkpoint_under_another_hash(run_dir: Path) -> None:
+    # A run resumed under another configuration: its checkpoint names a hash its manifest does not.
+    _rewrite_checkpoint(run_dir, config_hash="0" * 64)
+
+
+def _drop_row_6(run_dir: Path) -> None:
+    path = run_dir / "iterations.csv"
+    lines = path.read_text().splitlines(keepends=True)
+    kept = [line for line in lines if not line.startswith("6,")]
+    assert len(kept) == len(lines) - 1
+    path.write_text("".join(kept))
+
+
+def _nudge_y(run_dir: Path) -> None:
+    # One observation moved by 1e-6: y[:t] no longer standardizes to what row t recorded.
+    with np.load(run_dir / "checkpoint.npz") as data:
+        y = data["y"].copy()
+    y[0] += 1e-6
+    _rewrite_checkpoint(run_dir, y=y)
+
+
+@pytest.mark.parametrize(
+    "tamper, t, match",
+    [
+        (None, 8, "t_done"),
+        (_checkpoint_under_another_hash, 6, "config_hash"),
+        (_drop_row_6, 6, "no complete row"),
+        (_nudge_y, 6, "y_mean"),
+    ],
+    ids=["t_beyond_t_done", "checkpoint_under_another_hash", "missing_row", "tampered_y"],
+)
+def test_a_replay_refuses_data_its_source_loop_did_not_fit(runs, tmp_path, tamper, t, match):
+    """Review Focus 1: refused -- before any t is fitted -- never fitted on other data.
+
+    t = 5 is valid in every case and is asked for first, so a refusal that came only once the
+    bad t was reached would leave t = 5's fit behind; `out` must not even exist.
+    """
+    copy = tmp_path / "runs"
+    shutil.copytree(runs, copy)
+    if tamper is not None:
+        tamper(_source_dir(copy))
+    out = tmp_path / "replay"
+    with pytest.raises(ValueError, match=match):
+        run_replay(copy, out, family="aligned3", seed=1, method="product/lengthscale_r2d2",
+                   ts=(5, t))
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("inside", ["", "aligned3"], ids=["the_runs_root", "a_directory_in_it"])
+def test_a_replay_never_writes_into_the_stored_runs(runs, inside):
+    """Under the runs root, a control's replay directory would be its own source run, and the
+    replay's rollback of unfinished t would delete that run's coordinates and draws."""
+    before = _snapshot(runs)
+    with pytest.raises(ValueError, match="only read"):
+        run_replay(runs, runs / inside, family="aligned3", seed=1, method="product/lengthscale",
+                   ts=(6,))
+    assert _snapshot(runs) == before
+
+
+# At about the marker's 10 s line: an additive/amplitude run's two fits and acquisitions, the
+# replay's R2-D2 fit, and the process's first build of the R2-D2 map's table.
+@pytest.mark.slow
+def test_an_r2d2_replay_on_its_twins_run_writes_the_loops_vocabulary(tmp_path):
+    """The R2-D2 cell refitted on its twin's iteration-6 data, and everything the loop would write.
+
+    The row names the cell and the run it was replayed on, carries the fit's diagnostics and the
+    source row's standardization, and states the budget and the device; `coords.csv` holds the
+    t = 6 readouts (with the Sobol index, t = 6 being T - 1); the npz holds the R2-D2 cell's own
+    sites and no half-Cauchy one; the manifest is the source's configuration with `method`
+    replaced, and names the source.
+    """
+    source = run(
+        _objective(), "additive/amplitude", seed=1, T=7, n_init=5, out_dir=tmp_path / "runs",
+        nuts=NUTSConfig(16, 16, 4), thresholds=DiagThresholds(float("inf"), 0.0, 10**9),
+        **_LOOP_KW,
+    )
+    method = "additive/amplitude_r2d2"
+    cell = CELLS[("additive", "amplitude_r2d2")]
+    replay_dir = run_replay(tmp_path / "runs", tmp_path / "replay", family="aligned3", seed=1,
+                            method=method, ts=(6,))
+    assert replay_dir == tmp_path / "replay" / "aligned3" / "additive-amplitude_r2d2" / "seed01"
+
+    (row,) = _read_rows(replay_dir / "replay.csv")
+    # D9's row, spelled out: every later reader of a replay directory reads these names.
+    assert list(row) == [
+        "t", "n", "method", "source_method", "family", "seed", "nuts_seed", "budget",
+        "status", "reason",
+        "r_hat_max", "r_hat_median", "frac_r_hat_below_1_05", "n_eff_min", "divergences",
+        "num_steps_mean",
+        "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell", "n_eff_min_ell",
+        "r_hat_max_global", "n_eff_min_global",
+        "fit_wall_s", "readout_wall_s", "y_mean", "y_std", "r2d2_r2", "first_order_r2", "device",
+    ]
+    stored = next(r for r in _read_rows(source / "iterations.csv") if r["t"] == "6")
+    assert row["t"] == "6" and row["n"] == "6"
+    assert row["method"] == method and row["source_method"] == "additive/amplitude"
+    assert row["family"] == "aligned3" and row["seed"] == "1"
+    assert int(row["nuts_seed"]) == iteration_rngs(1, 6).nuts_seed
+    assert row["budget"] == "16/16/4/6"
+    assert row["status"] == "ok" and row["reason"] == ""  # the source's gate, which cannot fail
+    assert (row["y_mean"], row["y_std"]) == (stored["y_mean"], stored["y_std"])
+    assert np.isfinite(float(row["r_hat_max"])) and float(row["fit_wall_s"]) > 0.0
+    assert 0.0 < float(row["r2d2_r2"]) < 1.0 and 0.0 < float(row["first_order_r2"]) < 1.0
+    assert row["device"] == jax.devices()[0].device_kind
+
+    coords = _read_rows(replay_dir / "coords.csv")
+    assert [(int(r["t"]), int(r["i"])) for r in coords] == [(6, i) for i in range(5)]
+    for r in coords:
+        assert all(np.isfinite(float(r[k])) for k in ("native_median", "p_active", "sobol_hat"))
+
+    with np.load(replay_dir / "samples" / "t006.npz") as data:
+        assert set(data.files) == set(cell.sites) | {"status", "nuts_attempts", "schema_version"}
+        assert int(data["schema_version"]) == 2 and str(data["status"]) == "ok"
+        assert {data[site].shape[0] for site in cell.sites} == {4}
+
+    manifest = json.loads((replay_dir / "manifest.json").read_text())
+    source_manifest = json.loads((source / "manifest.json").read_text())
+    assert manifest["method"] == method
+    for field in ("family", "seed", "D", "T", "n_init", "nuts", "thresholds", "sobol_n"):
+        assert manifest[field] == source_manifest[field]
+    source_cfg = load_source(source).cfg
+    assert manifest["config_hash"] == config_hash(dataclasses.replace(source_cfg, method=method))
+    assert manifest["objective"] == source_manifest["objective"]
+    assert manifest["source"] == {
+        "path": str(source),
+        "config_hash": source_manifest["config_hash"],
+        "commit": source_manifest["git"]["commit"],
+        "devices": [source_manifest["env"]["jax_device"]],
+    }
+
+
+@pytest.fixture(scope="module")
+def replayed(runs, tmp_path_factory) -> tuple[Path, Path]:
+    """The control replay of t = 6 on `runs`: (the replay root, the replay directory).
+
+    Read only by the tests that use it -- a second call must write nothing, and a refused call
+    nothing either; the test that damages it works on a copy.
+    """
+    out = tmp_path_factory.mktemp("replay")
+    replay_dir = run_replay(runs, out, family="aligned3", seed=1, method="product/lengthscale",
+                            ts=(6,))
+    return out, replay_dir
+
+
+def _snapshot(directory: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(directory)): path.read_bytes()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _must_not_fit(*args, **kwargs):
+    raise AssertionError("a t with a complete row was fitted again")
+
+
+def test_a_second_call_skips_every_t_it_has_done(runs, replayed, monkeypatch):
+    out, replay_dir = replayed
+    before = _snapshot(replay_dir)
+    monkeypatch.setattr(replay_module, "fit", _must_not_fit)
+    again = run_replay(runs, out, family="aligned3", seed=1, method="product/lengthscale",
+                       ts=(6,))
+    assert again == replay_dir
+    assert _snapshot(replay_dir) == before
+
+
+def test_a_budget_other_than_the_files_is_refused(runs, replayed, monkeypatch):
+    out, replay_dir = replayed
+    before = _snapshot(replay_dir)
+    monkeypatch.setattr(replay_module, "fit", _must_not_fit)
+    # t = 7 is not done, so only the refusal stands between this call and a fit at depth 5.
+    with pytest.raises(ValueError, match="budget"):
+        run_replay(runs, out, family="aligned3", seed=1, method="product/lengthscale",
+                   ts=(6, 7), max_tree_depth=5)
+    with pytest.raises(ValueError, match="budget"):
+        run_replay(runs, out, family="aligned3", seed=1, method="product/lengthscale",
+                   ts=(7,), nuts=NUTSConfig(32, 32, 4))
+    assert _snapshot(replay_dir) == before
+
+
+def test_a_t_the_kill_interrupted_is_redone_without_duplicates(runs, replayed, tmp_path):
+    """What a kill during t = 7 leaves -- part of its coordinates, a torn row, a torn npz -- is
+    rolled back and t = 7 redone, while t = 6 is kept as it was (the loop's `truncate_to`)."""
+    out = tmp_path / "replay"
+    shutil.copytree(replayed[0], out)
+    replay_dir = out / replayed[1].relative_to(replayed[0])
+    t6_npz = (replay_dir / "samples" / "t006.npz").read_bytes()
+    with (replay_dir / "coords.csv").open("a", newline="") as handle:
+        handle.write("7,0,0.5,0.5,nan\r\n7,1,0.5,0.5,nan\r\n7,2,0.")
+    with (replay_dir / "replay.csv").open("a", newline="") as handle:
+        handle.write("7,7,product/lengthscale,product/lengthscale,aligned3,1,")
+    (replay_dir / "samples" / "t007.npz").write_bytes(b"torn")
+
+    run_replay(runs, out, family="aligned3", seed=1, method="product/lengthscale", ts=(6, 7))
+
+    assert [r["t"] for r in _read_rows(replay_dir / "replay.csv")] == ["6", "7"]
+    coords = [(int(r["t"]), int(r["i"])) for r in _read_rows(replay_dir / "coords.csv")]
+    assert coords == [(6, i) for i in range(5)] + [(7, i) for i in range(5)]
+    assert (replay_dir / "samples" / "t006.npz").read_bytes() == t6_npz
+    with np.load(replay_dir / "samples" / "t007.npz") as data:
+        assert int(data["schema_version"]) == 2
+
+
+def test_a_dry_run_prints_the_datasets_seeds_and_budget_and_writes_nothing(runs, tmp_path, capsys):
+    out = tmp_path / "dry"
+    argv = [
+        "fit", "--runs", str(runs), "--out", str(out), "--family", "aligned3", "--seed", "1",
+        "--cell", "product/lengthscale_r2d2", "--t", "5,6,7", "--max-tree-depth", "5",
+        "--dry-run",
+    ]
+    assert main(argv) == 0
+    printed = capsys.readouterr().out
+    assert not out.exists()
+    assert "product/lengthscale" in printed and "16/16/4/5" in printed
+    for t in (5, 6, 7):
+        assert f"t={t} n={t} nuts_seed={iteration_rngs(1, t).nuts_seed}" in printed
+
+
+def test_each_r2d2_cell_is_replayed_on_its_half_cauchy_twin():
+    """`TWINS` pairs each R2-D2 cell with the cell whose kernel and native site it shares."""
+    assert len(TWINS) == 4 and REPLAY_T == (50, 100, 199)
+    assert set(TWINS) | set(TWINS.values()) == {"/".join(key) for key in CELLS}
+    for method, twin in TWINS.items():
+        cell, other = CELLS[tuple(method.split("/"))], CELLS[tuple(twin.split("/"))]
+        assert (cell.structure, cell.native_site) == (other.structure, other.native_site)
+        assert cell.kernel is other.kernel and cell.pyro_model is not other.pyro_model
+
+
+# --- compare ---
+
+_DIAG_FIELDS = (
+    "r_hat_max", "r_hat_median", "frac_r_hat_below_1_05", "n_eff_min", "divergences",
+    "num_steps_mean",
+    "r_hat_max_native", "n_eff_min_native", "r_hat_max_ell", "n_eff_min_ell",
+    "r_hat_max_global", "n_eff_min_global",
+)
+# The fake problem: D = 5, S = {0, 2}. The replayed fits rank S first (AP 1); the stored ones put
+# coordinate 1 above both, so their AP is (1/2 + 2/3) / 2 = 7/12 and a swapped join would show.
+_S = [0, 2]
+_REPLAY_SCORES = [0.9, 0.1, 0.8, 0.2, 0.3]
+_STORED_SCORES = [0.9, 0.95, 0.8, 0.1, 0.1]
+
+
+def _write_csv(path: Path, fields: list[str], rows: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _diagnostics(marker: float) -> dict[str, object]:
+    """Twelve diagnostics tagged by `marker`, so a joined column says which fit it came from."""
+    return {field: marker for field in _DIAG_FIELDS} | {"divergences": 0, "num_steps_mean": 63.0}
+
+
+def _coords(ts: tuple[int, ...], scores: list[float], sobol: bool) -> list[dict[str, object]]:
+    return [
+        {"t": t, "i": i, "native_median": score, "p_active": float(i in _S),
+         "sobol_hat": score if sobol else float("nan")}
+        for t in ts
+        for i, score in enumerate(scores)
+    ]
+
+
+def _fake_stored_run(root: Path, method: str, seed: int, ts: tuple[int, ...]) -> None:
+    run_dir = root / "aligned3" / method.replace("/", "-") / f"seed{seed:02d}"
+    rows = [
+        {"t": t, "method": method, "status": "excluded", "reason": "r_hat_max 1.5 > 1.1",
+         **_diagnostics(1.0 + seed / 10 + t / 1000), "fit_wall_s": 10.0 + t,
+         "y_mean": 0.0, "y_std": 1.0}
+        for t in ts
+    ]
+    _write_csv(run_dir / "iterations.csv", list(rows[0]), rows)
+    _write_csv(run_dir / "coords.csv", ["t", "i", "native_median", "p_active", "sobol_hat"],
+               _coords(ts, _STORED_SCORES, sobol=False))
+    (run_dir / "manifest.json").write_text(json.dumps({
+        "family": "aligned3", "seed": seed, "method": method,
+        "nuts": {"num_warmup": 16, "num_samples": 16, "thinning": 4, "max_tree_depth": 6,
+                 "num_chains": 1},
+        "objective": {"S": _S, "D": 5}, "env": {"jax_device": "stored-gpu"}, "resumed": [],
+    }))
+    (run_dir / "log.txt").write_text(
+        "".join(f"t={t} method={method} status=excluded\n" for t in ts)
+    )
+
+
+def _fake_replay(root: Path, method: str, source: str, seed: int, ts: tuple[int, ...],
+                 marker: float) -> None:
+    replay_dir = root / "aligned3" / method.replace("/", "-") / f"seed{seed:02d}"
+    rows = [
+        {"t": t, "n": t, "method": method, "source_method": source, "family": "aligned3",
+         "seed": seed, "nuts_seed": 7, "budget": "16/16/4/6", "status": "ok", "reason": "",
+         **_diagnostics(marker + seed / 10 + t / 1000), "fit_wall_s": marker + t,
+         "readout_wall_s": 1.0, "y_mean": 0.0, "y_std": 1.0, "r2d2_r2": 0.4,
+         "first_order_r2": 0.6, "device": "replay-gpu"}
+        for t in ts
+    ]
+    _write_csv(replay_dir / "replay.csv", list(replay_module._REPLAY_FIELDS), rows)
+    _write_csv(replay_dir / "coords.csv", ["t", "i", "native_median", "p_active", "sobol_hat"],
+               _coords(ts, _REPLAY_SCORES, sobol=True))
+
+
+def test_compare_joins_one_row_per_cell_family_seed_and_t(tmp_path):
+    """Two tiny trees: a stored half-Cauchy cell at seeds 0 and 1, its R2-D2 twin replayed on
+    both, and its control refit on seed 0 only. Each replayed fit is one joined row, beside its
+    source's stored fit of the same (seed, t) and, for the R2-D2 cell, the control where present."""
+    runs, replay, out = tmp_path / "runs", tmp_path / "replay", tmp_path / "report"
+    ts = (5, 6)
+    for seed in (0, 1):
+        _fake_stored_run(runs, "additive/amplitude", seed, ts)
+        _fake_replay(replay, "additive/amplitude_r2d2", "additive/amplitude", seed, ts, 2.0)
+    _fake_replay(replay, "additive/amplitude", "additive/amplitude", 0, ts, 3.0)
+
+    assert main(["compare", "--runs", str(runs), "--replay", str(replay), "--out", str(out)]) == 0
+    assert compare(runs, replay, tmp_path / "again") == tmp_path / "again"
+
+    joined = _read_rows(out / "tables" / "replay_vs_stored.csv")
+    keys = [(r["cell"], r["family"], int(r["seed"]), int(r["t"])) for r in joined]
+    assert sorted(keys) == sorted(
+        [("additive/amplitude_r2d2", "aligned3", s, t) for s in (0, 1) for t in ts]
+        + [("additive/amplitude", "aligned3", 0, t) for t in ts]
+    )
+    for r in joined:
+        seed, t = int(r["seed"]), int(r["t"])
+        assert float(r["stored_r_hat_max"]) == 1.0 + seed / 10 + t / 1000
+        assert r["stored_status"] == "excluded" and r["stored_device"] == "stored-gpu"
+        assert float(r["ap_native"]) == 1.0
+        assert float(r["stored_ap_native"]) == pytest.approx(7 / 12)
+        assert math.isnan(float(r["stored_ap_sobol"]))  # no Sobol readout at these t
+        if r["cell"] == "additive/amplitude":
+            assert r["role"] == "control" and r["control_status"] == ""
+            assert float(r["r_hat_max"]) == 3.0 + seed / 10 + t / 1000
+        else:
+            assert r["role"] == "twin" and r["source_method"] == "additive/amplitude"
+            assert float(r["r_hat_max"]) == 2.0 + seed / 10 + t / 1000
+            if seed == 0:
+                assert float(r["control_r_hat_max"]) == 3.0 + t / 1000
+                assert r["control_device"] == "replay-gpu"
+            else:
+                assert math.isnan(float(r["control_r_hat_max"])) and r["control_status"] == ""
+
+    identification = _read_rows(out / "tables" / "identification.csv")
+    assert len(identification) == 6 + 4  # six replayed fits, four stored ones
+    gate = _read_rows(out / "tables" / "gate_by_cell_t.csv")
+    r2d2_all = next(
+        r for r in gate if r["cell"] == "additive/amplitude_r2d2" and r["t"] == "all"
+    )
+    assert int(r2d2_all["fits"]) == 4 and float(r2d2_all["exclusion_rate"]) == 0.0
+    assert float(r2d2_all["stored_exclusion_rate"]) == 1.0
+    assert float(r2d2_all["frac_at_tree_cap"]) == 1.0
+    assert (out / "tables" / "cost.csv").exists()
+    report = (out / "REPORT.md").read_text()
+    assert "G2" in report and "4 of 960" in report and "2 of 240" in report
