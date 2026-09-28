@@ -8,8 +8,9 @@ Saltelli estimator. What is pinned here is therefore: that each closed form is t
 claims to be, checked against a brute-force tensor-grid quadrature of the very posterior mean
 `FittedGP.posterior` returns; that the estimator agrees with the closed form where both apply; and
 that on a synthetic objective whose first-order shares are known the index recovers them, on and
-off the active set. The shares and the two active rules are checked against arithmetic, not
-against themselves.
+off the active set. The shares, the two active rules and the two R2 readouts are checked against
+arithmetic, not against themselves; and a cell is read out by the native site it declares, so a
+cell under a new prior string reads out exactly as its twin.
 
 Every test that does not need a sampler builds its `FittedGP` from hand-made draws (ruling R7):
 these are tests of the readout formulas, and a NUTS fit inside them would be slow and would leave
@@ -20,8 +21,10 @@ enable_x64 is in force for every array below.
 """
 import sagp.gp as gp
 import sagp.readouts as readouts
-from sagp.gp import ACTIVE_EPS, GL_NODES, GL_WEIGHTS, FittedGP, NUTSConfig
+from sagp.gp import ACTIVE_EPS, CELLS, GL_NODES, GL_WEIGHTS, FittedGP, NUTSConfig
+from sagp.readouts import first_order_r2, r2d2_r2
 
+import dataclasses
 import warnings
 
 import jax.numpy as jnp
@@ -302,6 +305,70 @@ def test_readouts_widen_the_oracle_to_full_D():
     assert out["native"].shape == (S, D)
     assert np.array_equal(out["native"][0], [0.0, 3.0, 0.0, 0.0, 0.4, 0.0])
     assert np.array_equal(out["p_active"], [0.0, 1.0, 0.0, 0.0, 1.0, 0.0])
+
+
+def _draws_for(native_site: str, S: int, D: int, seed: int):
+    """(X, y, samples): hand-made draws of either parameterization, the sites `load_mcmc_samples` reads."""
+    rng = np.random.default_rng(seed)
+    X, y = rng.uniform(0.0, 1.0, (12, D)), rng.normal(size=12)
+    if native_site == "a_sq":
+        samples = {"a_sq": rng.uniform(0.01, 2.0, (S, D)), "kernel_ell": rng.uniform(0.2, 2.0, (S, D))}
+    else:
+        rho = rng.uniform(0.1, 5.0, (S, D))
+        samples = {"outputscale": np.full(S, 1.3), "kernel_inv_length_sq": rho,
+                   "lengthscale": rho**-0.5}
+    samples |= {"mean": rng.normal(size=S), "noise": rng.uniform(0.01, 0.1, S)}
+    return X, (y - y.mean()) / y.std(), samples
+
+
+@pytest.mark.parametrize("twin_key", [("additive", "amplitude"), ("product", "amplitude"),
+                                      ("additive", "lengthscale"), ("product", "lengthscale")])
+def test_a_new_prior_string_is_read_out_as_its_twin(monkeypatch, twin_key):
+    # A registry entry that differs from its twin in nothing but the prior string must be read
+    # out exactly as the twin: the readouts may depend on the declared native site, never on the
+    # string. Dispatching on the string misroutes three of the four (share_hat None, KeyError
+    # 'a_sq', QMC instead of exact).
+    cell = dataclasses.replace(CELLS[twin_key], prior=twin_key[1] + "_x")
+    monkeypatch.setitem(gp.CELLS, cell.key, cell)
+    X, y, samples = _draws_for(CELLS[twin_key].native_site, S=3, D=4, seed=31)
+    ours = readouts.readouts(_fitted(cell.key, X, y, samples), sobol_n=256)
+    theirs = readouts.readouts(_fitted(twin_key, X, y, samples), sobol_n=256)
+    for name in ("native_median", "p_active", "sobol_hat"):
+        assert np.array_equal(ours[name], theirs[name])
+    assert (ours["share_hat"] is None) == (theirs["share_hat"] is None)
+
+
+def test_the_r2_readouts_follow_from_the_amplitudes():
+    # The amplitudes sum to omega = 1 and 2 in the two draws. The R2 the R2-D2 prior is on is
+    # omega / (1 + omega) whatever the noise; the model's first-order R^2 is omega / (omega +
+    # sigma^2), so only the second moves with the draw's noise.
+    a_sq = np.array([[0.5, 0.25, 0.25], [1.0, 0.5, 0.5]])
+    noise = np.array([0.01, 0.2])
+    assert np.allclose(r2d2_r2(a_sq), [1.0 / 2.0, 2.0 / 3.0])
+    assert np.allclose(first_order_r2(a_sq, noise), [1.0 / 1.01, 2.0 / 2.2])
+
+
+def test_first_order_r2_reads_a_fixed_noise_through_noises():
+    # A fit with `fixed_noise` set has no `noise` site, so the noise the readout divides by is
+    # `FittedGP.noises()`, the variance prediction uses: one value per draw, (S,), here the fixed
+    # 0.02 in each, and the readout is omega / (omega + 0.02), omega = sum_i a_sq_i, to roundoff.
+    S, D, n = 3, 4, 10
+    rng = np.random.default_rng(17)
+    a_sq = rng.uniform(0.05, 0.5, (S, D))
+    samples = {"a_sq": a_sq, "kernel_ell": np.full((S, D), 0.5), "mean": np.zeros(S)}
+    fitted = _fitted(
+        ("additive", "amplitude"),
+        rng.uniform(0.0, 1.0, (n, D)),
+        rng.normal(size=n),
+        samples,
+        fixed_noise=0.02,
+    )
+
+    r2 = first_order_r2(fitted.samples["a_sq"], fitted.noises())
+
+    omega = a_sq.sum(axis=1)
+    assert r2.shape == (S,)
+    assert np.max(np.abs(r2 - omega / (omega + 0.02))) < 1.0e-15
 
 
 def _readout_at_D10():

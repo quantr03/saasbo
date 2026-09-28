@@ -707,7 +707,7 @@ class FittedGP:
 
     def param_sites(self) -> tuple[str, ...]:
         """This cell's kernel parameters, in the order the readouts pass them around."""
-        if self._is_map_reference() or self.cell[1] == "lengthscale":
+        if self._is_map_reference() or CELLS[self.cell].native_site == "kernel_inv_length_sq":
             return ("outputscale", "kernel_inv_length_sq")
         return ("a_sq", "kernel_ell")
 

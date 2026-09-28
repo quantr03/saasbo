@@ -40,6 +40,33 @@ def shares_from_amplitudes(a_sq: ArrayLike, noise: ArrayLike) -> Array:
     return jnp.where(signal > 0.0, jnp.asarray(a_sq) / signal, jnp.nan)
 
 
+def r2d2_r2(a_sq: ArrayLike) -> Array:
+    """The R2-D2 prior's R2 per draw, omega / (1 + omega) with omega = sum_i a_sq_i; (S,).
+
+    `a_sq` is (S, D), from any amplitude cell. Normalized components make omega the first-order
+    variance of the standardized target, and under the R2-D2 prior it is exactly the global scale
+    R2 / (1 - R2), the shares summing to one: this is the R2 its Beta is on, recomputed from the
+    retained amplitudes rather than stored as a site. It is not the first-order R^2 of the data --
+    a well-fitted standardized target has omega near 1, so this sits near 0.5 however much of the
+    target is noise; `first_order_r2` is that R^2.
+    """
+    omega = jnp.sum(jnp.asarray(a_sq), axis=-1)
+    return omega / (1.0 + omega)
+
+
+def first_order_r2(a_sq: ArrayLike, noise: ArrayLike) -> Array:
+    """First-order R^2 per draw, omega / (omega + sigma^2) with omega = sum_i a_sq_i; (S,).
+
+    The fitted model's: `a_sq` is (S, D), from any amplitude cell, and `noise` is sigma^2 per
+    draw, (S,), as `FittedGP.noises()` gives it -- the only source when the noise is fixed, since
+    then there is no `noise` site. Interaction variance an additive cell cannot represent goes to
+    the noise, so on the interaction sweep this falls to about 1 - gamma: the misspecification
+    readout.
+    """
+    omega = jnp.sum(jnp.asarray(a_sq), axis=-1)
+    return omega / (omega + jnp.reshape(jnp.asarray(noise), (-1,)))
+
+
 def _centered_parts(fitted: FittedGP, s: int) -> tuple[Array, Array, bool]:
     """Sample `s`'s per-coordinate lengthscales, component weights and normalization flag.
 
@@ -229,7 +256,7 @@ def readouts(
     numpy, zero-padded back to D outside `active` so a row has one width.
     """
     D = fitted.X_train.shape[1]
-    is_amplitude = isinstance(fitted.cell, tuple) and fitted.cell[1] == "amplitude"
+    is_amplitude = isinstance(fitted.cell, tuple) and CELLS[fitted.cell].native_site == "a_sq"
     site = (
         CELLS[fitted.cell].native_site
         if isinstance(fitted.cell, tuple)
@@ -263,7 +290,7 @@ def readouts(
     if compute_sobol:
         if isinstance(fitted.cell, tuple) and fitted.cell[0] == "additive":
             sobol_hat, total_var = _sobol_exact_additive(fitted)
-        elif fitted.cell == ("product", "amplitude"):
+        elif is_amplitude and fitted.cell[0] == "product":
             sobol_hat, total_var = _sobol_exact_product_amplitude(fitted)
         else:
             sobol_hat, total_var = _sobol_qmc(fitted, sobol_n, sobol_seed)

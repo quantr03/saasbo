@@ -4,10 +4,13 @@
 Rules (a)-(c) run one way through the `sagp`/`experiments` split; rule (d) is the edge that keeps
 `synthobj` off the torch stack, so `import synthobj` works on a machine with neither torch nor
 botorch installed and only `synthobj/botorch_adapter.py` -- the module nobody imports at package
-import -- may name them. All four are properties of the source, not of any run, so they are
-checked with `ast` over every file rather than by importing anything. Each test also feeds its
-checker a deliberately violating source string, so a checker that quietly stopped looking would
-fail here instead of passing vacuously over a tree that happens to be clean.
+import -- may name them. Rule (e) keeps a cell's parameterization where the cell declares it, in
+its `native_site`: nothing under `sagp/` or `experiments/` compares against a prior string, so a
+new cell can share its twin's parameterization under a prior string of its own. All five are
+properties of the source, not of any run, so they are checked with `ast` over every file rather
+than by importing anything. Each test also feeds its checker a deliberately violating source
+string, so a checker that quietly stopped looking would fail here instead of passing vacuously
+over a tree that happens to be clean.
 """
 from __future__ import annotations
 
@@ -44,6 +47,10 @@ _ALLOWED_SAGP_IMPORTS: dict[str, set[str]] = {
     "bo": {"sagp.gp"},
     "__init__": {"sagp.gp", "sagp.bo"},  # the lazy imports inside `__getattr__` count
 }
+
+# The prior strings rule (e) forbids comparing against: the ones a dispatch written for the four
+# half-Cauchy cells would name.
+_PRIOR_STRINGS = frozenset({"amplitude", "lengthscale"})
 
 
 def _imported_modules(source: str) -> set[str]:
@@ -104,6 +111,18 @@ def _private_sagp_uses(source: str) -> list[str]:
     return sorted(private)
 
 
+def _prior_string_comparisons(source: str) -> list[int]:
+    """Lines comparing anything against a bare prior string, alone or inside a tuple."""
+    lines = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Compare):
+            for operand in (node.left, *node.comparators):
+                parts = operand.elts if isinstance(operand, ast.Tuple) else [operand]
+                if any(isinstance(p, ast.Constant) and p.value in _PRIOR_STRINGS for p in parts):
+                    lines.append(node.lineno)
+    return lines
+
+
 @pytest.mark.parametrize("path", _SAGP_FILES, ids=lambda p: p.name)
 def test_the_library_never_imports_the_study(path: Path):
     """Rule (a): no module under `sagp/` imports `experiments`, in any form."""
@@ -150,3 +169,11 @@ def test_the_objectives_never_import_the_torch_stack(path: Path):
         "botorch.models", "botorch.models.SingleTaskGP", "gpytorch.settings",
         "linear_operator.utils.errors", "linear_operator.utils.errors.NotPSDError", "torch",
     ]
+
+
+@pytest.mark.parametrize("path", _SAGP_FILES + _EXPERIMENT_FILES, ids=lambda p: p.name)
+def test_nothing_dispatches_on_a_prior_string(path: Path):
+    """Rule (e): a cell's parameterization is its declared `native_site`, never its prior string."""
+    assert _prior_string_comparisons(path.read_text()) == []
+    violating = 'a = cell[1] == "amplitude"\nb = key == ("product", "lengthscale")\n'
+    assert _prior_string_comparisons(violating) == [1, 2]
