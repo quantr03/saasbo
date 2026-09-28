@@ -1,0 +1,135 @@
+{
+ "tiers": [
+  "A",
+  "B",
+  "C",
+  "D"
+ ],
+ "config": {
+  "dim_a": 100,
+  "dims_b": [
+   30,
+   100
+  ],
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "depths": [
+   6,
+   10
+  ],
+  "tier_a_nuts": {
+   "num_warmup": 512,
+   "num_samples": 4000,
+   "thinning": 16,
+   "max_tree_depth": 10,
+   "num_chains": 1
+  },
+  "tier_b_nuts": {
+   "num_warmup": 512,
+   "num_samples": 256,
+   "thinning": 16,
+   "max_tree_depth": 6,
+   "num_chains": 1
+  },
+  "n_truth": 200000,
+  "tier_c_samples": 4000,
+  "null_replicates": 200,
+  "null_seed": 20260928,
+  "calibration": {
+   "dim": 100,
+   "tied_b": 0.5,
+   "a_grid": [
+    0.5,
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    2.5,
+    3.0,
+    4.0,
+    5.0,
+    7.0,
+    10.0,
+    20.0,
+    50.0,
+    100.0
+   ],
+   "k_scan": 16,
+   "trend_a": [
+    1.5,
+    3.0,
+    5.0,
+    10.0,
+    20.0,
+    50.0,
+    100.0
+   ],
+   "trend_k_max": 1000.0,
+   "refine": true,
+   "search_qmc_log2": 12
+  },
+  "smoke": false
+ },
+ "calibration": {
+  "C_tied": {
+   "a": 9.378587497618584,
+   "b": 0.5,
+   "k": 0.09378587497618585
+  },
+  "C_untied": {
+   "a": 1.577790731256835,
+   "b": 0.8043916352200708,
+   "k": 0.49942145555129697
+  },
+  "C_untied_k1": {
+   "a": 3.0486546035543407,
+   "b": 1.67377856733023,
+   "k": 0.9981098100451032
+  },
+  "target": {
+   "kind": "target",
+   "a": NaN,
+   "b": NaN,
+   "k": NaN,
+   "alpha": NaN,
+   "sd_log_omega": NaN,
+   "P_R2_below_0.6": NaN,
+   "q25": 17,
+   "q25_c": 16.62796610056788,
+   "q50": 37,
+   "q50_c": 36.988983733216266,
+   "q75": 64,
+   "q75_c": 64.3979438767847,
+   "residual": 0,
+   "residual_c": 0.0,
+   "note": ""
+  }
+ },
+ "extra_points": {},
+ "control_passes_depth6_p100": true,
+ "exit_status": 0,
+ "wall_s": {
+  "calibration": 0.000563957990380004,
+  "B_control": 0.1533350420068018,
+  "A": 1.4567600000009406,
+  "B": 1.4657892089744564,
+  "C": 18.811053417011863,
+  "D": 29.464503750001313
+ },
+ "started": "2026-09-28 06:09:32",
+ "finished": "2026-09-28 06:10:23",
+ "git_head": "d06be119c13606f764c7fd0a182d1a180cee68b7",
+ "source_digest": "7a5110da855c4cdb",
+ "versions": {
+  "python": "3.11.16",
+  "jax": "0.10.2",
+  "numpyro": "0.21.0",
+  "numpy": "2.4.6",
+  "scipy": "1.17.1"
+ }
+}

@@ -1,0 +1,4 @@
+impl,tier_a_P1,null_pass_P1,margins_P1,tier_b_P1,tier_a_P3,null_pass_P3,margins_P3,tier_b_P3,tier_a_P2,null_pass_P2,margins_P2,tier_b_P2,tier_a_C_tied,null_pass_C_tied,margins_C_tied,tier_b_C_tied,tier_a_C_untied,null_pass_C_untied,margins_C_untied,tier_b_C_untied,tier_a_C_untied_k1,null_pass_C_untied_k1,margins_C_untied_k1,tier_b_C_untied_k1,passes,agrees_with_scouting
+I1,pass,0.88,,0/3,pass,0.91,,0/3,not evaluable,0.885,,0/3,fail,0.84,var_log_a_sq: fraction outside 0.02 > 0.01,0/3,pass,0.835,,0/3,fail,0.86,var_log_a_sq: fraction outside 0.03 > 0.01,1/3,False,
+I2,pass,0.88,,3/3,pass,0.91,,3/3,pass,0.885,,3/3,pass,0.84,,3/3,fail,0.835,var_log_a_sq: fraction outside 0.05 > 0.01,3/3,pass,0.86,,3/3,True,
+I3,pass,0.88,,3/3,n/a,n/a,n/a,n/a,pass,0.885,,3/3,pass,0.84,,3/3,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,True,
