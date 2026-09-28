@@ -1007,8 +1007,21 @@ def tab_fstar_reopt(outdir: Path, stats: dict) -> None:
 
 
 def collect_test_count() -> int:
+    # Count the tests in git-tracked test files only, never the whole tests/ directory: an untracked
+    # file in a working tree must not change a number the thesis quotes, so every checkout of one
+    # commit gives the same count.
+    listed = subprocess.run(
+        ["git", "ls-files", "--", "tests/test_*.py"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+    )
+    test_files = listed.stdout.splitlines()
+    if listed.returncode != 0 or not test_files:
+        raise RuntimeError(
+            "collect_test_count: `git ls-files -- 'tests/test_*.py'` listed no tracked test file:\n"
+            f"stdout:\n{listed.stdout}\nstderr:\n{listed.stderr}"
+        )
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "tests"],
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", *test_files],
         cwd=str(REPO_ROOT), capture_output=True, text=True,
     )
     for line in reversed(result.stdout.splitlines()):
