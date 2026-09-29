@@ -10,3 +10,12 @@ runs_r2d2/
 runs_replay/
 runs_smoke/
 sagp_analysis/r2d2-replay/
+# outputs of an R2-D2 analysis run, written into its snapshot directory (commit with git add -f)
+sagp_analysis/r2d2/*/venv/
+sagp_analysis/r2d2/*/venv-freeze.txt
+sagp_analysis/r2d2/*/*.out
+sagp_analysis/r2d2/*/tables/
+sagp_analysis/r2d2/*/figures/
+sagp_analysis/r2d2/*/REPORT.md
+sagp_analysis/r2d2/*/g3.json
+sagp_analysis/r2d2/*/summary.json
