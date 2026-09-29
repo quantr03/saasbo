@@ -144,30 +144,46 @@ def wilcoxon_p(d) -> tuple[float, float]:
         return np.nan, np.nan
     if np.all(d == 0):
         return np.nan, 1.0
-    try:
-        res = stats.wilcoxon(d, alternative="two-sided")
-        return float(res.statistic), float(res.pvalue)
-    except ValueError:
-        return np.nan, 1.0
+    res = stats.wilcoxon(d, alternative="two-sided")
+    return float(res.statistic), float(res.pvalue)
 
 
-def cluster_bootstrap_mean(values, clusters, n_boot: int = N_BOOT, seed: int = BOOT_SEED) -> dict:
-    """Percentile bootstrap of the mean of `values`, resampling whole clusters with replacement.
+def cluster_bootstrap_mean(values, clusters, n_boot: int = N_BOOT, seed: int = BOOT_SEED,
+                           stat: str = "mean") -> dict:
+    """Percentile bootstrap of the mean (or, with stat="median", the median) of `values`,
+    resampling whole clusters with replacement.
 
-    A resample draws as many clusters as there are, with replacement, and averages every value in
-    the drawn clusters (a cluster drawn twice counts twice). With one value per cluster this is the
-    ordinary bootstrap of the mean.
+    A resample draws as many clusters as there are, with replacement, and takes the mean or median
+    of every value in the drawn clusters (a cluster drawn twice counts twice). With one value per
+    cluster this is the ordinary bootstrap. Both statistics use the same resamples.
     """
     values = np.asarray(values, float)
     labels, inv = np.unique(np.asarray(clusters).astype(str), return_inverse=True)
     k = len(labels)
-    sums = np.bincount(inv, weights=values, minlength=k)
-    counts = np.bincount(inv, minlength=k).astype(float)
     idx = np.random.default_rng(seed).integers(0, k, size=(n_boot, k))
-    boot = sums[idx].sum(1) / counts[idx].sum(1)
+    if stat == "mean":
+        sums = np.bincount(inv, weights=values, minlength=k)
+        counts = np.bincount(inv, minlength=k).astype(float)
+        boot = sums[idx].sum(1) / counts[idx].sum(1)
+    elif stat == "median":
+        # each resample's median, exactly as np.median of the drawn values: the values sorted once,
+        # weighted by how often their cluster was drawn, and read at the middle position(s)
+        order = np.argsort(values, kind="stable")
+        draws = np.zeros((n_boot, k))
+        np.add.at(draws, (np.arange(n_boot)[:, None], idx), 1)
+        cum = np.cumsum(draws[:, inv[order]], axis=1)
+        n = cum[:, -1]
+        lo = (cum > ((n - 1) // 2)[:, None]).argmax(1)
+        hi = (cum > (n // 2)[:, None]).argmax(1)
+        boot = 0.5 * (values[order][lo] + values[order][hi])
+    else:
+        raise ValueError(f"stat must be 'mean' or 'median', not {stat!r}")
     lo90, hi90, lo95, hi95 = np.quantile(boot, [0.05, 0.95, 0.025, 0.975])
-    return dict(mean=float(values.mean()), lo90=float(lo90), hi90=float(hi90), lo95=float(lo95),
-                hi95=float(hi95), n=int(len(values)), n_clusters=int(k), n_boot=int(n_boot))
+    out = dict(mean=float(values.mean()), lo90=float(lo90), hi90=float(hi90), lo95=float(lo95),
+               hi95=float(hi95), n=int(len(values)), n_clusters=int(k), n_boot=int(n_boot), stat=stat)
+    if stat == "median":
+        out["median"] = float(np.median(values))
+    return out
 
 
 def pr2_reading(lo90: float, hi90: float) -> str:
@@ -177,6 +193,40 @@ def pr2_reading(lo90: float, hi90: float) -> str:
     if hi90 <= -SESOI or lo90 >= SESOI:
         return "prior family changes the effect"
     return "inconclusive"
+
+
+def pr4_reading(lo90: float, hi90: float) -> str:
+    """PR4's three-way reading (prereg clarification, 2026-09-29) of the 90 % interval of the median
+    paired AP difference against (-PR4_MARGIN, PR4_MARGIN), parallel to PR2's."""
+    if lo90 > -PR4_MARGIN and hi90 < PR4_MARGIN:
+        return "equivalent"
+    if hi90 <= -PR4_MARGIN or lo90 >= PR4_MARGIN:
+        return "differs"
+    return "inconclusive"
+
+
+def pr4_table(idc: pd.DataFrame) -> pd.DataFrame:
+    """PR4: per R2-D2 cell and AP kind, the paired differences AP(R2-D2) - AP(twin) over (family,
+    seed), with the (family, seed)-cluster bootstrap 90 % interval of their median and its reading.
+    `idc`: family, method, seed, ap_native, ap_sobol (complete runs)."""
+    pr4 = []
+    idk = idc.set_index(["family", "method", "seed"])
+    for d in R2_CELLS:
+        tw = BY_DIR[d].twin
+        for met in ("ap_native", "ap_sobol"):
+            diffs = []
+            for (fam, m, s), r in idk.iterrows():
+                if m == d and (fam, tw, s) in idk.index:
+                    diffs.append((fam, s, r[met] - idk.loc[(fam, tw, s), met]))
+            dd = pd.DataFrame(diffs, columns=["family", "seed", "diff"]).dropna()
+            if dd.empty:
+                continue
+            b = cluster_bootstrap_mean(dd["diff"].values, (dd.family + "/" + dd.seed).values, stat="median")
+            pr4.append(dict(cell=d, twin=tw, metric=met, n_pairs=len(dd), mean_diff=b["mean"],
+                            median_diff=b["median"], lo90=b["lo90"], hi90=b["hi90"],
+                            reading=pr4_reading(b["lo90"], b["hi90"])))
+    return pd.DataFrame(pr4, columns=["cell", "twin", "metric", "n_pairs", "mean_diff", "median_diff", "lo90", "hi90",
+                                      "reading"])
 
 
 # ----------------------------------------------------------------------------- R2 readouts
@@ -269,7 +319,11 @@ def unit_effects(final: pd.DataFrame) -> pd.DataFrame:
 
 def effect_tables(effects: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Per objective family (Wilcoxon over seeds, Holm within family and kind, seed bootstrap) and
-    pooled over families ((family, seed)-cluster bootstrap)."""
+    pooled over families ((family, seed)-cluster bootstrap).
+
+    Holm's four kinds per objective family are the prereg's clarification (2026-09-29): {S(HC),
+    P(HC)}, {S(R2-D2), P(R2-D2)}, {dS, dP} and the four Delta_c (EFFECT_KIND).
+    """
     rows = []
     for (fam, eff), g in effects.groupby(["family", "effect"], sort=False):
         v = g.value.values
@@ -318,9 +372,9 @@ def g3_statistics(effects: pd.DataFrame, n_boot: int = N_BOOT, seed: int = BOOT_
         st["n_cell"][d] = int(len(v))
         st["median_cell"][d] = float(np.median(v)) if len(v) else np.nan
         st["p_cell"][d] = wilcoxon_p(v)[1]
-    have = [d for d in R2_CELLS if not np.isnan(st["p_cell"][d])]
-    adj = holm([st["p_cell"][d] for d in have]) if have else []
-    st["p_holm_cell"] = {d: np.nan for d in R2_CELLS} | dict(zip(have, map(float, adj)))
+    # Holm over the fixed four cells: a cell without a p (fewer than 2 pairs) counts as p = 1
+    adj = holm([1.0 if np.isnan(st["p_cell"][d]) else st["p_cell"][d] for d in R2_CELLS])
+    st["p_holm_cell"] = dict(zip(R2_CELLS, map(float, adj)))
     for e in ("dS", "dP"):
         v = effects[effects.effect == e].value.values
         st[f"n_{e}"] = int(len(v))
@@ -394,9 +448,16 @@ def git_blob_resolver(repo: Path):
     return resolve
 
 
-def prior_code_check(manifests: dict, resolve) -> pd.DataFrame:
+def blob_pair_at(resolve, commit):
+    """The blob ids of PRIOR_CODE_PATHS at `commit`, or None if any does not resolve."""
+    blobs = tuple(resolve(commit, p) for p in PRIOR_CODE_PATHS)
+    return None if any(b is None for b in blobs) else blobs
+
+
+def prior_code_check(manifests: dict, resolve, launch_commit: str | None = None) -> pd.DataFrame:
     """Review Focus 3: every R2-D2 run's creation and resume commits carry one pair of blobs of
     sagp/gp.py and sagp/r2d2.py, the same pair for every run, and the creation checkout was clean.
+    With `launch_commit`, the pair most runs share must also be the pair at that commit.
 
     config_hash does not see module constants, so a resume after the prior's code changed would
     splice two priors with no error; this is where that is caught. A run passes if its sessions
@@ -427,6 +488,9 @@ def prior_code_check(manifests: dict, resolve) -> pd.DataFrame:
     good = pc[pc.blobs_resolved & pc.single_blob_pair]
     modal = good.blob_pair.value_counts().index[0] if len(good) else None
     pc["prior_code_ok"] = pc.created_clean & pc.blobs_resolved & pc.single_blob_pair & (pc.blob_pair == modal)
+    if launch_commit is not None:
+        anchor = blob_pair_at(resolve, launch_commit)
+        pc["prior_code_ok"] &= anchor is not None and modal == "/".join(b[:10] for b in anchor)
     return pc
 
 
@@ -683,6 +747,9 @@ def main():
     ap.add_argument("--seeds", default="0-9", help='seeds, e.g. "0-4" or "0,3,7"')
     ap.add_argument("--repo", type=Path, default=None,
                     help="git repository holding every run's commits (default: the one this script is in)")
+    ap.add_argument("--launch-commit", default=None,
+                    help="the R2-D2 launch commit (the pilot's: 97eda925b); prior_code_ok then also requires "
+                         "the runs' modal (gp.py, r2d2.py) blob pair to be the pair at this commit")
     a = ap.parse_args()
     FAMILIES = [f for f in a.families.split(",") if f]
     SEEDS = parse_seeds(a.seeds)
@@ -711,7 +778,9 @@ def main():
     # 2. sanity ------------------------------------------------------------------------------
     ck, cross = sanity_checks(it, inv, manifests, dev)
     tp = twin_pairing_check(ck)
-    pc = prior_code_check(manifests, git_blob_resolver(repo))
+    resolver = git_blob_resolver(repo)
+    pc = prior_code_check(manifests, resolver, a.launch_commit)
+    launch_pair = blob_pair_at(resolver, a.launch_commit) if a.launch_commit else None
     save_table(ck.assign(S=ck.S.astype(str)), out, "sanity_per_run")
     save_table(cross, out, "sanity_cross_method")
     save_table(tp, out, "sanity_twin_pairing")
@@ -886,24 +955,9 @@ def main():
         ap_sobol_mean=("ap_sobol", "mean"), ap_sobol_median=("ap_sobol", "median"), f1_mean=("f1", "mean"),
         n_pred_active_median=("n_pred_active", "median")).reset_index()
     save_table(id_pf, out, "identification_by_prior_family")
-    # PR4: AP by native_median and by sobol_hat within PR4_MARGIN of the twin's (paired over (family, seed))
-    pr4 = []
-    idk = idc.set_index(["family", "method", "seed"])
-    for d in R2_CELLS:
-        tw = BY_DIR[d].twin
-        for met in ("ap_native", "ap_sobol"):
-            diffs = []
-            for (fam, m, s), r in idk.iterrows():
-                if m == d and (fam, tw, s) in idk.index:
-                    diffs.append((fam, s, r[met] - idk.loc[(fam, tw, s), met]))
-            dd = pd.DataFrame(diffs, columns=["family", "seed", "diff"]).dropna()
-            if dd.empty:
-                continue
-            b = cluster_bootstrap_mean(dd["diff"].values, (dd.family + "/" + dd.seed).values)
-            pr4.append(dict(cell=d, twin=tw, metric=met, n_pairs=len(dd), mean_diff=b["mean"],
-                            median_diff=float(dd["diff"].median()), lo90=b["lo90"], hi90=b["hi90"],
-                            holds=bool(abs(b["mean"]) <= PR4_MARGIN)))
-    pr4 = pd.DataFrame(pr4, columns=["cell", "twin", "metric", "n_pairs", "mean_diff", "median_diff", "lo90", "hi90", "holds"])
+    # PR4: AP by native_median and by sobol_hat within PR4_MARGIN of the twin's (prereg clarification:
+    # the cluster bootstrap 90 % interval of the median paired difference, read as PR2 is)
+    pr4 = pr4_table(idc)
     save_table(pr4, out, "pr4_identification_twin_pairs")
     # per-family ranking of the cells on mean AP(native) and mean F1
     rank_rows = []
@@ -1234,7 +1288,9 @@ def main():
              f"(b) the pooled (family, seed)-cluster bootstrap 95 % interval of the mean Delta ({N_BOOT:,} resamples) excludes 0; "
              f"(c) any cell's Wilcoxon signed-rank over its pairs, Holm-adjusted over the 4 cells, below {ALPHA}; "
              f"(d) |median dS| or |median dP| >= {SESOI} over the units. Criteria firing: "
-             f"(a) {g3c['a']}, (b) {g3c['b']}, (c) {g3c['c']}, (d) {g3c['d']}.\n\n")
+             f"(a) {g3c['a']}, (b) {g3c['b']}, (c) {g3c['c']}, (d) {g3c['d']}. "
+             "For (b): a percentile bootstrap over 10 clusters tends to under-cover, and the prereg does not fix "
+             "the interval type.\n\n")
     R.append(md_table(g3_tab) + "\n")
     h("What changed since the previous analysis"); R.append(prev_section + "\n")
     h("1. Inventory"); R.append(md_table(inv_summary) + "\n")
@@ -1260,6 +1316,12 @@ def main():
              f"commit and every resume commit resolve, in `{repo}`, to one pair of blobs of {' and '.join(PRIOR_CODE_PATHS)}, the pair "
              "most R2-D2 runs share, and the creation checkout was clean (resume entries record no dirty flag) "
              "(`tables/sanity_prior_code.csv`).\n")
+    if a.launch_commit:
+        R.append(f"\nLaunch commit `{a.launch_commit}`: blob pair (gp.py/r2d2.py) "
+                 f"{'`' + '/'.join(launch_pair) + '`' if launch_pair else '**does not resolve**'}; `prior_code_ok` "
+                 "also requires the R2-D2 runs' modal pair to be this one.\n")
+    else:
+        R.append("\nNo `--launch-commit` given: `prior_code_ok` compares the runs with each other only.\n")
     if len(pc):
         R.append("\nPrior-code blob pairs (gp.py/r2d2.py) over the R2-D2 runs: " +
                  ", ".join(f"`{k or 'unresolved'}` x {v}" for k, v in pc.blob_pair.value_counts().items()) +
@@ -1309,9 +1371,12 @@ def main():
     R.append(f"\n**PR3** (Q6's null: |median Delta_c| < {SESOI} for every cell and family): holds in {int(pr3.holds.sum())} of {len(pr3)} "
              f"(cell, family); {'holds' if len(pr3) and pr3.holds.all() else 'does not hold'} overall.\n\n" +
              (md_table(pr3) if len(pr3) else "(no data)") + "\n")
-    R.append(f"\n**PR4** (secondary: AP by native_median and by sobol_hat within {PR4_MARGIN} of the twin's; read here as |mean paired "
-             "difference over (family, seed)| <= 0.05, with the pooled 90 % cluster interval shown): holds in "
-             f"{int(pr4.holds.sum())} of {len(pr4)} (cell, metric).\n\n" + (md_table(pr4) if len(pr4) else "(no data)") + "\n")
+    R.append(f"\n**PR4** (secondary: AP by native_median and by sobol_hat within {PR4_MARGIN} of the twin's; per the prereg's "
+             f"clarification, the (family, seed)-cluster bootstrap 90 % interval ({N_BOOT:,} resamples) of the median paired "
+             f"difference, R2-D2 minus twin, inside (-{PR4_MARGIN}, {PR4_MARGIN}) = equivalent, entirely outside = differs, "
+             "otherwise inconclusive; lo90/hi90 are that interval): " +
+             (", ".join(f"{k} {int((pr4.reading == k).sum())}" for k in ("equivalent", "differs", "inconclusive"))
+              if len(pr4) else "no data") + f" of {len(pr4)} (cell, metric).\n\n" + (md_table(pr4) if len(pr4) else "(no data)") + "\n")
     h("7. Identification of the active set")
     R.append("Scored at the LAST readout of each run (coords.csv rows are written every iteration; sobol_hat is computed at t = 25, 50, ..., 175 and 199). "
              "`native_median` is the cell's own sparsity parameter (rho_i = 1/ell_i^2 for the lengthscale cells, a_sq_i for the amplitude cells; "

@@ -3,7 +3,7 @@
 Run with the analysis environment (numpy, scipy, pandas, matplotlib; the study's `saasbo` env has no
 pandas), from the repository root:
 
-    python -m pytest -q sagp_analysis/r2d2/<stamp>/test_analyze.py            # the fast tests
+    python -m pytest -q -m "not slow" sagp_analysis/r2d2/<stamp>/test_analyze.py   # the fast tests
     python -m pytest -q -m slow sagp_analysis/r2d2/<stamp>/test_analyze.py    # the fixture pipeline
 
 The slow tests read the stored half-Cauchy runs under `runs/` (read-only) and write only under
@@ -111,6 +111,15 @@ def test_wilcoxon_p_edge_cases():
     assert analyze.wilcoxon_p(np.arange(1, 11) / 10)[1] == pytest.approx(2 / 1024)
 
 
+def test_wilcoxon_p_propagates_errors_other_than_all_zero(monkeypatch):
+    def boom(*args, **kwargs):
+        raise ValueError("not the all-zero case")
+    monkeypatch.setattr(analyze.stats, "wilcoxon", boom)
+    assert analyze.wilcoxon_p(np.zeros(5))[1] == 1.0          # handled before scipy is called
+    with pytest.raises(ValueError, match="not the all-zero case"):
+        analyze.wilcoxon_p(np.array([0.1, -0.2, 0.3]))
+
+
 # ----------------------------------------------------------------------------- R2 readouts
 def test_r2_readouts_follow_from_the_draws():
     rng = np.random.default_rng(0)
@@ -213,6 +222,23 @@ def test_cluster_bootstrap_is_seeded_and_nested():
     assert half == pytest.approx(1.96 * v.std() / np.sqrt(40), rel=0.15)
 
 
+def test_cluster_bootstrap_of_the_median_matches_brute_force():
+    rng = np.random.default_rng(7)
+    v = rng.normal(0.0, 1.0, 30)
+    c = np.repeat(np.arange(10), 3)                     # three values per cluster, and an odd one below
+    for vals, clus in ((v, c), (v[:25], np.arange(25))):
+        b = analyze.cluster_bootstrap_mean(vals, clus, n_boot=500, seed=3, stat="median")
+        labels = np.unique(clus.astype(str))            # the function's cluster order: labels as strings
+        idx = np.random.default_rng(3).integers(0, len(labels), size=(500, len(labels)))
+        groups = [vals[clus.astype(str) == k] for k in labels]
+        boot = np.array([np.median(np.concatenate([groups[k] for k in row])) for row in idx])
+        lo90, hi90, lo95, hi95 = np.quantile(boot, [0.05, 0.95, 0.025, 0.975])
+        assert (b["lo90"], b["hi90"], b["lo95"], b["hi95"]) == (lo90, hi90, lo95, hi95)
+        assert b["median"] == np.median(vals) and b["mean"] == pytest.approx(vals.mean())
+    # the default is still the mean, drawn from the same resamples
+    assert analyze.cluster_bootstrap_mean(v, c)["stat"] == "mean"
+
+
 # ----------------------------------------------------------------------------- G3
 W = np.array([0.3, -0.3, 0.6, -0.6, 0.9, -0.9, 1.2, -1.2, 1.5, -1.5])   # symmetric seed noise
 A = np.array([0.3, 0.3, 0.6, 0.6, 0.9, 0.9, 1.2, 1.2, 1.5, 1.5])
@@ -268,6 +294,17 @@ def test_g3_criteria_boundaries():
     assert analyze.g3_criteria(base | dict(median_dS=-0.31))["d"]
 
 
+def test_g3_holm_is_over_the_four_cells_with_a_missing_p_counted_as_one():
+    deltas = {AA: 0.1 + 0.001 * U, AL: W, PA: W, PL: W}          # AA's exact p is 2/1024
+    effects = analyze.unit_effects(_final_from_deltas(deltas))
+    # PL keeps one pair only, so its Wilcoxon p is NaN
+    keep = (effects.effect != f"Delta_{PL}") | ((effects.family == "aligned10") & (effects.seed == "00"))
+    stats = analyze.g3_statistics(effects[keep])
+    assert np.isnan(stats["p_cell"][PL])
+    assert stats["p_holm_cell"][AA] == pytest.approx(4 * 2 / 1024)   # a family of 4, not 3
+    assert stats["p_holm_cell"][PL] == 1.0
+
+
 def test_g3_verdict_is_read_only_on_the_complete_pilot():
     stats = analyze.g3_statistics(analyze.unit_effects(_final_from_deltas(SCENARIOS["d_only"][0])))
     ok = analyze.g3_reading(stats, families=PILOT_FAMILIES, seeds=analyze.parse_seeds("0-4"),
@@ -291,6 +328,51 @@ def test_pr2_reading():
     assert analyze.pr2_reading(-1.0, -0.3) == "prior family changes the effect"
     assert analyze.pr2_reading(-0.3, 0.1) == "inconclusive"
     assert analyze.pr2_reading(0.1, 0.5) == "inconclusive"
+
+
+def test_pr4_reading():
+    assert analyze.pr4_reading(-0.049, 0.049) == "equivalent"
+    assert analyze.pr4_reading(0.05, 0.2) == "differs"
+    assert analyze.pr4_reading(-0.3, -0.05) == "differs"
+    assert analyze.pr4_reading(-0.05, 0.01) == "inconclusive"
+    assert analyze.pr4_reading(0.01, 0.06) == "inconclusive"
+
+
+def _idc_from_ap_deltas(delta):
+    """An identification table for AA-R2 and its twin: twin AP drawn at random, R2-D2's = twin's +
+    delta[u], for both AP kinds. (family, seed) = u, as in `_final_from_deltas`."""
+    rng = np.random.default_rng(11)
+    rows = []
+    for u in range(10):
+        fam, seed = PILOT_FAMILIES[u // 5], f"{u % 5:02d}"
+        base = rng.uniform(0.3, 0.7, 2)
+        rows.append(dict(family=fam, method="additive-amplitude", seed=seed, ap_native=base[0], ap_sobol=base[1]))
+        rows.append(dict(family=fam, method=AA, seed=seed, ap_native=base[0] + delta[u], ap_sobol=base[1] + delta[u]))
+    return pd.DataFrame(rows)
+
+
+# a median paired difference of 0.1 with a mean of 0.01: the median, not the mean, is read
+MEDIAN_NOT_MEAN = np.array([0.1] * 8 + [-0.35] * 2)
+PR4_SCENARIOS = {
+    "equivalent": (0.01 * W / 1.5, "equivalent"),
+    "differs": (0.2 + 0.01 * W, "differs"),
+    "differs_on_the_median": (MEDIAN_NOT_MEAN, "differs"),
+    "inconclusive": (0.04 + 0.05 * W / 1.5, "inconclusive"),
+}
+
+
+@pytest.mark.parametrize("name", list(PR4_SCENARIOS))
+def test_pr4_reads_the_bootstrap_interval_of_the_median_difference(name):
+    delta, expected = PR4_SCENARIOS[name]
+    pr4 = analyze.pr4_table(_idc_from_ap_deltas(delta))
+    assert len(pr4) == 2 and set(pr4.metric) == {"ap_native", "ap_sobol"}
+    for r in pr4.itertuples():
+        assert r.cell == AA and r.twin == "additive-amplitude" and r.n_pairs == 10
+        assert r.median_diff == pytest.approx(np.median(delta), abs=1e-12)
+        assert r.mean_diff == pytest.approx(delta.mean(), abs=1e-12)
+        b = analyze.cluster_bootstrap_mean(np.array(delta), np.arange(10), stat="median")
+        assert (r.lo90, r.hi90) == pytest.approx((b["lo90"], b["hi90"]), abs=1e-12)
+        assert r.reading == expected
 
 
 # ----------------------------------------------------------------------------- sanity: pairing
@@ -356,11 +438,28 @@ def test_prior_code_check_with_a_fake_repository():
     assert len(pc) == 0
 
 
+def test_prior_code_check_is_anchored_to_the_launch_commit():
+    blobs = {("c1", "sagp/gp.py"): "g1", ("c1", "sagp/r2d2.py"): "r1",
+             ("c3", "sagp/gp.py"): "g2", ("c3", "sagp/r2d2.py"): "r1"}
+    resolve = lambda commit, path: blobs.get((commit, path))  # noqa: E731
+    assert analyze.blob_pair_at(resolve, "c1") == ("g1", "r1")
+    assert analyze.blob_pair_at(resolve, "nope") is None
+    mans = {("aligned10", AA, "00"): _man("c3"), ("aligned10", AL, "00"): _man("c3", ["c3"])}
+    assert analyze.prior_code_check(mans, resolve).prior_code_ok.all()            # unanchored: modal only
+    assert analyze.prior_code_check(mans, resolve, launch_commit="c3").prior_code_ok.all()
+    # every run agrees, but on a pair other than the launch commit's
+    assert not analyze.prior_code_check(mans, resolve, launch_commit="c1").prior_code_ok.any()
+    assert not analyze.prior_code_check(mans, resolve, launch_commit="nope").prior_code_ok.any()
+
+
 def test_prior_code_check_against_this_repository():
     resolve = analyze.git_blob_resolver(REPO)
     # the smoke runs' commit and the pilot's launch commit share both blobs
     mans = {("aligned10", AA, "00"): _man("76cbb7994ff0c82405a9462d037ec8674fd8ac9c", ["97eda925b"])}
     assert analyze.prior_code_check(mans, resolve).prior_code_ok.all()
+    assert analyze.prior_code_check(mans, resolve, launch_commit="97eda925b").prior_code_ok.all()
+    # anchored to the first half-Cauchy launch, which has no sagp/r2d2.py, nothing passes
+    assert not analyze.prior_code_check(mans, resolve, launch_commit="a51a4b9").prior_code_ok.any()
     # the first half-Cauchy launch predates sagp/r2d2.py
     mans = {("aligned10", AA, "00"): _man("97eda925b", ["a51a4b9"])}
     pc = analyze.prior_code_check(mans, resolve)
@@ -375,7 +474,8 @@ def _run_fixture(tmp_path, deltas, name):
     out.mkdir()
     subprocess.run([sys.executable, str(HERE / "analyze.py"), "--runs", str(REPO / "runs"),
                     "--runs", str(r2root), "--out", str(out), "--families", ",".join(PILOT_FAMILIES),
-                    "--seeds", "0-4", "--asof", "fixture"], check=True, cwd=tmp_path)
+                    "--seeds", "0-4", "--asof", "fixture", "--launch-commit", fixture.PILOT_COMMIT],
+                   check=True, cwd=tmp_path)
     return out
 
 
@@ -399,3 +499,7 @@ def test_fixture_pipeline_reads_g3_as_constructed(tmp_path, name):
             assert len(v) == 1 and v.iloc[0] == pytest.approx(deltas[c][u], abs=1e-9)
     report = (out / "REPORT.md").read_text()
     assert ("G3: GO to stage 4" if any(expected.values()) else "G3: STOP") in report
+    assert "Launch commit `97eda925b`" in report
+    # the fixture's R2-D2 coords are the twins', so every paired AP difference is 0: equivalent
+    pr4 = pd.read_csv(out / "tables" / "pr4_identification_twin_pairs.csv")
+    assert len(pr4) == 8 and (pr4.reading == "equivalent").all()
