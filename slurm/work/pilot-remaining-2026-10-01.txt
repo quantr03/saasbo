@@ -1,0 +1,40 @@
+# The 22 R2-D2 pilot runs still to do on 2026-10-01 (aligned10 and decoupled, seeds 0-4; the other
+# 18 of the 40 reached T = 200 unpacked), for slurm/r2d2_packed.sbatch at K = 8 per task:
+#   bash slurm/submit_chain.sh slurm/r2d2_packed.sbatch 3 \
+#       --export=ALL,WORK=slurm/work/pilot-remaining-2026-10-01.txt --array=0-2
+# Task 0 is lines 1-8 below, task 1 lines 9-16, task 2 lines 17-22 (comments and blanks skipped).
+#
+# Order: the two product/amplitude runs, about 22-26 h packed, are the pilot's longest and share
+# task 0 with six product/lengthscale runs, the shortest cell (its half-Cauchy twins took about
+# 2.5 h unpacked). A packed run slows with the number of runs on its GPU (1.3x at 4, 1.7x at 8),
+# so once the short runs finish the two long ones share the GPU with each other alone and speed
+# up; next to additive/lengthscale runs, a longer cell, they would stay at full load for longer and
+# finish later.
+
+# task 0
+product/amplitude_r2d2 decoupled 3
+product/amplitude_r2d2 decoupled 4
+product/lengthscale_r2d2 aligned10 0
+product/lengthscale_r2d2 aligned10 1
+product/lengthscale_r2d2 aligned10 2
+product/lengthscale_r2d2 aligned10 3
+product/lengthscale_r2d2 aligned10 4
+product/lengthscale_r2d2 decoupled 0
+
+# task 1
+additive/lengthscale_r2d2 aligned10 0
+additive/lengthscale_r2d2 aligned10 1
+additive/lengthscale_r2d2 aligned10 2
+additive/lengthscale_r2d2 aligned10 3
+additive/lengthscale_r2d2 aligned10 4
+additive/lengthscale_r2d2 decoupled 0
+additive/lengthscale_r2d2 decoupled 1
+additive/lengthscale_r2d2 decoupled 2
+
+# task 2
+additive/lengthscale_r2d2 decoupled 3
+additive/lengthscale_r2d2 decoupled 4
+product/lengthscale_r2d2 decoupled 1
+product/lengthscale_r2d2 decoupled 2
+product/lengthscale_r2d2 decoupled 3
+product/lengthscale_r2d2 decoupled 4
