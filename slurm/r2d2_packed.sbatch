@@ -7,10 +7,11 @@
 # share the task's one GPU and its cores (one core each; torch and XLA are pinned to one thread).
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-# Memory: a run reaches about 12 GB of host memory by t = 200, so 8 x 12 GB = 96 GB, and 120G is
-# that plus headroom; on the GPU a run holds about 4.8 GB, so 8 x 5 GB = 40 GB of the H200's 141 GB.
-# 16 cores and 120G per GPU fit an H200 node's 128 cores, 8 GPUs and 1.98 TB eight times over.
-#SBATCH --mem=120G
+# Memory: 8 x 12.3 GB measured MaxRSS = 98 GB, requested 160G (four complete pilot runs at t = 199
+# peaked at 11.9-12.3 GB each, and the K runs start together, so they peak together); each GPU's
+# share of an H200 node's 1.98 TB is about 250 GB. On the GPU a run holds about 4.8 GB, so
+# 8 x 5 GB = 40 GB of the H200's 141 GB. 16 cores per GPU is the node's 128 cores over its 8 GPUs.
+#SBATCH --mem=160G
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/%x_%A_%a.out
 #
