@@ -1,0 +1,372 @@
+# The R2-D2 study's full replicate (stage 4) on 2026-10-02, for slurm/r2d2_packed.sbatch at K = 8
+# per task. The design is 4 R2-D2 cells x 8 objective families x 10 seeds (0-9) = 320 runs; the
+# pilot already ran 40 of them (every cell on aligned10 and decoupled, seeds 0-4), and those 40 are
+# left out, so this list holds the other 320 - 40 = 280. Submit from $WRKDIR/saasbo with TMPDIR
+# unset (the launcher's directives set gpu-h200-141g-ellis and ellis_users):
+#   bash slurm/submit_chain.sh slurm/r2d2_packed.sbatch 3 \
+#       --export=ALL,WORK=slurm/work/replicate-2026-10-02.txt --array=0-34 --mem=200G
+#
+# Order: by cell (additive/amplitude_r2d2, product/amplitude_r2d2, additive/lengthscale_r2d2,
+# product/lengthscale_r2d2), then by family (aligned10, decoupled, aligned3, anti_aligned,
+# interaction_g0.00, g0.25, g0.50, g0.75), then by seed. The four cells differ 5-10x in run time,
+# and a task whose runs are all one cell keeps its GPU fully used until they end together; a task
+# that mixed a fast cell with a slow one would leave the GPU part-idle once the fast runs finish.
+# Each cell has 70 runs (aligned10 and decoupled seeds 5-9, the other six families seeds 0-9).
+#
+# Task i is runs 8i+1 .. 8i+8 below (comments and blanks skipped; the launcher slices the whole
+# file, so the "# task" markers are only for reading): 280 runs = 35 tasks, --array=0-34.
+#   additive/amplitude_r2d2    runs   1-70   tasks  0-7 whole, task 8 runs 65-70
+#   product/amplitude_r2d2     runs  71-140  task 8 runs 71-72, tasks  9-16 whole, task 17 runs 137-140
+#   additive/lengthscale_r2d2  runs 141-210  task 17 runs 141-144, tasks 18-25 whole, task 26 runs 209-210
+#   product/lengthscale_r2d2   runs 211-280  task 26 runs 211-216, tasks 27-34 whole
+# Tasks 8, 17 and 26 straddle two cells (6 + 2, 4 + 4 and 2 + 6 runs); the other 32 hold one cell.
+
+# task 0
+additive/amplitude_r2d2 aligned10 5
+additive/amplitude_r2d2 aligned10 6
+additive/amplitude_r2d2 aligned10 7
+additive/amplitude_r2d2 aligned10 8
+additive/amplitude_r2d2 aligned10 9
+additive/amplitude_r2d2 decoupled 5
+additive/amplitude_r2d2 decoupled 6
+additive/amplitude_r2d2 decoupled 7
+
+# task 1
+additive/amplitude_r2d2 decoupled 8
+additive/amplitude_r2d2 decoupled 9
+additive/amplitude_r2d2 aligned3 0
+additive/amplitude_r2d2 aligned3 1
+additive/amplitude_r2d2 aligned3 2
+additive/amplitude_r2d2 aligned3 3
+additive/amplitude_r2d2 aligned3 4
+additive/amplitude_r2d2 aligned3 5
+
+# task 2
+additive/amplitude_r2d2 aligned3 6
+additive/amplitude_r2d2 aligned3 7
+additive/amplitude_r2d2 aligned3 8
+additive/amplitude_r2d2 aligned3 9
+additive/amplitude_r2d2 anti_aligned 0
+additive/amplitude_r2d2 anti_aligned 1
+additive/amplitude_r2d2 anti_aligned 2
+additive/amplitude_r2d2 anti_aligned 3
+
+# task 3
+additive/amplitude_r2d2 anti_aligned 4
+additive/amplitude_r2d2 anti_aligned 5
+additive/amplitude_r2d2 anti_aligned 6
+additive/amplitude_r2d2 anti_aligned 7
+additive/amplitude_r2d2 anti_aligned 8
+additive/amplitude_r2d2 anti_aligned 9
+additive/amplitude_r2d2 interaction_g0.00 0
+additive/amplitude_r2d2 interaction_g0.00 1
+
+# task 4
+additive/amplitude_r2d2 interaction_g0.00 2
+additive/amplitude_r2d2 interaction_g0.00 3
+additive/amplitude_r2d2 interaction_g0.00 4
+additive/amplitude_r2d2 interaction_g0.00 5
+additive/amplitude_r2d2 interaction_g0.00 6
+additive/amplitude_r2d2 interaction_g0.00 7
+additive/amplitude_r2d2 interaction_g0.00 8
+additive/amplitude_r2d2 interaction_g0.00 9
+
+# task 5
+additive/amplitude_r2d2 interaction_g0.25 0
+additive/amplitude_r2d2 interaction_g0.25 1
+additive/amplitude_r2d2 interaction_g0.25 2
+additive/amplitude_r2d2 interaction_g0.25 3
+additive/amplitude_r2d2 interaction_g0.25 4
+additive/amplitude_r2d2 interaction_g0.25 5
+additive/amplitude_r2d2 interaction_g0.25 6
+additive/amplitude_r2d2 interaction_g0.25 7
+
+# task 6
+additive/amplitude_r2d2 interaction_g0.25 8
+additive/amplitude_r2d2 interaction_g0.25 9
+additive/amplitude_r2d2 interaction_g0.50 0
+additive/amplitude_r2d2 interaction_g0.50 1
+additive/amplitude_r2d2 interaction_g0.50 2
+additive/amplitude_r2d2 interaction_g0.50 3
+additive/amplitude_r2d2 interaction_g0.50 4
+additive/amplitude_r2d2 interaction_g0.50 5
+
+# task 7
+additive/amplitude_r2d2 interaction_g0.50 6
+additive/amplitude_r2d2 interaction_g0.50 7
+additive/amplitude_r2d2 interaction_g0.50 8
+additive/amplitude_r2d2 interaction_g0.50 9
+additive/amplitude_r2d2 interaction_g0.75 0
+additive/amplitude_r2d2 interaction_g0.75 1
+additive/amplitude_r2d2 interaction_g0.75 2
+additive/amplitude_r2d2 interaction_g0.75 3
+
+# task 8
+additive/amplitude_r2d2 interaction_g0.75 4
+additive/amplitude_r2d2 interaction_g0.75 5
+additive/amplitude_r2d2 interaction_g0.75 6
+additive/amplitude_r2d2 interaction_g0.75 7
+additive/amplitude_r2d2 interaction_g0.75 8
+additive/amplitude_r2d2 interaction_g0.75 9
+product/amplitude_r2d2 aligned10 5
+product/amplitude_r2d2 aligned10 6
+
+# task 9
+product/amplitude_r2d2 aligned10 7
+product/amplitude_r2d2 aligned10 8
+product/amplitude_r2d2 aligned10 9
+product/amplitude_r2d2 decoupled 5
+product/amplitude_r2d2 decoupled 6
+product/amplitude_r2d2 decoupled 7
+product/amplitude_r2d2 decoupled 8
+product/amplitude_r2d2 decoupled 9
+
+# task 10
+product/amplitude_r2d2 aligned3 0
+product/amplitude_r2d2 aligned3 1
+product/amplitude_r2d2 aligned3 2
+product/amplitude_r2d2 aligned3 3
+product/amplitude_r2d2 aligned3 4
+product/amplitude_r2d2 aligned3 5
+product/amplitude_r2d2 aligned3 6
+product/amplitude_r2d2 aligned3 7
+
+# task 11
+product/amplitude_r2d2 aligned3 8
+product/amplitude_r2d2 aligned3 9
+product/amplitude_r2d2 anti_aligned 0
+product/amplitude_r2d2 anti_aligned 1
+product/amplitude_r2d2 anti_aligned 2
+product/amplitude_r2d2 anti_aligned 3
+product/amplitude_r2d2 anti_aligned 4
+product/amplitude_r2d2 anti_aligned 5
+
+# task 12
+product/amplitude_r2d2 anti_aligned 6
+product/amplitude_r2d2 anti_aligned 7
+product/amplitude_r2d2 anti_aligned 8
+product/amplitude_r2d2 anti_aligned 9
+product/amplitude_r2d2 interaction_g0.00 0
+product/amplitude_r2d2 interaction_g0.00 1
+product/amplitude_r2d2 interaction_g0.00 2
+product/amplitude_r2d2 interaction_g0.00 3
+
+# task 13
+product/amplitude_r2d2 interaction_g0.00 4
+product/amplitude_r2d2 interaction_g0.00 5
+product/amplitude_r2d2 interaction_g0.00 6
+product/amplitude_r2d2 interaction_g0.00 7
+product/amplitude_r2d2 interaction_g0.00 8
+product/amplitude_r2d2 interaction_g0.00 9
+product/amplitude_r2d2 interaction_g0.25 0
+product/amplitude_r2d2 interaction_g0.25 1
+
+# task 14
+product/amplitude_r2d2 interaction_g0.25 2
+product/amplitude_r2d2 interaction_g0.25 3
+product/amplitude_r2d2 interaction_g0.25 4
+product/amplitude_r2d2 interaction_g0.25 5
+product/amplitude_r2d2 interaction_g0.25 6
+product/amplitude_r2d2 interaction_g0.25 7
+product/amplitude_r2d2 interaction_g0.25 8
+product/amplitude_r2d2 interaction_g0.25 9
+
+# task 15
+product/amplitude_r2d2 interaction_g0.50 0
+product/amplitude_r2d2 interaction_g0.50 1
+product/amplitude_r2d2 interaction_g0.50 2
+product/amplitude_r2d2 interaction_g0.50 3
+product/amplitude_r2d2 interaction_g0.50 4
+product/amplitude_r2d2 interaction_g0.50 5
+product/amplitude_r2d2 interaction_g0.50 6
+product/amplitude_r2d2 interaction_g0.50 7
+
+# task 16
+product/amplitude_r2d2 interaction_g0.50 8
+product/amplitude_r2d2 interaction_g0.50 9
+product/amplitude_r2d2 interaction_g0.75 0
+product/amplitude_r2d2 interaction_g0.75 1
+product/amplitude_r2d2 interaction_g0.75 2
+product/amplitude_r2d2 interaction_g0.75 3
+product/amplitude_r2d2 interaction_g0.75 4
+product/amplitude_r2d2 interaction_g0.75 5
+
+# task 17
+product/amplitude_r2d2 interaction_g0.75 6
+product/amplitude_r2d2 interaction_g0.75 7
+product/amplitude_r2d2 interaction_g0.75 8
+product/amplitude_r2d2 interaction_g0.75 9
+additive/lengthscale_r2d2 aligned10 5
+additive/lengthscale_r2d2 aligned10 6
+additive/lengthscale_r2d2 aligned10 7
+additive/lengthscale_r2d2 aligned10 8
+
+# task 18
+additive/lengthscale_r2d2 aligned10 9
+additive/lengthscale_r2d2 decoupled 5
+additive/lengthscale_r2d2 decoupled 6
+additive/lengthscale_r2d2 decoupled 7
+additive/lengthscale_r2d2 decoupled 8
+additive/lengthscale_r2d2 decoupled 9
+additive/lengthscale_r2d2 aligned3 0
+additive/lengthscale_r2d2 aligned3 1
+
+# task 19
+additive/lengthscale_r2d2 aligned3 2
+additive/lengthscale_r2d2 aligned3 3
+additive/lengthscale_r2d2 aligned3 4
+additive/lengthscale_r2d2 aligned3 5
+additive/lengthscale_r2d2 aligned3 6
+additive/lengthscale_r2d2 aligned3 7
+additive/lengthscale_r2d2 aligned3 8
+additive/lengthscale_r2d2 aligned3 9
+
+# task 20
+additive/lengthscale_r2d2 anti_aligned 0
+additive/lengthscale_r2d2 anti_aligned 1
+additive/lengthscale_r2d2 anti_aligned 2
+additive/lengthscale_r2d2 anti_aligned 3
+additive/lengthscale_r2d2 anti_aligned 4
+additive/lengthscale_r2d2 anti_aligned 5
+additive/lengthscale_r2d2 anti_aligned 6
+additive/lengthscale_r2d2 anti_aligned 7
+
+# task 21
+additive/lengthscale_r2d2 anti_aligned 8
+additive/lengthscale_r2d2 anti_aligned 9
+additive/lengthscale_r2d2 interaction_g0.00 0
+additive/lengthscale_r2d2 interaction_g0.00 1
+additive/lengthscale_r2d2 interaction_g0.00 2
+additive/lengthscale_r2d2 interaction_g0.00 3
+additive/lengthscale_r2d2 interaction_g0.00 4
+additive/lengthscale_r2d2 interaction_g0.00 5
+
+# task 22
+additive/lengthscale_r2d2 interaction_g0.00 6
+additive/lengthscale_r2d2 interaction_g0.00 7
+additive/lengthscale_r2d2 interaction_g0.00 8
+additive/lengthscale_r2d2 interaction_g0.00 9
+additive/lengthscale_r2d2 interaction_g0.25 0
+additive/lengthscale_r2d2 interaction_g0.25 1
+additive/lengthscale_r2d2 interaction_g0.25 2
+additive/lengthscale_r2d2 interaction_g0.25 3
+
+# task 23
+additive/lengthscale_r2d2 interaction_g0.25 4
+additive/lengthscale_r2d2 interaction_g0.25 5
+additive/lengthscale_r2d2 interaction_g0.25 6
+additive/lengthscale_r2d2 interaction_g0.25 7
+additive/lengthscale_r2d2 interaction_g0.25 8
+additive/lengthscale_r2d2 interaction_g0.25 9
+additive/lengthscale_r2d2 interaction_g0.50 0
+additive/lengthscale_r2d2 interaction_g0.50 1
+
+# task 24
+additive/lengthscale_r2d2 interaction_g0.50 2
+additive/lengthscale_r2d2 interaction_g0.50 3
+additive/lengthscale_r2d2 interaction_g0.50 4
+additive/lengthscale_r2d2 interaction_g0.50 5
+additive/lengthscale_r2d2 interaction_g0.50 6
+additive/lengthscale_r2d2 interaction_g0.50 7
+additive/lengthscale_r2d2 interaction_g0.50 8
+additive/lengthscale_r2d2 interaction_g0.50 9
+
+# task 25
+additive/lengthscale_r2d2 interaction_g0.75 0
+additive/lengthscale_r2d2 interaction_g0.75 1
+additive/lengthscale_r2d2 interaction_g0.75 2
+additive/lengthscale_r2d2 interaction_g0.75 3
+additive/lengthscale_r2d2 interaction_g0.75 4
+additive/lengthscale_r2d2 interaction_g0.75 5
+additive/lengthscale_r2d2 interaction_g0.75 6
+additive/lengthscale_r2d2 interaction_g0.75 7
+
+# task 26
+additive/lengthscale_r2d2 interaction_g0.75 8
+additive/lengthscale_r2d2 interaction_g0.75 9
+product/lengthscale_r2d2 aligned10 5
+product/lengthscale_r2d2 aligned10 6
+product/lengthscale_r2d2 aligned10 7
+product/lengthscale_r2d2 aligned10 8
+product/lengthscale_r2d2 aligned10 9
+product/lengthscale_r2d2 decoupled 5
+
+# task 27
+product/lengthscale_r2d2 decoupled 6
+product/lengthscale_r2d2 decoupled 7
+product/lengthscale_r2d2 decoupled 8
+product/lengthscale_r2d2 decoupled 9
+product/lengthscale_r2d2 aligned3 0
+product/lengthscale_r2d2 aligned3 1
+product/lengthscale_r2d2 aligned3 2
+product/lengthscale_r2d2 aligned3 3
+
+# task 28
+product/lengthscale_r2d2 aligned3 4
+product/lengthscale_r2d2 aligned3 5
+product/lengthscale_r2d2 aligned3 6
+product/lengthscale_r2d2 aligned3 7
+product/lengthscale_r2d2 aligned3 8
+product/lengthscale_r2d2 aligned3 9
+product/lengthscale_r2d2 anti_aligned 0
+product/lengthscale_r2d2 anti_aligned 1
+
+# task 29
+product/lengthscale_r2d2 anti_aligned 2
+product/lengthscale_r2d2 anti_aligned 3
+product/lengthscale_r2d2 anti_aligned 4
+product/lengthscale_r2d2 anti_aligned 5
+product/lengthscale_r2d2 anti_aligned 6
+product/lengthscale_r2d2 anti_aligned 7
+product/lengthscale_r2d2 anti_aligned 8
+product/lengthscale_r2d2 anti_aligned 9
+
+# task 30
+product/lengthscale_r2d2 interaction_g0.00 0
+product/lengthscale_r2d2 interaction_g0.00 1
+product/lengthscale_r2d2 interaction_g0.00 2
+product/lengthscale_r2d2 interaction_g0.00 3
+product/lengthscale_r2d2 interaction_g0.00 4
+product/lengthscale_r2d2 interaction_g0.00 5
+product/lengthscale_r2d2 interaction_g0.00 6
+product/lengthscale_r2d2 interaction_g0.00 7
+
+# task 31
+product/lengthscale_r2d2 interaction_g0.00 8
+product/lengthscale_r2d2 interaction_g0.00 9
+product/lengthscale_r2d2 interaction_g0.25 0
+product/lengthscale_r2d2 interaction_g0.25 1
+product/lengthscale_r2d2 interaction_g0.25 2
+product/lengthscale_r2d2 interaction_g0.25 3
+product/lengthscale_r2d2 interaction_g0.25 4
+product/lengthscale_r2d2 interaction_g0.25 5
+
+# task 32
+product/lengthscale_r2d2 interaction_g0.25 6
+product/lengthscale_r2d2 interaction_g0.25 7
+product/lengthscale_r2d2 interaction_g0.25 8
+product/lengthscale_r2d2 interaction_g0.25 9
+product/lengthscale_r2d2 interaction_g0.50 0
+product/lengthscale_r2d2 interaction_g0.50 1
+product/lengthscale_r2d2 interaction_g0.50 2
+product/lengthscale_r2d2 interaction_g0.50 3
+
+# task 33
+product/lengthscale_r2d2 interaction_g0.50 4
+product/lengthscale_r2d2 interaction_g0.50 5
+product/lengthscale_r2d2 interaction_g0.50 6
+product/lengthscale_r2d2 interaction_g0.50 7
+product/lengthscale_r2d2 interaction_g0.50 8
+product/lengthscale_r2d2 interaction_g0.50 9
+product/lengthscale_r2d2 interaction_g0.75 0
+product/lengthscale_r2d2 interaction_g0.75 1
+
+# task 34
+product/lengthscale_r2d2 interaction_g0.75 2
+product/lengthscale_r2d2 interaction_g0.75 3
+product/lengthscale_r2d2 interaction_g0.75 4
+product/lengthscale_r2d2 interaction_g0.75 5
+product/lengthscale_r2d2 interaction_g0.75 6
+product/lengthscale_r2d2 interaction_g0.75 7
+product/lengthscale_r2d2 interaction_g0.75 8
+product/lengthscale_r2d2 interaction_g0.75 9
