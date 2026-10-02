@@ -5,13 +5,22 @@
 
 PYTHON ?= /opt/anaconda3/envs/saasbo/bin/python
 
-.PHONY: tables check pdf lint
+.PHONY: tables check study-tables study-check pdf lint
 
 tables:
 	$(PYTHON) regen_tables.py
 
 check:
 	$(PYTHON) regen_tables.py --check
+
+# The R2-D2 study's tables, from sagp_analysis/r2d2/latest (pass SNAPSHOT=<dir> to read another).
+SNAPSHOT ?= ../../sagp_analysis/r2d2/latest
+
+study-tables:
+	$(PYTHON) regen_study_tables.py --snapshot $(SNAPSHOT)
+
+study-check:
+	$(PYTHON) regen_study_tables.py --check --snapshot $(SNAPSHOT)
 
 pdf:
 	latexmk -pdf -interaction=nonstopmode -halt-on-error standalone_main.tex
