@@ -1,0 +1,113 @@
+{
+  "asof": "2026-10-02 14:01 EEST",
+  "families": [
+    "aligned10",
+    "decoupled"
+  ],
+  "seeds": [
+    "00",
+    "01",
+    "02",
+    "03",
+    "04"
+  ],
+  "n_complete": 110,
+  "n_total": 110,
+  "notes": [
+    "DEGENERATE readout: aligned10/additive-lengthscale_r2d2/seed01 declares 52/100 coordinates active at t=199 (AP by native_median 0.83, by sobol_hat 0.86; min native_median on true S 0.481, max on inactive 2.53; fit status ok)",
+    "DEGENERATE readout: decoupled/additive-lengthscale_r2d2/seed00 declares 64/100 coordinates active at t=199 (AP by native_median 0.63, by sobol_hat 0.74; min native_median on true S 0.558, max on inactive 3.41; fit status ok)",
+    "DEGENERATE readout: decoupled/additive-lengthscale_r2d2/seed02 declares 99/100 coordinates active at t=199 (AP by native_median 0.61, by sobol_hat 0.57; min native_median on true S 3.67, max on inactive 18; fit status ok)",
+    "DEGENERATE readout: decoupled/additive-lengthscale_r2d2/seed03 declares 97/100 coordinates active at t=199 (AP by native_median 0.51, by sobol_hat 0.83; min native_median on true S 2.5, max on inactive 17.9; fit status ok)",
+    "NUTS hits max_tree_depth=6 (num_steps_mean >= 62 of the 63 possible) in most fits: fraction per cell additive-amplitude 1.000, additive-amplitude_r2d2 1.000, additive-lengthscale 0.990, additive-lengthscale_r2d2 0.200, product-amplitude 1.000, product-amplitude_r2d2 1.000, product-lengthscale 0.993, product-lengthscale_r2d2 0.156"
+  ],
+  "infos": [
+    "Git commits at creation, by prior family: {'HC': ['a51a4b9'], 'R2D2': ['97eda92', 'c4d9c38'], 'reference': ['a51a4b9']} (the HC cells and references were launched at a51a4b9 and 2866ed2; the R2-D2 cells' commits are checked by `prior_code_ok`)."
+  ],
+  "n_mixed_device_runs": 0,
+  "exception_kinds": {
+    "NotPSDError": 2
+  },
+  "readout_from_excluded": {
+    "additive-amplitude": 10,
+    "additive-amplitude_r2d2": 10,
+    "additive-lengthscale": 5,
+    "additive-lengthscale_r2d2": 0,
+    "dsp_map": 0,
+    "oracle_S": 0,
+    "product-amplitude": 10,
+    "product-amplitude_r2d2": 10,
+    "product-lengthscale": 4,
+    "product-lengthscale_r2d2": 0
+  },
+  "tree_cap_frac": {
+    "additive-amplitude": 1.0,
+    "additive-amplitude_r2d2": 1.0,
+    "additive-lengthscale": 0.99,
+    "additive-lengthscale_r2d2": 0.2,
+    "product-amplitude": 1.0,
+    "product-amplitude_r2d2": 1.0,
+    "product-lengthscale": 0.9927777777777778,
+    "product-lengthscale_r2d2": 0.15555555555555556
+  },
+  "S_size": {
+    "aligned10": [
+      10
+    ],
+    "decoupled": [
+      8
+    ]
+  },
+  "sanity_failures": [],
+  "g3": {
+    "statistics": {
+      "n_pairs": 40,
+      "n_units": 10,
+      "median_pooled": 0.13847835482672818,
+      "mean_pooled": 0.25141836372704535,
+      "lo95": -0.05152752243929446,
+      "hi95": 0.5178461248915084,
+      "n_boot": 10000,
+      "median_cell": {
+        "product-lengthscale_r2d2": 0.012179789985500594,
+        "additive-lengthscale_r2d2": 0.13847835482672818,
+        "product-amplitude_r2d2": 0.04058587733837993,
+        "additive-amplitude_r2d2": 0.40952453551222656
+      },
+      "n_cell": {
+        "product-lengthscale_r2d2": 10,
+        "additive-lengthscale_r2d2": 10,
+        "product-amplitude_r2d2": 10,
+        "additive-amplitude_r2d2": 10
+      },
+      "p_cell": {
+        "product-lengthscale_r2d2": 0.625,
+        "additive-lengthscale_r2d2": 0.556640625,
+        "product-amplitude_r2d2": 0.625,
+        "additive-amplitude_r2d2": 0.00390625
+      },
+      "p_holm_cell": {
+        "product-lengthscale_r2d2": 1.0,
+        "additive-lengthscale_r2d2": 1.0,
+        "product-amplitude_r2d2": 1.0,
+        "additive-amplitude_r2d2": 0.015625
+      },
+      "n_dS": 10,
+      "median_dS": 0.14479346838017287,
+      "n_dP": 10,
+      "median_dP": 0.001728490643868083
+    },
+    "criteria": {
+      "a": true,
+      "b": false,
+      "c": true,
+      "d": false,
+      "go": true
+    },
+    "reading": {
+      "read": true,
+      "verdict": "GO",
+      "would_read": "GO",
+      "reasons": []
+    }
+  }
+}

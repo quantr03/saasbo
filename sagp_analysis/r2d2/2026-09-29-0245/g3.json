@@ -1,0 +1,52 @@
+{
+  "statistics": {
+    "n_pairs": 40,
+    "n_units": 10,
+    "median_pooled": 0.13847835482672818,
+    "mean_pooled": 0.25141836372704535,
+    "lo95": -0.05152752243929446,
+    "hi95": 0.5178461248915084,
+    "n_boot": 10000,
+    "median_cell": {
+      "product-lengthscale_r2d2": 0.012179789985500594,
+      "additive-lengthscale_r2d2": 0.13847835482672818,
+      "product-amplitude_r2d2": 0.04058587733837993,
+      "additive-amplitude_r2d2": 0.40952453551222656
+    },
+    "n_cell": {
+      "product-lengthscale_r2d2": 10,
+      "additive-lengthscale_r2d2": 10,
+      "product-amplitude_r2d2": 10,
+      "additive-amplitude_r2d2": 10
+    },
+    "p_cell": {
+      "product-lengthscale_r2d2": 0.625,
+      "additive-lengthscale_r2d2": 0.556640625,
+      "product-amplitude_r2d2": 0.625,
+      "additive-amplitude_r2d2": 0.00390625
+    },
+    "p_holm_cell": {
+      "product-lengthscale_r2d2": 1.0,
+      "additive-lengthscale_r2d2": 1.0,
+      "product-amplitude_r2d2": 1.0,
+      "additive-amplitude_r2d2": 0.015625
+    },
+    "n_dS": 10,
+    "median_dS": 0.14479346838017287,
+    "n_dP": 10,
+    "median_dP": 0.001728490643868083
+  },
+  "criteria": {
+    "a": true,
+    "b": false,
+    "c": true,
+    "d": false,
+    "go": true
+  },
+  "reading": {
+    "read": true,
+    "verdict": "GO",
+    "would_read": "GO",
+    "reasons": []
+  }
+}

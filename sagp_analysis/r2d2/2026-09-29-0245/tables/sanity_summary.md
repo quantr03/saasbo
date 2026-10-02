@@ -1,0 +1,19 @@
+| check | n_runs | n_pass | n_fail | failing_runs |
+|---|---|---|---|---|
+| rows_180 | 110 | 110 | 0 |  |
+| no_dup_t | 110 | 110 | 0 |  |
+| t_contiguous | 110 | 110 | 0 |  |
+| regret_nonincreasing | 110 | 110 | 0 |  |
+| best_f_nondecreasing | 110 | 110 | 0 |  |
+| best_f_ge_cummax_f | 110 | 110 | 0 |  |
+| regret_eq_fstar_minus_bestf | 110 | 110 | 0 |  |
+| regret_nonnegative | 110 | 110 | 0 |  |
+| log_resumes_eq_manifest | 110 | 110 | 0 |  |
+| log_t_set_eq_csv | 110 | 110 | 0 |  |
+| manifest_method_eq_dir | 110 | 110 | 0 |  |
+| f_star_identical | 10 | 10 | 0 |  |
+| S_identical | 10 | 10 | 0 |  |
+| y_mean_t20_identical | 10 | 10 | 0 |  |
+| y_std_t20_identical | 10 | 10 | 0 |  |
+| twin_paired | 40 | 40 | 0 |  |
+| prior_code_ok | 40 | 40 | 0 |  |

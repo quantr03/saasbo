@@ -1,0 +1,5 @@
+family,effect,n_HC,median_HC,p_holm_HC,significant_HC,n_R2D2,median_R2D2,holds
+aligned10,S,5,-0.6088041974371456,0.25,False,5,-0.6126968958870223,not tested
+aligned10,P,5,-0.2734065986781815,0.4375,False,5,-0.12075214797098499,not tested
+decoupled,S,5,-0.39289696278240704,0.125,False,5,0.10612952534277748,not tested
+decoupled,P,5,-0.4991548848381493,0.125,False,5,-0.24074550109702655,not tested

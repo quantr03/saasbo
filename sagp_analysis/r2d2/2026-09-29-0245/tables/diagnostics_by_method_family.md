@@ -1,0 +1,24 @@
+| method | family | n_iter | gate_excluded | exception_rows | ok | r_hat_max_median | r_hat_max_q90 | n_eff_min_median | n_eff_min_q10 | divergences_mean | fit_calls_mean | nuts_attempts_mean | gate_excluded_rate |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| product-lengthscale | aligned10 | 900 | 668 | 0 | 232 | 1.14 | 1.38 | 15.1 | 6.62 | 0.00333 | 1 | 1 | 0.742 |
+| product-lengthscale | decoupled | 900 | 545 | 0 | 355 | 1.12 | 1.39 | 18.8 | 6.45 | 0.00444 | 1 | 1 | 0.606 |
+| additive-lengthscale | aligned10 | 900 | 554 | 0 | 346 | 1.12 | 1.32 | 18.6 | 7.21 | 0.0278 | 1 | 1 | 0.616 |
+| additive-lengthscale | decoupled | 900 | 625 | 0 | 275 | 1.14 | 1.56 | 14 | 4.44 | 0.0111 | 1 | 1 | 0.694 |
+| product-amplitude | aligned10 | 900 | 900 | 0 | 0 | 1.49 | 1.68 | 6.06 | 4.85 | 0 | 1 | 1 | 1 |
+| product-amplitude | decoupled | 900 | 900 | 0 | 0 | 1.5 | 1.71 | 6.03 | 4.71 | 0.00333 | 1 | 1 | 1 |
+| additive-amplitude | aligned10 | 900 | 900 | 0 | 0 | 1.52 | 1.75 | 5.74 | 4.54 | 0 | 1 | 1 | 1 |
+| additive-amplitude | decoupled | 900 | 900 | 0 | 0 | 1.51 | 1.74 | 5.86 | 4.55 | 0.00222 | 1 | 1 | 1 |
+| product-lengthscale_r2d2 | aligned10 | 900 | 3 | 0 | 897 | 1.03 | 1.06 | 91.5 | 59.1 | 0.00889 | 1 | 1 | 0.00333 |
+| product-lengthscale_r2d2 | decoupled | 900 | 11 | 0 | 889 | 1.03 | 1.06 | 93.5 | 60.7 | 0.00556 | 1 | 1 | 0.0122 |
+| additive-lengthscale_r2d2 | aligned10 | 900 | 20 | 0 | 880 | 1.04 | 1.06 | 82.3 | 46.7 | 0.22 | 1 | 1 | 0.0222 |
+| additive-lengthscale_r2d2 | decoupled | 900 | 38 | 0 | 862 | 1.04 | 1.06 | 82.2 | 39.9 | 0.548 | 1 | 1 | 0.0422 |
+| product-amplitude_r2d2 | aligned10 | 900 | 900 | 0 | 0 | 1.5 | 1.71 | 5.94 | 4.78 | 0 | 1 | 1 | 1 |
+| product-amplitude_r2d2 | decoupled | 900 | 900 | 0 | 0 | 1.5 | 1.7 | 6.02 | 4.78 | 0.00111 | 1 | 1 | 1 |
+| additive-amplitude_r2d2 | aligned10 | 900 | 900 | 0 | 0 | 1.55 | 1.76 | 5.59 | 4.5 | 0 | 1 | 1 | 1 |
+| additive-amplitude_r2d2 | decoupled | 900 | 900 | 0 | 0 | 1.53 | 1.77 | 5.79 | 4.54 | 0 | 1 | 1 | 1 |
+| sobol | aligned10 | 900 | 0 | 0 | 900 | nan | nan | nan | nan | nan | 0 | 0 | 0 |
+| sobol | decoupled | 900 | 0 | 0 | 900 | nan | nan | nan | nan | nan | 0 | 0 | 0 |
+| dsp_map | aligned10 | 900 | 0 | 2 | 898 | nan | nan | nan | nan | nan | 1 | 0 | 0 |
+| dsp_map | decoupled | 900 | 0 | 0 | 900 | nan | nan | nan | nan | nan | 1 | 0 | 0 |
+| oracle_S | aligned10 | 900 | 0 | 0 | 900 | nan | nan | nan | nan | nan | 1 | 0 | 0 |
+| oracle_S | decoupled | 900 | 0 | 0 | 900 | nan | nan | nan | nan | nan | 1 | 0 | 0 |

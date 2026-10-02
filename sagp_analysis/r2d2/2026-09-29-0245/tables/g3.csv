@@ -1,0 +1,13 @@
+criterion,statistic,n,value,rule,fires
+(a),"median Delta, pooled",40,0.13847835482672818,abs(value) >= 0.3,False
+(a),"median Delta, product-lengthscale_r2d2",10,0.012179789985500594,abs(value) >= 0.3,False
+(a),"median Delta, additive-lengthscale_r2d2",10,0.13847835482672818,abs(value) >= 0.3,False
+(a),"median Delta, product-amplitude_r2d2",10,0.04058587733837993,abs(value) >= 0.3,False
+(a),"median Delta, additive-amplitude_r2d2",10,0.40952453551222656,abs(value) >= 0.3,True
+(b),"mean Delta, pooled; cluster bootstrap 95 % [-0.0515, 0.518]",40,0.25141836372704535,interval excludes 0,False
+(c),"Wilcoxon p, product-lengthscale_r2d2 (raw 0.625); Holm over 4 cells",10,1.0,value < 0.05,False
+(c),"Wilcoxon p, additive-lengthscale_r2d2 (raw 0.557); Holm over 4 cells",10,1.0,value < 0.05,False
+(c),"Wilcoxon p, product-amplitude_r2d2 (raw 0.625); Holm over 4 cells",10,1.0,value < 0.05,False
+(c),"Wilcoxon p, additive-amplitude_r2d2 (raw 0.00391); Holm over 4 cells",10,0.015625,value < 0.05,True
+(d),median dS over units,10,0.14479346838017287,abs(value) >= 0.3,False
+(d),median dP over units,10,0.001728490643868083,abs(value) >= 0.3,False

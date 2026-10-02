@@ -1,0 +1,12 @@
+| family | seed | n_methods | f_star_identical | S_identical | y_mean_t20_identical | y_std_t20_identical | y_mean_t20_range | y_std_t20_range |
+|---|---|---|---|---|---|---|---|---|
+| aligned10 | 00 | 11 | True | True | True | True | 0 | 0 |
+| aligned10 | 01 | 11 | True | True | True | True | 0 | 0 |
+| aligned10 | 02 | 11 | True | True | True | True | 0 | 0 |
+| aligned10 | 03 | 11 | True | True | True | True | 0 | 0 |
+| aligned10 | 04 | 11 | True | True | True | True | 0 | 0 |
+| decoupled | 00 | 11 | True | True | True | True | 0 | 0 |
+| decoupled | 01 | 11 | True | True | True | True | 0 | 0 |
+| decoupled | 02 | 11 | True | True | True | True | 0 | 0 |
+| decoupled | 03 | 11 | True | True | True | True | 0 | 0 |
+| decoupled | 04 | 11 | True | True | True | True | 0 | 0 |
