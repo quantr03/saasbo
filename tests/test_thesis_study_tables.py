@@ -120,3 +120,36 @@ def test_check_passes_on_current_tables_and_fails_after_a_one_character_edit(tab
     assert bad.returncode != 0
     assert "study_effects.tex differs" in bad.stdout
     assert "1 of 6 table(s) differ: study_effects.tex" in bad.stdout
+
+
+def test_body_numbers_trace_to_the_csvs_and_the_work_lists(tables: Path) -> None:
+    """Spot traces: the dS row of the effects table against effects_pooled.csv, and the cost
+    table's packed column against an independent count over slurm/work/*.txt and inventory.csv."""
+    import csv
+
+    snap_tables = G3_SNAPSHOT / "tables"
+    with (snap_tables / "effects_pooled.csv").open(newline="") as fh:
+        ds = next(r for r in csv.DictReader(fh) if r["effect"] == "dS")
+    effects = (tables / "study_effects.tex").read_text(encoding="utf-8")
+    assert f"structure & difference & {float(ds['median']):.3f} & {float(ds['mean']):.3f} & " in effects
+
+    listed = set()
+    for wl in (REPO_ROOT / "slurm" / "work").glob("*.txt"):
+        for line in wl.read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].split()
+            if line:
+                listed.add((line[0].replace("/", "-"), line[1], int(line[2])))
+    with (snap_tables / "inventory.csv").open(newline="") as fh:
+        inventory = list(csv.DictReader(fh))
+    expected = {}
+    for r in inventory:
+        if r["method"].endswith("_r2d2"):
+            expected.setdefault(r["method"], 0)
+            expected[r["method"]] += (r["method"], r["family"], int(r["seed"])) in listed
+    assert sorted(expected.values()) == [0, 2, 10, 10]  # the pilot: 18 unpacked, 22 packed
+
+    cost = (tables / "study_diagnostics_cost.tex").read_text(encoding="utf-8")
+    for method, n in expected.items():
+        structure, parameterization = method.split("-", 1)
+        label = (structure[0] + parameterization[0]).upper()
+        assert re.search(rf"^{label} & R2-D2 & H200 & 10 & {n} & ", cost, re.M), (method, n)

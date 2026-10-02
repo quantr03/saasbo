@@ -78,6 +78,14 @@ class Snapshot:
         self.regret_file = regret_files[0]
         self.t_final = int(re.fullmatch(r"final_regret_t(\d+)\.csv", self.regret_file.name).group(1))
 
+    def constant(self, name: str) -> str:
+        """A module-level constant of the snapshot's own analyze.py, as written there (e.g. SESOI)."""
+        text = (self.path / "analyze.py").read_text(encoding="utf-8")
+        m = re.search(rf"^{name} = ([0-9.eE+-]+)", text, re.M)
+        if m is None:
+            raise SystemExit(f"regen_study_tables: no constant {name} in {self.path / 'analyze.py'}")
+        return m.group(1)
+
     def csv(self, name: str) -> list[dict[str, str]]:
         return read_csv(self.tables / name)
 
@@ -139,15 +147,12 @@ def row(cells: list[str]) -> str:
     return " & ".join(cells) + r" \\"
 
 
-def g3(x: float) -> str:
-    """Three significant figures, as the analysis's own .md tables print them; NaN as ---."""
+def fx(x: float, decimals: int) -> str:
+    """Fixed decimals, one count per column so a column's entries line up; NaN as ---; no
+    negative zero."""
     if math.isnan(x):
         return "---"
-    if x != 0 and abs(x) < 1e-3:
-        return f"{x:.2e}"
-    s = f"{x:.3g}"
-    if "e" in s:
-        s = f"{x:.0f}"
+    s = f"{x:.{decimals}f}"
     if s.startswith("-") and float(s) == 0.0:
         s = s[1:]
     return s
@@ -155,12 +160,7 @@ def g3(x: float) -> str:
 
 def f3(x: float) -> str:
     """Fixed three decimals, for log10 differences; NaN as ---; no negative zero."""
-    if math.isnan(x):
-        return "---"
-    s = f"{x:.3f}"
-    if s.startswith("-") and float(s) == 0.0:
-        s = s[1:]
-    return s
+    return fx(x, 3)
 
 
 def interval(lo: float, hi: float, fmt=f3) -> str:
@@ -232,9 +232,9 @@ def study_final_regret(snap: Snapshot, outdir: Path) -> None:
             if r is None:
                 cells.append("---")
             elif r["rank_in_family"] == "1":
-                cells.append(r"\textbf{" + g3(fnum(r["median"])) + "}")
+                cells.append(r"\textbf{" + fx(fnum(r["median"]), 4) + "}")
             else:
-                cells.append(g3(fnum(r["median"])))
+                cells.append(fx(fnum(r["median"]), 4))
         body.append(row([code(f), *cells]))
     body += [r"\bottomrule", r"\end{tabular}"]
     caption = (
@@ -245,7 +245,7 @@ def study_final_regret(snap: Snapshot, outdir: Path) -> None:
         f"{code(snap.regret_file.name)}. Read from {snap.scope()}."
     )
     write_table(outdir / "study_final_regret.tex", [f"source: {snap.regret_file.name}"],
-                caption, "app:so:study:tab:regret", body, sep="1.5pt")
+                caption, "app:so:study:tab:regret", body, sep="1pt")
 
 
 # =================================================================================================
@@ -289,7 +289,9 @@ def study_effects(snap: Snapshot, outdir: Path) -> None:
         f"for amplitude. Median and seed-averaged value over the {join_words(n_units)} units; the intervals are percentile "
         f"intervals of the seed-averaged value from a (family, seed)-cluster bootstrap with "
         f"{join_words(n_boot)} resamples. The PR2 reading compares the {levels[0]}\\% interval of each "
-        f"difference with the preregistered equivalence band. Read from {snap.scope()}."
+        f"difference with the preregistered equivalence band from minus to plus "
+        f"{snap.constant('SESOI')}: equivalent when the interval lies inside it, a changed effect "
+        f"when entirely outside, inconclusive otherwise. Read from {snap.scope()}."
     )
     write_table(outdir / "study_effects.tex", [f"source: {path.name} (main_HC, main_R2D2, interaction rows)"],
                 caption, "app:so:study:tab:effects", body)
@@ -342,8 +344,9 @@ def study_twins(snap: Snapshot, outdir: Path) -> None:
         f"seed-averaged value and its (family, seed)-cluster bootstrap percentile intervals. Lower "
         f"block, per family: the median over that family's seeds ({join_words(n_per)} pairs each, "
         f"{code(fam_path.name)})"
-        + ("; an asterisk marks a cell and family where the PR3 null does not hold." if any_fail
-           else "; the PR3 null holds in every cell and family.")
+        + (f". The PR3 null is that the absolute median stays below {snap.constant('SESOI')} in every "
+           f"cell and family"
+           + ("; an asterisk marks where it does not hold." if any_fail else "; it holds in all of them."))
         + f" {CELL_NAMING} Read from {snap.scope()}."
     )
     write_table(outdir / "study_twins.tex", [f"source: {pooled_path.name} (twin rows), {fam_path.name}"],
@@ -374,7 +377,7 @@ def study_identification(snap: Snapshot, outdir: Path) -> None:
         body.append(row([method_cell(f"{r['structure']}-{r['parameterization']}"), PRIOR_NAMES[r["prior_family"]],
                          r["n_runs"], f3(fnum(r["ap_native_mean"])), f3(fnum(r["ap_native_median"])),
                          f3(fnum(r["ap_sobol_mean"])), f3(fnum(r["ap_sobol_median"])),
-                         f3(fnum(r["f1_mean"])), g3(fnum(r["n_pred_active_median"]))]))
+                         f3(fnum(r["f1_mean"])), fx(fnum(r["n_pred_active_median"]), 1)]))
     body += [r"\bottomrule", r"\end{tabular}", r"\par\medskip",
              r"\begin{tabular}{llrrr" + "c" * len(levels) + "l}", r"\toprule",
              row(["R2-D2 cell", "metric", "pairs", hd("mean", "difference"), hd("median", "difference"),
@@ -394,7 +397,8 @@ def study_identification(snap: Snapshot, outdir: Path) -> None:
         f"median size of that set, over the complete runs ({code(path.name)}). Lower block: each R2-D2 cell minus its half-Cauchy "
         f"twin on the same (family, seed), with the (family, seed)-cluster bootstrap percentile "
         f"interval of the median paired difference and the PR4 reading against the preregistered "
-        f"equivalence band ({code(pr4_path.name)}). {CELL_NAMING} Read from {snap.scope()}."
+        f"equivalence band from minus to plus {snap.constant('PR4_MARGIN')} "
+        f"({code(pr4_path.name)}). {CELL_NAMING} Read from {snap.scope()}."
     )
     write_table(outdir / "study_identification.tex", [f"source: {path.name}, {pr4_path.name}"],
                 caption, "app:so:study:tab:identification", body)
@@ -458,12 +462,12 @@ def study_diagnostics_cost(snap: Snapshot, outdir: Path) -> None:
         r = diag[m]
         body.append(row([method_cell(m), PRIOR_NAMES[prior[m]], r["n_iter"],
                          f3(fnum(r["gate_excluded_rate"])), f3(fnum(r["r_hat_max_median"])),
-                         g3(fnum(r["n_eff_min_median"])), f3(fnum(r["divergences_mean"])),
+                         fx(fnum(r["n_eff_min_median"]), 1), f3(fnum(r["divergences_mean"])),
                          f3(fnum(r["frac_at_tree_cap"])), r["exception_rows"]]))
     body += [r"\bottomrule", r"\end{tabular}", r"\par\medskip",
              r"\begin{tabular}{lllrrrrrr}", r"\toprule",
-             row(["method", "prior", "device", "runs", hd("runs packed", f"{k} per GPU"), hd("fit s", "(median)"),
-                  hd("acquisition s", "(median)"), hd("iteration s", "(median)"),
+             row(["method", "prior", "device", "runs", hd("runs", "packed", f"(up to {k}", "per GPU)"), hd("fit s", "(median)"),
+                  hd("acqui-", "sition s", "(median)"), hd("iteration s", "(median)"),
                   hd("fit and", "acquisition", "hours")]), r"\midrule"]
     prev_method = None
     for r in cost:
@@ -475,10 +479,19 @@ def study_diagnostics_cost(snap: Snapshot, outdir: Path) -> None:
         gpu = r["device"] != "cpu"
         body.append(row([method_cell(r["method"]), PRIOR_NAMES[prior[r["method"]]], esc(device), r["n_runs"],
                          str(n_packed.get((r["method"], r["device"]), 0)) if gpu else "---",
-                         g3(fnum(r["fit_wall_s_median"])), g3(fnum(r["acq_wall_s_median"])),
-                         g3(fnum(r["iter_wall_s_median"])),
-                         g3(fnum(r["hours_fit_plus_acq"]))]))
+                         fx(fnum(r["fit_wall_s_median"]), 1), fx(fnum(r["acq_wall_s_median"]), 1),
+                         fx(fnum(r["iter_wall_s_median"]), 1),
+                         fx(fnum(r["hours_fit_plus_acq"]), 1)]))
     body += [r"\bottomrule", r"\end{tabular}"]
+    mixed = [f"{method_cell(r['method'])} {PRIOR_NAMES[prior[r['method']]]} on "
+             f"{re.split(r'[ -]', r['device'].removeprefix('NVIDIA '))[0]} "
+             f"({n_packed[(r['method'], r['device'])]} of {r['n_runs']} packed)"
+             for r in cost
+             if 0 < n_packed.get((r["method"], r["device"]), 0) < int(r["n_runs"])]
+    mixed_note = (
+        " Rows that mix packed and unpacked runs, whose medians therefore blend the two: "
+        + join_words(mixed) + "." if mixed else " No row mixes packed and unpacked runs."
+    )
     caption = (
         f"MCMC diagnostics and cost by method. Upper block ({code(diag_path.name)}): the share of "
         f"iterations the convergence gate excluded, the per-iteration largest R-hat and smallest "
@@ -486,13 +499,15 @@ def study_diagnostics_cost(snap: Snapshot, outdir: Path) -> None:
         f"divergent transitions, the share of iterations whose NUTS trees hit the depth cap, and the "
         f"iterations whose fit raised an exception (they queried a random point instead); the reference methods fit no MCMC model. Lower block "
         f"({code(cost_path.name)}): wall-clock seconds per iteration grouped by the device that ran "
-        f"the iteration, and the summed fit and acquisition hours, a lower bound on allocated "
-        f"device hours; do not compare across devices. Runs packed {k} per GPU are those the "
+        f"the iteration, and the summed fit and acquisition hours, a lower bound on the runs' own wall "
+        f"time and, for runs that had a GPU to themselves, on allocated device hours; packed runs "
+        f"shared one device among up to {k}, so their summed hours exceed that device's allocation. "
+        f"Do not compare across devices. Packed runs are those the "
         f"packed launcher's work lists name ({join_words([code(x) for x in lists])}, Slurm job "
         f"name {code('r2d2-packed')}): up to {k} runs share one H200 under MPS, and their wall times "
         f"are not comparable with runs that had a GPU to themselves. Of this snapshot's {n_r2d2} "
         f"R2-D2 runs, {total_packed} ran packed and {n_r2d2 - total_packed} ran one per GPU; no "
-        f"half-Cauchy or reference run is on a packed list. {CELL_NAMING} Read from {snap.scope()}."
+        f"half-Cauchy or reference run is on a packed list.{mixed_note} {CELL_NAMING} Read from {snap.scope()}."
     )
     write_table(outdir / "study_diagnostics_cost.tex",
                 [f"source: {diag_path.name}, {cost_path.name}, inventory.csv; packed runs from "
@@ -535,6 +550,15 @@ def study_calibration(snap: Snapshot, outdir: Path) -> None:
     dims = round(fnum(chosen["alpha"]) / fnum(chosen["k"]))
     tq = [int(float(target[q])) for q in ("q25", "q50", "q75")]
     cq = [int(float(chosen[q])) for q in ("q25", "q50", "q75")]
+    points = [n for n in _CALIBRATION_POINTS if n != "target"]
+    median_matched = all(by[n]["q50"] == target["q50"] for n in points)
+    tied = by["C_tied"]
+    median_note = (
+        f"; every point matches the target median, and {code('C_tied')}, median-matched at its fixed "
+        f"b = {tied['b']}, matches the median only (quartiles {int(float(tied['q25']))}/"
+        f"{int(float(tied['q75']))} against {int(float(target['q25']))}/{int(float(target['q75']))})"
+        if median_matched else ""
+    )
     body = [r"\begin{tabular}{lrrrrrrrrr}", r"\toprule",
             row(["point", "a", "b", "k", "alpha", hd("lower", "quartile"), "median", hd("upper", "quartile"),
                  "residual", hd("R2 mass", f"below {mass_level}")]), r"\midrule"]
@@ -543,26 +567,27 @@ def study_calibration(snap: Snapshot, outdir: Path) -> None:
         label = code(name) + (" (chosen)" if name == g0["point"] else "")
         if name == "target":
             label = "half-Cauchy target"
-        body.append(row([label, g3(fnum(r["a"])), g3(fnum(r["b"])), g3(fnum(r["k"])),
-                         g3(fnum(r["alpha"])), *[str(int(float(r[q]))) for q in ("q25", "q50", "q75")],
-                         r["residual"], g3(fnum(r[mass_col]))]))
+        body.append(row([label, fx(fnum(r["a"]), 4), fx(fnum(r["b"]), 4), fx(fnum(r["k"]), 4),
+                         fx(fnum(r["alpha"]), 2), *[str(int(float(r[q]))) for q in ("q25", "q50", "q75")],
+                         r["residual"], fx(fnum(r[mass_col]), 4)]))
     body += [r"\bottomrule", r"\end{tabular}"]
     caption = (
         f"Calibration of the R2-D2 prior at stage 0 (directory {code(STAGE0_DIR.name)}, file "
         f"{code(path.name)}; scope: the prior alone at dimension {dims}, no optimization runs; the "
-        f"profile and trend rows of the file are not shown). Each point is matched to the half-Cauchy "
-        f"cells' quartiles of the prior's active-coordinate count; alpha is k times the dimension, "
+        f"profile and trend rows of the file are not shown). Each point's quartiles of the prior's "
+        f"active-coordinate count are compared with the half-Cauchy cells'{median_note}; alpha is k "
+        f"times the dimension, "
         f"and the residual is the larger of the two outer-quartile gaps to the target. Gate G0 chose "
         f"the {g0['form']} ({g0['form_word']}) form at {code(g0['point'])}, (a, b, k) = "
         f"({chosen['a']}, {chosen['b']}, {chosen['k']}): its quartiles {cq[0]}/{cq[1]}/{cq[2]} "
         f"against the target's {tq[0]}/{tq[1]}/{tq[2]}, residuals {abs(cq[0] - tq[0])} and "
         f"{abs(cq[2] - tq[2])} on the lower and upper quartile (continuous "
-        f"{g3(fnum(chosen['residual_c']))}). The study tables beside this one were read from "
+        f"{fx(fnum(chosen['residual_c']), 2)}). The study tables beside this one were read from "
         f"snapshot {code(snap.name)}."
     )
     write_table(outdir / "study_calibration.tex", [f"source: {STAGE0_DIR.name}/tables/{path.name}, "
                                                     f"{STAGE0_DIR.name}/REPORT.md section G0 decision"],
-                caption, "app:so:study:tab:calibration", body)
+                caption, "app:so:study:tab:calibration", body, sep="2pt")
 
 
 # =================================================================================================
