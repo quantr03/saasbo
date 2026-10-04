@@ -1,0 +1,11 @@
+| method | divergences | exception | fit_gpytorch_mll+Adam | n_eff_min | n_eff_min+divergences | ok | r_hat_max | r_hat_max+divergences | r_hat_max+n_eff_min | r_hat_max+n_eff_min+divergences |
+|---|---|---|---|---|---|---|---|---|---|---|
+| product-lengthscale | 2 | 0 | 0 | 482 | 1 | 7031 | 2131 | 5 | 4702 | 46 |
+| additive-lengthscale | 3 | 0 | 0 | 443 | 3 | 5798 | 2058 | 2 | 5966 | 127 |
+| product-amplitude | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 14384 | 16 |
+| additive-amplitude | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 14342 | 58 |
+| product-lengthscale_r2d2 | 0 | 0 | 0 | 1 | 0 | 14304 | 89 | 0 | 6 | 0 |
+| additive-lengthscale_r2d2 | 102 | 0 | 0 | 71 | 21 | 13600 | 236 | 13 | 179 | 178 |
+| product-amplitude_r2d2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 14400 | 0 |
+| additive-amplitude_r2d2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 14400 | 0 |
+| dsp_map | 0 | 65 | 225 | 0 | 0 | 14110 | 0 | 0 | 0 | 0 |

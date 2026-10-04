@@ -1,0 +1,12 @@
+method,runs,complete,rows
+product-lengthscale,80,80,14400
+additive-lengthscale,80,80,14400
+product-amplitude,80,80,14400
+additive-amplitude,80,80,14400
+product-lengthscale_r2d2,80,80,14400
+additive-lengthscale_r2d2,80,80,14400
+product-amplitude_r2d2,80,80,14400
+additive-amplitude_r2d2,80,80,14400
+sobol,80,80,14400
+dsp_map,80,80,14400
+oracle_S,80,80,14400
